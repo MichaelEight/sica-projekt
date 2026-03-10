@@ -1,0 +1,11 @@
+data/ptb-xl*/
+models/*.pt
+models/*.pth
+models/*.npy
+__pycache__/
+*.pyc
+.DS_Store
+*.egg-info/
+dist/
+build/
+.env
