@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; background: #f5f6f8; color: #1a1a2e; width: 1280px; height: 800px; overflow: hidden; }
+
+  .topbar { height: 48px; background: #1a1a2e; display: flex; align-items: center; padding: 0 20px; }
+  .logo { color: #fff; font-size: 15px; font-weight: 600; }
+  .logo span { color: #4a9eff; }
+
+  .main { display: flex; flex-direction: column; align-items: center; justify-content: center; height: calc(800px - 48px - 32px); gap: 28px; }
+
+  .title-section { text-align: center; }
+  .title-section h1 { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+  .title-section p { font-size: 13px; color: #6b7280; }
+
+  .dropzone {
+    width: 520px; height: 220px; border: 2px dashed #c5cad3; border-radius: 12px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    background: #fff; transition: border-color 0.2s;
+  }
+  .dropzone:hover { border-color: #4a9eff; }
+  .dropzone .icon { width: 52px; height: 52px; border-radius: 10px; background: #eef4ff; display: flex; align-items: center; justify-content: center; }
+  .dropzone .icon svg { width: 26px; height: 26px; color: #4a9eff; }
+  .dropzone .text { text-align: center; }
+  .dropzone .text .primary { font-size: 14px; font-weight: 500; }
+  .dropzone .text .primary a { color: #4a9eff; text-decoration: underline; cursor: pointer; }
+  .dropzone .text .secondary { font-size: 12px; color: #9ca3af; margin-top: 4px; }
+  .formats { display: flex; gap: 8px; }
+  .formats .tag { font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace; background: #f0f1f3; color: #6b7280; padding: 3px 10px; border-radius: 4px; }
+
+  .recent { width: 520px; }
+  .recent h3 { font-size: 11px; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .recent-list { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+  .recent-item { display: flex; align-items: center; padding: 10px 14px; border-bottom: 1px solid #f3f4f6; cursor: pointer; gap: 12px; }
+  .recent-item:last-child { border-bottom: none; }
+  .recent-item:hover { background: #f9fafb; }
+  .recent-item .file-icon { width: 32px; height: 32px; background: #eef4ff; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+  .recent-item .file-icon svg { width: 16px; height: 16px; color: #4a9eff; }
+  .recent-item .file-info { flex: 1; }
+  .recent-item .file-name { font-size: 13px; font-weight: 500; font-family: 'SF Mono', monospace; }
+  .recent-item .file-meta { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+  .recent-item .file-date { font-size: 11px; color: #9ca3af; }
+
+  .statusbar { height: 32px; background: #fff; border-top: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: center; padding: 0 20px; }
+  .statusbar span { font-size: 11px; color: #9ca3af; }
+</style>
+<script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+</head>
+<body>
+  <div class="topbar"><div class="logo"><span>EKG</span> Assistant</div></div>
+
+  <div class="main">
+    <div class="title-section">
+      <h1>Wczytaj sygnał EKG</h1>
+      <p>Przeciągnij plik WFDB lub wybierz z dysku, aby rozpocząć analizę</p>
+    </div>
+
+    <div class="dropzone">
+      <div class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+      </div>
+      <div class="text">
+        <div class="primary">Przeciągnij plik tutaj lub <a>wybierz z dysku</a></div>
+        <div class="secondary">Obsługiwane formaty WFDB</div>
+      </div>
+      <div class="formats"><div class="tag">.dat</div><div class="tag">.hea</div></div>
+    </div>
+
+    <div class="recent">
+      <h3>Ostatnie pliki</h3>
+      <div class="recent-list">
+        <div class="recent-item">
+          <div class="file-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></div>
+          <div class="file-info"><div class="file-name">00888_lr.dat</div><div class="file-meta">500 Hz · 12 odprowadzeń · 10.0 s</div></div>
+          <div class="file-date">15.03.2026</div>
+        </div>
+        <div class="recent-item">
+          <div class="file-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></div>
+          <div class="file-info"><div class="file-name">01234_hr.dat</div><div class="file-meta">500 Hz · 12 odprowadzeń · 10.0 s</div></div>
+          <div class="file-date">14.03.2026</div>
+        </div>
+        <div class="recent-item">
+          <div class="file-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg></div>
+          <div class="file-info"><div class="file-name">05678_lr.dat</div><div class="file-meta">500 Hz · 12 odprowadzeń · 10.0 s</div></div>
+          <div class="file-date">12.03.2026</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar"><span>Cyfrowy asystent wspomagający pracę specjalistów z zakresu elektrofizjologii</span></div>
+</body>
+</html>

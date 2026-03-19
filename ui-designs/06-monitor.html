@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; background: #000; color: #00ff41; width: 1280px; height: 800px; overflow: hidden; }
+
+  .top-overlay { position: absolute; top: 0; left: 0; right: 0; height: 48px; display: flex; align-items: center; padding: 0 20px; z-index: 10; background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, transparent 100%); }
+  .logo { font-size: 15px; font-weight: 600; color: #00ff41; }
+  .logo span { color: #00ff41; }
+  .spacer { flex: 1; }
+  .exit-btn { font-size: 11px; padding: 5px 14px; border-radius: 5px; border: 1px solid #005500; background: transparent; color: #00ff41; cursor: pointer; font-weight: 500; }
+  .exit-btn:hover { background: #0a3300; }
+
+  /* Vitals display */
+  .vitals { position: absolute; top: 60px; right: 30px; text-align: right; z-index: 10; }
+  .hr-number { font-size: 80px; font-weight: 700; font-family: 'SF Mono', 'Fira Code', monospace; color: #00ff41; line-height: 1; text-shadow: 0 0 20px rgba(0,255,65,0.3); }
+  .hr-label { font-size: 18px; color: #00ff41; opacity: 0.7; margin-top: -4px; }
+  .hr-heart { display: inline-block; font-size: 24px; margin-right: 8px; animation: beat 0.833s infinite; }
+  @keyframes beat { 0%,100% { transform: scale(1); } 15% { transform: scale(1.2); } }
+
+  .vital-row { margin-top: 16px; }
+  .vital-label { font-size: 11px; color: #005500; text-transform: uppercase; letter-spacing: 1px; }
+  .vital-value { font-size: 20px; font-family: 'SF Mono', monospace; font-weight: 600; color: #00ff41; }
+
+  /* Lead traces */
+  .traces { position: absolute; top: 60px; left: 20px; right: 200px; bottom: 70px; display: flex; flex-direction: column; gap: 4px; }
+  .trace-strip { flex: 1; position: relative; }
+  .trace-label { position: absolute; left: 0; top: 4px; font-size: 12px; font-weight: 600; font-family: 'SF Mono', monospace; color: #005500; z-index: 2; }
+
+  /* Bottom controls */
+  .bottom-overlay { position: absolute; bottom: 0; left: 0; right: 0; height: 60px; display: flex; align-items: center; justify-content: center; padding: 0 20px; gap: 20px; z-index: 10; background: linear-gradient(0deg, rgba(0,0,0,0.7) 0%, transparent 100%); }
+  .ctrl-btn { width: 40px; height: 40px; border-radius: 50%; border: 1px solid #005500; background: transparent; color: #00ff41; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .ctrl-btn:hover { background: #0a3300; }
+  .ctrl-btn.play { width: 48px; height: 48px; border-width: 2px; border-color: #00ff41; }
+  .ctrl-group { display: flex; gap: 4px; }
+  .ctrl-seg { font-size: 11px; padding: 4px 10px; border: 1px solid #005500; background: transparent; color: #005500; cursor: pointer; font-family: 'SF Mono', monospace; }
+  .ctrl-seg:first-child { border-radius: 4px 0 0 4px; }
+  .ctrl-seg:last-child { border-radius: 0 4px 4px 0; }
+  .ctrl-seg.active { color: #00ff41; border-color: #00ff41; background: rgba(0,255,65,0.1); }
+  .ctrl-label { font-size: 10px; color: #005500; text-transform: uppercase; letter-spacing: 0.5px; }
+</style>
+<script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+</head>
+<body>
+  <div class="top-overlay">
+    <div class="logo"><span>EKG</span> Assistant</div>
+    <div class="spacer"></div>
+    <button class="exit-btn">Wyjdź z trybu monitora (Esc)</button>
+  </div>
+
+  <div class="vitals">
+    <div><span class="hr-heart">♥</span><span class="hr-number">72</span></div>
+    <div class="hr-label">BPM</div>
+    <div class="vital-row">
+      <div class="vital-label">SpO2</div>
+      <div class="vital-value">98%</div>
+    </div>
+  </div>
+
+  <div class="traces">
+    <div class="trace-strip"><div class="trace-label">II</div><canvas class="trace-canvas" data-lead="II" data-seed="0.5" data-amp="1.0"></canvas></div>
+    <div class="trace-strip"><div class="trace-label">V1</div><canvas class="trace-canvas" data-lead="V1" data-seed="-0.5" data-amp="0.5"></canvas></div>
+    <div class="trace-strip"><div class="trace-label">V5</div><canvas class="trace-canvas" data-lead="V5" data-seed="1.0" data-amp="0.9"></canvas></div>
+  </div>
+
+  <div class="bottom-overlay">
+    <div>
+      <div class="ctrl-label">Prędkość</div>
+      <div class="ctrl-group">
+        <button class="ctrl-seg">0.5x</button>
+        <button class="ctrl-seg active">1x</button>
+        <button class="ctrl-seg">2x</button>
+      </div>
+    </div>
+    <button class="ctrl-btn play">⏸</button>
+    <div>
+      <div class="ctrl-label">Przesuw</div>
+      <div class="ctrl-group">
+        <button class="ctrl-seg active">25 mm/s</button>
+        <button class="ctrl-seg">50 mm/s</button>
+      </div>
+    </div>
+    <div>
+      <div class="ctrl-label">Odprowadzenia</div>
+      <div class="ctrl-group">
+        <button class="ctrl-seg active">II</button>
+        <button class="ctrl-seg active">V1</button>
+        <button class="ctrl-seg active">V5</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function ekg(t, seed, amp) {
+      const period = 0.833;
+      const phase = ((t % period) / period) * 2 * Math.PI;
+      let v = 0;
+      v += 0.12 * Math.exp(-Math.pow(phase - 0.9, 2) / 0.03);
+      v -= 0.08 * Math.exp(-Math.pow(phase - 1.55, 2) / 0.004);
+      v += (0.9 + seed * 0.1) * Math.exp(-Math.pow(phase - 1.65, 2) / 0.005);
+      v -= 0.15 * Math.exp(-Math.pow(phase - 1.78, 2) / 0.004);
+      v += 0.2 * Math.exp(-Math.pow(phase - 2.8, 2) / 0.06);
+      return v * amp;
+    }
+
+    const canvases = document.querySelectorAll('.trace-canvas');
+    canvases.forEach(c => {
+      const parent = c.parentElement;
+      c.width = parent.offsetWidth;
+      c.height = parent.offsetHeight;
+      const ctx = c.getContext('2d');
+      const W = c.width, H = c.height;
+      const seed = parseFloat(c.dataset.seed);
+      const amp = parseFloat(c.dataset.amp);
+      const midY = H / 2;
+      const mvPx = H / 4;
+
+      // Subtle grid
+      ctx.strokeStyle = '#0A3300';
+      ctx.lineWidth = 0.5;
+      const sqSize = W / 50;
+      ctx.beginPath();
+      for (let x = 0; x < W; x += sqSize) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+      for (let y = 0; y < H; y += sqSize) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+      ctx.stroke();
+
+      // Simulate sweep at ~60% through
+      const sweepPos = W * 0.6;
+      const totalTime = 5; // 5 seconds visible
+
+      // Draw trace
+      ctx.strokeStyle = '#00FF41';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'rgba(0,255,65,0.4)';
+      ctx.shadowBlur = 4;
+      ctx.beginPath();
+      for (let px = 0; px < sweepPos; px++) {
+        const t = (px / W) * totalTime + 2; // offset for variety
+        const v = ekg(t, seed, amp);
+        const py = midY - v * mvPx;
+        if (px === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+
+      // Erase bar (black fade)
+      const grad = ctx.createLinearGradient(sweepPos, 0, sweepPos + 30, 0);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, 'rgba(0,0,0,1)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(sweepPos, 0, 30, H);
+
+      // Black after sweep
+      ctx.fillStyle = '#000';
+      ctx.fillRect(sweepPos + 30, 0, W - sweepPos - 30, H);
+
+      // Re-draw grid over black area
+      ctx.strokeStyle = '#0A3300';
+      ctx.lineWidth = 0.5;
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      for (let x = sweepPos + 30; x < W; x += sqSize) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+      for (let y = 0; y < H; y += sqSize) { ctx.moveTo(sweepPos + 30, y); ctx.lineTo(W, y); }
+      ctx.stroke();
+
+      // Sweep cursor line
+      ctx.strokeStyle = '#00FF41';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'rgba(0,255,65,0.6)';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.moveTo(sweepPos, 0);
+      ctx.lineTo(sweepPos, H);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; background: #f5f6f8; color: #1a1a2e; width: 1280px; height: 800px; overflow: hidden; }
+  .topbar { height: 48px; background: #1a1a2e; display: flex; align-items: center; padding: 0 12px; gap: 10px; }
+  .logo { color: #fff; font-size: 15px; font-weight: 600; }
+  .logo span { color: #4a9eff; }
+  .sep { width: 1px; height: 24px; background: #333; flex-shrink: 0; }
+  .file-info { font-size: 11px; color: #9ca3af; font-family: 'SF Mono', monospace; }
+  .file-info strong { color: #d1d5db; }
+  .spacer { flex: 1; }
+  .seg-group { display: flex; border-radius: 5px; overflow: hidden; }
+  .seg-btn { font-size: 11px; padding: 5px 10px; border: none; cursor: pointer; font-weight: 500; background: #2a2a40; color: #9ca3af; }
+  .seg-btn.active { background: #4a9eff; color: #fff; }
+  .tool-group { display: flex; gap: 2px; }
+  .tool-btn { width: 30px; height: 28px; border-radius: 4px; border: none; background: #2a2a40; color: #9ca3af; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .tool-btn.active { background: #4a9eff; color: #fff; }
+  .tool-btn svg { width: 14px; height: 14px; }
+  .dropdown { font-size: 11px; padding: 4px 8px; border-radius: 4px; border: none; background: #2a2a40; color: #d1d5db; cursor: pointer; font-family: 'SF Mono', monospace; }
+  .btn { font-size: 11px; padding: 5px 12px; border-radius: 5px; border: none; cursor: pointer; font-weight: 500; }
+  .btn-primary { background: #4a9eff; color: #fff; }
+  .btn-secondary { background: #2a2a40; color: #d1d5db; }
+
+  .content { display: flex; height: calc(800px - 48px - 32px); }
+
+  /* Lead selector */
+  .lead-sidebar { width: 56px; background: #fff; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; padding: 8px 0; gap: 2px; align-items: center; overflow-y: auto; }
+  .lead-btn { width: 44px; height: 34px; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 600; font-family: 'SF Mono', monospace; background: transparent; color: #9ca3af; display: flex; align-items: center; justify-content: center; }
+  .lead-btn.active { background: #4a9eff; color: #fff; }
+  .lead-btn:not(.active):hover { background: #f3f4f6; }
+  .lead-divider { width: 32px; height: 1px; background: #e5e7eb; margin: 4px 0; }
+
+  /* Graph area */
+  .graph-area { flex: 1; background: #fff; padding: 8px; position: relative; }
+  .lead-title { position: absolute; top: 16px; left: 80px; font-size: 16px; font-weight: 700; font-family: 'SF Mono', monospace; color: #1a1a2e; z-index: 2; }
+
+  /* Voltage ruler */
+  .v-ruler { position: absolute; left: 8px; top: 8px; width: 44px; height: calc(100% - 36px); display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; padding-right: 4px; }
+  .v-tick { font-size: 9px; font-family: 'SF Mono', monospace; color: #9ca3af; }
+
+  /* Time ruler */
+  .t-ruler { position: absolute; bottom: 4px; left: 56px; right: 8px; height: 16px; display: flex; justify-content: space-between; }
+  .t-tick { font-size: 9px; font-family: 'SF Mono', monospace; color: #9ca3af; }
+
+  .statusbar { height: 32px; background: #fff; border-top: 1px solid #e5e7eb; display: flex; align-items: center; padding: 0 16px; gap: 20px; }
+  .status-item { font-size: 11px; color: #6b7280; font-family: 'SF Mono', monospace; }
+  .status-item strong { color: #1a1a2e; }
+  .status-shortcuts { font-size: 10px; color: #9ca3af; flex: 1; text-align: center; }
+  .status-cursor { font-size: 11px; color: #6b7280; font-family: 'SF Mono', monospace; margin-left: auto; }
+</style>
+<script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo"><span>EKG</span> Assistant</div>
+    <div class="sep"></div>
+    <div class="file-info"><strong>00888_lr.dat</strong> | 500 Hz | 12 odpr. | 10.0 s</div>
+    <div class="spacer"></div>
+    <div class="seg-group">
+      <button class="seg-btn">12-Lead</button>
+      <button class="seg-btn active">1-Lead</button>
+      <button class="seg-btn">Monitor</button>
+    </div>
+    <div class="sep"></div>
+    <div class="tool-group">
+      <button class="tool-btn active" title="Wybierz"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 2l10 6-4.5 1.2L7.3 14z"/></svg></button>
+      <button class="tool-btn" title="Suwmiarka"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="4" y1="2" x2="4" y2="14"/><line x1="12" y1="2" x2="12" y2="14"/><line x1="4" y1="8" x2="12" y2="8"/></svg></button>
+      <button class="tool-btn" title="Adnotacja"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="1"/><line x1="5" y1="6" x2="11" y2="6"/><line x1="5" y1="9" x2="9" y2="9"/></svg></button>
+    </div>
+    <div class="sep"></div>
+    <select class="dropdown"><option>10 mm/mV</option></select>
+    <select class="dropdown"><option>25 mm/s</option></select>
+    <select class="dropdown"><option>0.05-150 Hz</option></select>
+    <div class="sep"></div>
+    <button class="btn btn-primary">Analizuj</button>
+    <button class="btn btn-secondary">Wczytaj plik</button>
+  </div>
+
+  <div class="content">
+    <div class="lead-sidebar">
+      <button class="lead-btn">I</button>
+      <button class="lead-btn active">II</button>
+      <button class="lead-btn">III</button>
+      <div class="lead-divider"></div>
+      <button class="lead-btn">aVR</button>
+      <button class="lead-btn">aVL</button>
+      <button class="lead-btn">aVF</button>
+      <div class="lead-divider"></div>
+      <button class="lead-btn">V1</button>
+      <button class="lead-btn">V2</button>
+      <button class="lead-btn">V3</button>
+      <button class="lead-btn">V4</button>
+      <button class="lead-btn">V5</button>
+      <button class="lead-btn">V6</button>
+    </div>
+
+    <div class="graph-area">
+      <div class="lead-title">II</div>
+      <div class="v-ruler">
+        <span class="v-tick">2.0 mV</span>
+        <span class="v-tick">1.5 mV</span>
+        <span class="v-tick">1.0 mV</span>
+        <span class="v-tick">0.5 mV</span>
+        <span class="v-tick">0 mV</span>
+        <span class="v-tick">-0.5 mV</span>
+        <span class="v-tick">-1.0 mV</span>
+        <span class="v-tick">-1.5 mV</span>
+        <span class="v-tick">-2.0 mV</span>
+      </div>
+      <canvas id="singleCanvas" width="1160" height="680"></canvas>
+      <div class="t-ruler">
+        <span class="t-tick">0 s</span><span class="t-tick">1 s</span><span class="t-tick">2 s</span><span class="t-tick">3 s</span><span class="t-tick">4 s</span><span class="t-tick">5 s</span><span class="t-tick">6 s</span><span class="t-tick">7 s</span><span class="t-tick">8 s</span><span class="t-tick">9 s</span><span class="t-tick">10 s</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <div class="status-item"><strong>10 mm/mV</strong> | <strong>25 mm/s</strong> | 0.05-150 Hz</div>
+    <div class="status-shortcuts">Tab: Następne odprowadzenie | Shift+Tab: Poprzednie | ←/→: Przewiń</div>
+    <div class="status-cursor">t = <strong>4.16 s</strong> | V = <strong>0.92 mV</strong></div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('singleCanvas');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const SMALL_X = W / 250; // 10s / 0.04s = 250 small squares
+    const LARGE_X = SMALL_X * 5;
+    const SMALL_Y = H / 80; // ±4mV range = 80 small squares
+    const LARGE_Y = SMALL_Y * 5;
+
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, W, H);
+
+    // Minor grid
+    ctx.strokeStyle = '#FCE4E4';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    for (let x = 0; x < W; x += SMALL_X) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let y = 0; y < H; y += SMALL_Y) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+
+    // Major grid
+    ctx.strokeStyle = '#F5C6C6';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x < W; x += LARGE_X) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let y = 0; y < H; y += LARGE_Y) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+
+    // Calibration pulse
+    const midY = H / 2;
+    const mvPx = H / 8; // 1mV in pixels (4mV range = H)
+    const calW = W * 0.02;
+    ctx.strokeStyle = '#1A1A2E';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(4, midY);
+    ctx.lineTo(8, midY);
+    ctx.lineTo(8, midY - mvPx);
+    ctx.lineTo(8 + calW, midY - mvPx);
+    ctx.lineTo(8 + calW, midY);
+    ctx.stroke();
+
+    // Signal (Lead II, 10 seconds)
+    function ekg(t) {
+      const period = 0.833;
+      const phase = ((t % period) / period) * 2 * Math.PI;
+      let v = 0;
+      v += 0.12 * Math.exp(-Math.pow(phase - 0.9, 2) / 0.03);
+      v -= 0.08 * Math.exp(-Math.pow(phase - 1.55, 2) / 0.004);
+      v += 1.0 * Math.exp(-Math.pow(phase - 1.65, 2) / 0.005);
+      v -= 0.15 * Math.exp(-Math.pow(phase - 1.78, 2) / 0.004);
+      v += 0.2 * Math.exp(-Math.pow(phase - 2.8, 2) / 0.06);
+      v += Math.sin(t * 97) * 0.008;
+      return v;
+    }
+
+    const sigStart = 8 + calW + 8;
+    const sigW = W - sigStart;
+    ctx.strokeStyle = '#1A1A2E';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let px = 0; px < sigW; px++) {
+      const t = (px / sigW) * 10;
+      const v = ekg(t);
+      const py = midY - v * mvPx;
+      if (px === 0) ctx.moveTo(sigStart + px, py);
+      else ctx.lineTo(sigStart + px, py);
+    }
+    ctx.stroke();
+  </script>
+</body>
+</html>

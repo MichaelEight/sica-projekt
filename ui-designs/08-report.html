@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; background: #f5f6f8; color: #1a1a2e; width: 1280px; height: 800px; overflow: hidden; }
+  .topbar { height: 48px; background: #1a1a2e; display: flex; align-items: center; padding: 0 12px; gap: 10px; }
+  .logo { color: #fff; font-size: 15px; font-weight: 600; } .logo span { color: #4a9eff; }
+  .sep { width: 1px; height: 24px; background: #333; flex-shrink: 0; }
+  .file-info { font-size: 11px; color: #9ca3af; font-family: 'SF Mono', monospace; } .file-info strong { color: #d1d5db; }
+  .spacer { flex: 1; }
+  .badge-export { font-size: 11px; background: #dbeafe; color: #1e40af; padding: 4px 10px; border-radius: 4px; font-weight: 600; }
+  .btn { font-size: 11px; padding: 5px 12px; border-radius: 5px; border: none; cursor: pointer; font-weight: 500; }
+  .btn-secondary { background: #2a2a40; color: #d1d5db; }
+
+  .content { display: flex; justify-content: center; padding: 16px; height: calc(800px - 48px - 52px); overflow-y: auto; }
+
+  .report-card { width: 800px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 32px; }
+
+  .report-header { text-align: center; border-bottom: 2px solid #1a1a2e; padding-bottom: 16px; margin-bottom: 20px; }
+  .report-header h1 { font-size: 18px; font-weight: 600; }
+  .report-header .date { font-size: 12px; color: #6b7280; margin-top: 4px; }
+
+  .patient-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 32px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #e5e7eb; }
+  .patient-row { display: flex; gap: 8px; }
+  .patient-label { font-size: 11px; color: #6b7280; width: 100px; }
+  .patient-value { font-size: 12px; font-weight: 600; font-family: 'SF Mono', monospace; }
+
+  .section-title { font-size: 13px; font-weight: 600; color: #1a1a2e; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .ecg-preview { width: 100%; height: 200px; margin-bottom: 16px; border: 1px solid #e5e7eb; border-radius: 4px; overflow: hidden; }
+  .ecg-meta { font-size: 10px; color: #6b7280; font-family: 'SF Mono', monospace; margin-bottom: 16px; }
+
+  .measurements-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+  .measurements-table th { font-size: 11px; color: #6b7280; text-align: left; padding: 6px 12px; border-bottom: 1px solid #e5e7eb; font-weight: 500; }
+  .measurements-table td { font-size: 12px; padding: 6px 12px; border-bottom: 1px solid #f3f4f6; font-family: 'SF Mono', monospace; }
+
+  .ai-summary { padding: 14px; background: #fefce8; border: 1px solid #fde68a; border-radius: 8px; margin-bottom: 16px; }
+  .ai-summary .diagnosis { font-size: 14px; font-weight: 600; color: #92400e; }
+  .ai-summary .confidence { font-size: 12px; color: #a16207; margin-top: 2px; }
+  .ai-summary .model-info { font-size: 10px; color: #6b7280; margin-top: 6px; }
+
+  .annot-summary { margin-bottom: 16px; }
+  .annot-item { font-size: 11px; padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
+  .annot-item .a-meta { font-family: 'SF Mono', monospace; color: #6b7280; }
+  .annot-item .a-text { color: #4b5563; margin-top: 2px; }
+
+  .report-disclaimer { font-size: 10px; color: #9ca3af; text-align: center; margin-top: 20px; padding-top: 16px; border-top: 1px solid #e5e7eb; line-height: 1.5; }
+
+  /* Bottom toolbar */
+  .export-bar { height: 52px; background: #fff; border-top: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0 20px; }
+  .export-btn { padding: 8px 20px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid #e5e7eb; background: #fff; color: #4b5563; }
+  .export-btn:hover { background: #f9fafb; }
+  .export-btn.primary { background: #4a9eff; color: #fff; border-color: #4a9eff; }
+  .page-size { font-size: 11px; padding: 6px 10px; border: 1px solid #e5e7eb; border-radius: 6px; color: #4b5563; background: #fff; margin-left: auto; }
+</style>
+<script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo"><span>EKG</span> Assistant</div><div class="sep"></div>
+    <div class="file-info"><strong>00888_lr.dat</strong> | 500 Hz | 12 odpr. | 10.0 s</div><div class="spacer"></div>
+    <div class="badge-export">Podgląd raportu</div>
+    <div class="sep"></div>
+    <button class="btn btn-secondary">Wczytaj plik</button>
+  </div>
+
+  <div class="content">
+    <div class="report-card">
+      <div class="report-header">
+        <h1>EKG Assistant — Raport badania</h1>
+        <div class="date">Wygenerowano: 15.03.2026, 22:15 | Plik: 00888_lr.dat</div>
+      </div>
+
+      <div class="patient-grid">
+        <div class="patient-row"><span class="patient-label">ID pacjenta</span><span class="patient-value">00888</span></div>
+        <div class="patient-row"><span class="patient-label">Data badania</span><span class="patient-value">15.03.2026</span></div>
+        <div class="patient-row"><span class="patient-label">Wiek</span><span class="patient-value">62 lat</span></div>
+        <div class="patient-row"><span class="patient-label">Czas trwania</span><span class="patient-value">10.0 s</span></div>
+        <div class="patient-row"><span class="patient-label">Płeć</span><span class="patient-value">Mężczyzna</span></div>
+        <div class="patient-row"><span class="patient-label">Częstotliwość</span><span class="patient-value">500 Hz</span></div>
+      </div>
+
+      <div class="section-title">Zapis EKG (12 odprowadzeń)</div>
+      <div class="ecg-preview"><canvas id="previewCanvas" width="736" height="200"></canvas></div>
+      <div class="ecg-meta">25 mm/s | 10 mm/mV | 0.05-150 Hz | Układ: I, aVR, V1, V4 / II, aVL, V2, V5 / III, aVF, V3, V6 + pasmo rytmu (II)</div>
+
+      <div class="section-title">Pomiary</div>
+      <table class="measurements-table">
+        <tr><th>Parametr</th><th>Wartość</th><th>Norma</th><th>Status</th></tr>
+        <tr><td>HR</td><td>72 bpm</td><td>60-100 bpm</td><td style="color:#059669">Norma</td></tr>
+        <tr><td>PR interval</td><td>164 ms</td><td>120-200 ms</td><td style="color:#059669">Norma</td></tr>
+        <tr><td>QRS duration</td><td>88 ms</td><td>&lt;120 ms</td><td style="color:#059669">Norma</td></tr>
+        <tr><td>QT interval</td><td>392 ms</td><td>350-440 ms</td><td style="color:#059669">Norma</td></tr>
+        <tr><td>QTc (Bazett)</td><td>429 ms</td><td>350-440 ms</td><td style="color:#059669">Norma</td></tr>
+        <tr><td>Oś elektryczna</td><td>+55°</td><td>-30° do +90°</td><td style="color:#059669">Norma</td></tr>
+      </table>
+
+      <div class="section-title">Analiza AI</div>
+      <div class="ai-summary">
+        <div class="diagnosis">Zawał mięśnia sercowego (MI) — 87.2%</div>
+        <div class="confidence">Zdrowy (NORM): 5.8% | ISC_: 3.1% | NST_: 1.9% | LBBB: 0.8% | RBBB: 0.5% | LVH: 0.4% | RVH: 0.3%</div>
+        <div class="model-info">Model: Inception1D | Czas inferencji: 1.2 s</div>
+      </div>
+
+      <div class="section-title">Adnotacje (2)</div>
+      <div class="annot-summary">
+        <div class="annot-item">
+          <div class="a-meta">II: 0.40 s — 1.20 s | Norma</div>
+          <div class="a-text">Prawidłowy kompleks PQRST, rytm zatokowy miarowy</div>
+        </div>
+        <div class="annot-item">
+          <div class="a-meta">V1: 3.10 s — 3.60 s | Do weryfikacji</div>
+          <div class="a-text">Szerokie S w V1, możliwe RBBB — do potwierdzenia w V6</div>
+        </div>
+      </div>
+
+      <div class="report-disclaimer">
+        Wynik analizy AI ma charakter pomocniczy i nie stanowi diagnozy medycznej.<br>
+        Ostateczna decyzja diagnostyczna należy do lekarza specjalisty.<br>
+        Raport wygenerowany automatycznie przez EKG Assistant.
+      </div>
+    </div>
+  </div>
+
+  <div class="export-bar">
+    <button class="export-btn primary">Eksportuj PDF</button>
+    <button class="export-btn">Eksportuj PNG</button>
+    <button class="export-btn">Drukuj</button>
+    <select class="page-size"><option>A4</option><option>Letter</option></select>
+  </div>
+
+  <script>
+    const c = document.getElementById('previewCanvas');
+    const ctx = c.getContext('2d');
+    const W = c.width, H = c.height;
+    const ROW_H = H / 4, COL_W = W / 4;
+    const SX = COL_W / 62.5, LX = SX * 5, SY = ROW_H / 15, LY = SY * 5;
+
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+
+    // Grid
+    ctx.strokeStyle = '#FCE4E4'; ctx.lineWidth = 0.3; ctx.beginPath();
+    for (let x = 0; x < W; x += SX) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let y = 0; y < H; y += SY) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+    ctx.strokeStyle = '#F5C6C6'; ctx.lineWidth = 0.6; ctx.beginPath();
+    for (let x = 0; x < W; x += LX) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let y = 0; y < H; y += LY) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+
+    function ekg(t, seed) {
+      const period = 0.833, phase = ((t % period) / period) * 2 * Math.PI;
+      let v = 0.12 * Math.exp(-Math.pow(phase - 0.9, 2) / 0.03);
+      v -= 0.08 * Math.exp(-Math.pow(phase - 1.55, 2) / 0.004);
+      v += (0.9 + seed * 0.08) * Math.exp(-Math.pow(phase - 1.65, 2) / 0.005);
+      v -= 0.15 * Math.exp(-Math.pow(phase - 1.78, 2) / 0.004);
+      v += 0.2 * Math.exp(-Math.pow(phase - 2.8, 2) / 0.06);
+      return v;
+    }
+
+    const grid = [['I','aVR','V1','V4'],['II','aVL','V2','V5'],['III','aVF','V3','V6']];
+    const seeds = {I:0,II:0.5,III:0.3,aVR:-1,aVL:0.2,aVF:0.6,V1:-0.5,V2:0.1,V3:0.8,V4:1.2,V5:1.0,V6:0.7};
+    const amps = {I:0.7,II:1.0,III:0.5,aVR:-0.6,aVL:0.4,aVF:0.8,V1:-0.3,V2:0.5,V3:1.0,V4:1.3,V5:1.1,V6:0.8};
+
+    for (let r = 0; r < 3; r++) {
+      for (let col = 0; col < 4; col++) {
+        const lead = grid[r][col];
+        const x = col * COL_W, y = r * ROW_H;
+        const mid = y + ROW_H / 2, mv = ROW_H / 3;
+        const tS = col * 2.5, tE = tS + 2.5;
+        ctx.strokeStyle = '#1A1A2E'; ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let px = 0; px < COL_W; px++) {
+          const t = tS + (px / COL_W) * (tE - tS);
+          const v = ekg(t, seeds[lead]) * (amps[lead] || 1);
+          const py = mid - v * mv;
+          px === 0 ? ctx.moveTo(x + px, py) : ctx.lineTo(x + px, py);
+        }
+        ctx.stroke();
+        ctx.fillStyle = '#1A1A2E'; ctx.font = 'bold 8px "SF Mono",monospace'; ctx.fillText(lead, x + 2, y + 10);
+      }
+    }
+    // Rhythm strip row 4
+    const rY = 3 * ROW_H, rMid = rY + ROW_H / 2, rMv = ROW_H / 3;
+    ctx.strokeStyle = '#1A1A2E'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let px = 0; px < W; px++) {
+      const t = (px / W) * 10, v = ekg(t, 0.5), py = rMid - v * rMv;
+      px === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.fillStyle = '#1A1A2E'; ctx.font = 'bold 8px "SF Mono",monospace'; ctx.fillText('II', 2, rY + 10);
+  </script>
+</body>
+</html>

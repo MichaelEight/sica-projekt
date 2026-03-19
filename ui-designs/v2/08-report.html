@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; background: #f5f6f8; color: #1a1a2e; width: 100vw; height: 100vh; overflow: hidden; }
+  .topbar { height: 48px; background: #1a1a2e; display: flex; align-items: center; padding: 0 14px; gap: 8px; }
+  .logo { color: #fff; font-size: 15px; font-weight: 600; } .logo span { color: #4a9eff; }
+  .sep { width: 1px; height: 24px; background: #444; flex-shrink: 0; }
+  .file-info { font-size: 12px; color: #ccc; font-family: monospace; }
+  .spacer { flex: 1; }
+  .badge { font-size: 12px; background: #dbeafe; color: #1e40af; padding: 5px 12px; border-radius: 5px; font-weight: 600; }
+  .btn-sec { background: #2a2a40; color: #ccc; font-size: 12px; padding: 6px 14px; border-radius: 5px; border: none; white-space: nowrap; flex-shrink: 0; }
+
+  .content { display: flex; justify-content: center; padding: 12px; height: calc(100vh - 48px - 48px); overflow-y: auto; align-items: flex-start; }
+
+  .report { width: 780px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 28px 32px; margin-bottom: 20px; flex-shrink: 0; }
+  .report h1 { font-size: 18px; font-weight: 600; text-align: center; margin-bottom: 4px; }
+  .report .date { font-size: 12px; color: #6b7280; text-align: center; margin-bottom: 16px; }
+  .report hr { border: none; border-top: 2px solid #1a1a2e; margin-bottom: 16px; }
+
+  .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid #e5e7eb; }
+  .prow { display: flex; gap: 8px; }
+  .plabel { font-size: 12px; color: #6b7280; width: 110px; }
+  .pvalue { font-size: 13px; font-weight: 600; font-family: monospace; }
+
+  .stitle { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; margin-top: 14px; }
+
+  .ecg-preview { width: 100%; height: 160px; border: 1px solid #e5e7eb; border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
+  .ecg-meta { font-size: 11px; color: #6b7280; font-family: monospace; margin-bottom: 12px; }
+
+  table { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
+  th { text-align: left; padding: 6px 10px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-weight: 500; font-size: 12px; }
+  td { padding: 5px 10px; border-bottom: 1px solid #f3f4f6; font-family: monospace; }
+  .status-ok { color: #059669; font-weight: 600; }
+
+  .ai-box { padding: 12px; background: #fefce8; border: 1px solid #fde68a; border-radius: 8px; margin-bottom: 12px; }
+  .ai-diag { font-size: 14px; font-weight: 600; color: #92400e; }
+  .ai-conf { font-size: 12px; color: #a16207; margin-top: 2px; }
+  .ai-model { font-size: 11px; color: #6b7280; margin-top: 4px; }
+
+  .annot-item { font-size: 12px; padding: 5px 0; border-bottom: 1px solid #f3f4f6; }
+  .annot-meta { font-family: monospace; color: #6b7280; }
+  .annot-text { color: #4b5563; margin-top: 2px; }
+
+  .disclaimer { font-size: 11px; color: #9ca3af; text-align: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid #e5e7eb; line-height: 1.5; }
+
+  .export-bar { height: 48px; background: #fff; border-top: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0 20px; }
+  .exp-btn { padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: 1px solid #e5e7eb; background: #fff; color: #4b5563; }
+  .exp-btn.primary { background: #4a9eff; color: #fff; border-color: #4a9eff; }
+  .page-sel { font-size: 12px; padding: 6px 10px; border: 1px solid #e5e7eb; border-radius: 6px; margin-left: auto; }
+</style>
+<script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo"><span>EKG</span> Assistant</div><div class="sep"></div>
+    <div class="file-info">00888_lr.dat</div><div class="spacer"></div>
+    <div class="badge">Podgląd raportu</div><div class="sep"></div>
+    <button class="btn-sec">Wczytaj plik</button>
+  </div>
+  <div class="content">
+    <div class="report">
+      <h1>EKG Assistant — Raport badania</h1>
+      <div class="date">Wygenerowano: 15.03.2026, 22:15 | Plik: 00888_lr.dat</div>
+      <hr>
+
+      <div class="pgrid">
+        <div class="prow"><span class="plabel">ID pacjenta</span><span class="pvalue">00888</span></div>
+        <div class="prow"><span class="plabel">Data badania</span><span class="pvalue">15.03.2026</span></div>
+        <div class="prow"><span class="plabel">Wiek</span><span class="pvalue">62 lat</span></div>
+        <div class="prow"><span class="plabel">Czas trwania</span><span class="pvalue">10.0 s</span></div>
+        <div class="prow"><span class="plabel">Płeć</span><span class="pvalue">Mężczyzna</span></div>
+        <div class="prow"><span class="plabel">Częstotliwość</span><span class="pvalue">500 Hz</span></div>
+      </div>
+
+      <div class="stitle">Zapis EKG (12 odprowadzeń)</div>
+      <div class="ecg-preview"><canvas id="pc" width="1432" height="320"></canvas></div>
+      <div class="ecg-meta">25 mm/s | 10 mm/mV | 0.05-150 Hz</div>
+
+      <div class="stitle">Pomiary</div>
+      <table>
+        <tr><th>Parametr</th><th>Wartość</th><th>Norma</th><th>Status</th></tr>
+        <tr><td>HR</td><td>72 bpm</td><td>60-100 bpm</td><td class="status-ok">Norma</td></tr>
+        <tr><td>PR interval</td><td>164 ms</td><td>120-200 ms</td><td class="status-ok">Norma</td></tr>
+        <tr><td>QRS</td><td>88 ms</td><td>&lt;120 ms</td><td class="status-ok">Norma</td></tr>
+        <tr><td>QT</td><td>392 ms</td><td>350-440 ms</td><td class="status-ok">Norma</td></tr>
+        <tr><td>QTc</td><td>429 ms</td><td>350-440 ms</td><td class="status-ok">Norma</td></tr>
+        <tr><td>Oś</td><td>+55°</td><td>-30° do +90°</td><td class="status-ok">Norma</td></tr>
+      </table>
+
+      <div class="stitle">Analiza AI</div>
+      <div class="ai-box">
+        <div class="ai-diag">Zawał mięśnia sercowego (MI) — 87.2%</div>
+        <div class="ai-conf">NORM: 5.8% | ISC_: 3.1% | NST_: 1.9% | LBBB: 0.8% | RBBB: 0.5%</div>
+        <div class="ai-model">Model: Inception1D | Czas: 1.2 s</div>
+      </div>
+
+      <div class="stitle">Adnotacje (2)</div>
+      <div class="annot-item"><div class="annot-meta">II: 0.40 — 1.20 s | Norma</div><div class="annot-text">Prawidłowy kompleks PQRST, rytm zatokowy</div></div>
+      <div class="annot-item"><div class="annot-meta">V1: 3.10 — 3.60 s | Do weryfikacji</div><div class="annot-text">Szerokie S, możliwe RBBB</div></div>
+
+      <div class="disclaimer">Wynik analizy AI ma charakter pomocniczy i nie stanowi diagnozy medycznej.<br>Ostateczna decyzja diagnostyczna należy do lekarza specjalisty.</div>
+    </div>
+  </div>
+  <div class="export-bar">
+    <button class="exp-btn primary">Eksportuj PDF</button>
+    <button class="exp-btn">Eksportuj PNG</button>
+    <button class="exp-btn">Drukuj</button>
+    <select class="page-sel"><option>A4</option><option>Letter</option></select>
+  </div>
+  <script>
+    const c=document.getElementById('pc');
+    const ctx=c.getContext('2d');
+    const W=c.width,H=c.height;
+    const ROW_H=H/4,COL_W=W/4;
+
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+    // Grid
+    const sqX=COL_W/62.5,sqY=ROW_H/15;
+    ctx.strokeStyle='#FCE4E4';ctx.lineWidth=0.5;ctx.beginPath();
+    for(let x=0;x<W;x+=sqX){ctx.moveTo(x,0);ctx.lineTo(x,H);}
+    for(let y=0;y<H;y+=sqY){ctx.moveTo(0,y);ctx.lineTo(W,y);}
+    ctx.stroke();
+    ctx.strokeStyle='#F0BFBF';ctx.lineWidth=0.8;ctx.beginPath();
+    for(let x=0;x<W;x+=sqX*5){ctx.moveTo(x,0);ctx.lineTo(x,H);}
+    for(let y=0;y<H;y+=sqY*5){ctx.moveTo(0,y);ctx.lineTo(W,y);}
+    ctx.stroke();
+
+    // Cell borders
+    ctx.strokeStyle='#d1d5db';ctx.lineWidth=1.5;
+    for(let c2=1;c2<4;c2++){ctx.beginPath();ctx.moveTo(c2*COL_W,0);ctx.lineTo(c2*COL_W,3*ROW_H);ctx.stroke();}
+    for(let r=1;r<4;r++){ctx.beginPath();ctx.moveTo(0,r*ROW_H);ctx.lineTo(W,r*ROW_H);ctx.stroke();}
+
+    function ekg(t,s){const p=0.833,ph=((t%p)/p)*2*Math.PI;let v=0.12*Math.exp(-Math.pow(ph-0.9,2)/0.03);v-=0.08*Math.exp(-Math.pow(ph-1.55,2)/0.004);v+=(0.9+s*0.08)*Math.exp(-Math.pow(ph-1.65,2)/0.005);v-=0.15*Math.exp(-Math.pow(ph-1.78,2)/0.004);v+=0.2*Math.exp(-Math.pow(ph-2.8,2)/0.06);return v;}
+
+    const grid=[['I','aVR','V1','V4'],['II','aVL','V2','V5'],['III','aVF','V3','V6']];
+    const seeds={I:0,II:0.5,III:0.3,aVR:-1,aVL:0.2,aVF:0.6,V1:-0.5,V2:0.1,V3:0.8,V4:1.2,V5:1.0,V6:0.7};
+    const amps={I:0.7,II:1.0,III:0.5,aVR:-0.6,aVL:0.4,aVF:0.8,V1:-0.3,V2:0.5,V3:1.0,V4:1.3,V5:1.1,V6:0.8};
+
+    for(let r=0;r<3;r++)for(let c2=0;c2<4;c2++){
+      const lead=grid[r][c2],x=c2*COL_W,y=r*ROW_H;
+      const mid=y+ROW_H/2,mv=ROW_H/3;
+      const tS=c2*2.5,tE=tS+2.5;
+      ctx.strokeStyle='#1A1A2E';ctx.lineWidth=1.5;ctx.beginPath();
+      for(let px=0;px<COL_W;px++){const t=tS+(px/COL_W)*(tE-tS),v=ekg(t,seeds[lead])*(amps[lead]||1),py=mid-v*mv;px===0?ctx.moveTo(x+px,py):ctx.lineTo(x+px,py);}
+      ctx.stroke();
+      ctx.fillStyle='#1A1A2E';ctx.font='bold 16px monospace';ctx.fillText(lead,x+6,y+18);
+    }
+    // Rhythm
+    const rY=3*ROW_H,rMid=rY+ROW_H/2,rMv=ROW_H/3;
+    ctx.strokeStyle='#1A1A2E';ctx.lineWidth=1.5;ctx.beginPath();
+    for(let px=0;px<W;px++){const t=(px/W)*10,v=ekg(t,0.5),py=rMid-v*rMv;px===0?ctx.moveTo(px,py):ctx.lineTo(px,py);}
+    ctx.stroke();
+    ctx.fillStyle='#1A1A2E';ctx.font='bold 16px monospace';ctx.fillText('II',6,rY+18);
+  </script>
+</body>
+</html>

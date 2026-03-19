@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; background: #f5f6f8; color: #1a1a2e; width: 100vw; height: 100vh; overflow: hidden; }
+  .topbar { height: 48px; background: #1a1a2e; display: flex; align-items: center; padding: 0 14px; gap: 8px; }
+  .logo { color: #fff; font-size: 15px; font-weight: 600; white-space: nowrap; flex-shrink: 0; } .logo span { color: #4a9eff; }
+  .sep { width: 1px; height: 24px; background: #444; flex-shrink: 0; }
+  .file-info { font-size: 12px; color: #ccc; font-family: monospace; white-space: nowrap; }
+  .spacer { flex: 1; }
+  .seg { display: flex; border-radius: 5px; overflow: hidden; flex-shrink: 0; }
+  .seg-btn { font-size: 12px; padding: 6px 12px; border: none; font-weight: 500; background: #2a2a40; color: #888; white-space: nowrap; flex-shrink: 0; }
+  .seg-btn.active { background: #4a9eff; color: #fff; }
+  .tb { font-size: 12px; padding: 6px 10px; border-radius: 5px; border: none; background: #2a2a40; color: #ccc; white-space: nowrap; }
+  .tb.active { background: #4a9eff; color: #fff; }
+  .btn-primary { background: #4a9eff; color: #fff; font-size: 12px; padding: 6px 14px; border-radius: 5px; border: none; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+  .btn-sec { background: #2a2a40; color: #ccc; font-size: 12px; padding: 6px 14px; border-radius: 5px; border: none; white-space: nowrap; flex-shrink: 0; }
+
+  .content { display: flex; height: calc(100vh - 48px - 28px); }
+  .lead-sidebar { width: 58px; background: #fff; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; padding: 6px; gap: 3px; align-items: center; }
+  .lead-btn { width: 46px; height: 32px; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 12px; font-weight: 600; font-family: monospace; background: #fff; color: #9ca3af; display: flex; align-items: center; justify-content: center; }
+  .lead-btn.active { background: #4a9eff; color: #fff; border-color: #4a9eff; }
+  .lead-divider { width: 36px; height: 1px; background: #e5e7eb; margin: 2px 0; }
+
+  .graph-area { flex: 1; background: #fff; border: 1.5px solid #d1d5db; margin: 6px; border-radius: 6px; position: relative; overflow: hidden; }
+
+  .annot-panel { width: 270px; background: #fff; border-left: 1px solid #e5e7eb; display: flex; flex-direction: column; overflow-y: auto; }
+  .ph { padding: 12px 14px; border-bottom: 1px solid #e5e7eb; }
+  .ph h2 { font-size: 14px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+
+  .new-a { padding: 12px; border-bottom: 1px solid #e5e7eb; }
+  .new-a h3 { font-size: 12px; font-weight: 600; color: #4a9eff; margin-bottom: 8px; }
+  .region-badge { font-size: 12px; font-family: monospace; color: #4b5563; background: #eff6ff; padding: 6px 8px; border-radius: 4px; margin-bottom: 8px; }
+  .fg { margin-bottom: 8px; }
+  .fg label { font-size: 12px; color: #6b7280; display: block; margin-bottom: 3px; }
+  .fg select, .fg textarea { width: 100%; font-size: 13px; padding: 7px 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-family: inherit; }
+  .fg textarea { resize: vertical; min-height: 56px; }
+  .fa { display: flex; gap: 6px; }
+  .fa button { flex: 1; padding: 7px; border-radius: 6px; border: 1px solid #e5e7eb; background: #fff; color: #4b5563; font-size: 12px; font-weight: 500; cursor: pointer; }
+  .fa button.p { background: #4a9eff; color: #fff; border-color: #4a9eff; }
+
+  .al { padding: 0 12px; flex: 1; }
+  .al h3 { font-size: 12px; font-weight: 600; color: #9ca3af; text-transform: uppercase; margin: 12px 0 8px; }
+  .ac { padding: 8px 10px; margin-bottom: 6px; background: #f9fafb; border-radius: 6px; border-left: 3px solid; }
+  .ac.gn { border-color: #059669; }
+  .ac.yl { border-color: #d97706; }
+  .ac .am { font-size: 11px; font-family: monospace; color: #6b7280; }
+  .ac .ab { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; margin-left: 4px; }
+  .ab.gn { background: #d1fae5; color: #065f46; }
+  .ab.yl { background: #fef3c7; color: #92400e; }
+  .ac .an { font-size: 12px; color: #4b5563; margin-top: 4px; line-height: 1.4; }
+  .ac .ag { font-size: 11px; color: #4a9eff; margin-top: 4px; font-weight: 500; white-space: nowrap; flex-shrink: 0; }
+
+  .ae { padding: 10px 12px; border-top: 1px solid #e5e7eb; margin-top: auto; }
+  .ae button { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #e5e7eb; background: #fff; color: #4b5563; font-size: 12px; font-weight: 500; cursor: pointer; }
+
+  .statusbar { height: 28px; background: #fff; border-top: 1px solid #e5e7eb; display: flex; align-items: center; padding: 0 14px; }
+  .st { font-size: 11px; color: #6b7280; font-family: monospace; } .st b { color: #1a1a2e; }
+  .st-center { flex: 1; text-align: center; font-size: 10px; color: #9ca3af; }
+</style>
+<script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo"><span>EKG</span> Assistant</div><div class="sep"></div>
+    <div class="file-info">00888_lr.dat | 500 Hz | 12 odpr. | 10.0 s</div><div class="spacer"></div>
+    <div class="seg"><button class="seg-btn">12-Lead</button><button class="seg-btn active">1-Lead</button><button class="seg-btn">Monitor</button></div><div class="sep"></div>
+    <button class="tb">Wybierz</button><button class="tb">Suwmiarka</button><button class="tb active">Adnotacja</button><div class="sep"></div>
+    <button class="tb">10 mm/mV</button><button class="tb">25 mm/s</button><button class="tb">0.05-150 Hz</button><div class="sep"></div>
+    <button class="btn-primary">Analizuj</button><button class="btn-sec">Wczytaj plik</button>
+  </div>
+  <div class="content">
+    <div class="lead-sidebar">
+      <button class="lead-btn">I</button><button class="lead-btn active">II</button><button class="lead-btn">III</button><div class="lead-divider"></div>
+      <button class="lead-btn">aVR</button><button class="lead-btn">aVL</button><button class="lead-btn">aVF</button><div class="lead-divider"></div>
+      <button class="lead-btn">V1</button><button class="lead-btn">V2</button><button class="lead-btn">V3</button><button class="lead-btn">V4</button><button class="lead-btn">V5</button><button class="lead-btn">V6</button>
+    </div>
+    <div class="graph-area"><canvas id="c"></canvas></div>
+    <div class="annot-panel">
+      <div class="ph"><h2>Adnotacje</h2></div>
+      <div class="new-a">
+        <h3>Nowa adnotacja</h3>
+        <div class="region-badge">II: 2.30 s — 2.85 s</div>
+        <div class="fg"><label>Kategoria</label><select><option>Patologia</option><option>Norma</option><option>Artefakt</option><option>Do weryfikacji</option></select></div>
+        <div class="fg"><label>Notatka</label><textarea>Podejrzenie uniesienia ST</textarea></div>
+        <div class="fa"><button class="p">Zapisz</button><button>Eksportuj PNG</button></div>
+      </div>
+      <div class="al">
+        <h3>Zapisane (2)</h3>
+        <div class="ac gn">
+          <div class="am">II: 0.40 — 1.20 s <span class="ab gn">Norma</span></div>
+          <div class="an">Prawidłowy kompleks PQRST, rytm zatokowy</div>
+          <div class="ag">Przejdź →</div>
+        </div>
+        <div class="ac yl">
+          <div class="am">V1: 3.10 — 3.60 s <span class="ab yl">Do weryfikacji</span></div>
+          <div class="an">Szerokie S w V1, możliwe RBBB</div>
+          <div class="ag">Przejdź →</div>
+        </div>
+      </div>
+      <div class="ae"><button>Eksportuj wszystkie adnotacje</button></div>
+    </div>
+  </div>
+  <div class="statusbar">
+    <div class="st"><b>Adnotacja</b> | <b>10 mm/mV</b></div>
+    <div class="st-center">Przeciągnij, aby zaznaczyć | Enter: Zapisz | Esc: Anuluj</div>
+    <div class="st">Zaznaczenie: <b>2.30 — 2.85 s</b></div>
+  </div>
+  <script>
+    const canvas=document.getElementById('c');
+    requestAnimationFrame(()=>{
+      const p=canvas.parentElement;
+      const W=canvas.width=p.offsetWidth*2,H=canvas.height=p.offsetHeight*2;
+      const ctx=canvas.getContext('2d');ctx.scale(2,2);
+      const w=p.offsetWidth,h=p.offsetHeight;
+      const SX=w/250,LX=SX*5,SY=h/80,LY=SY*5,midY=h/2,mvPx=h/8;
+
+      ctx.strokeStyle='#FCE4E4';ctx.lineWidth=0.4;ctx.beginPath();
+      for(let x=0;x<w;x+=SX){ctx.moveTo(x,0);ctx.lineTo(x,h);}
+      for(let y=0;y<h;y+=SY){ctx.moveTo(0,y);ctx.lineTo(w,y);}
+      ctx.stroke();
+      ctx.strokeStyle='#F0BFBF';ctx.lineWidth=0.8;ctx.beginPath();
+      for(let x=0;x<w;x+=LX){ctx.moveTo(x,0);ctx.lineTo(x,h);}
+      for(let y=0;y<h;y+=LY){ctx.moveTo(0,y);ctx.lineTo(w,y);}
+      ctx.stroke();
+
+      // Selection highlight
+      const ss=30,sw=w-ss;
+      const sx1=ss+(2.3/10)*sw,sx2=ss+(2.85/10)*sw;
+      ctx.fillStyle='rgba(74,158,255,0.12)';ctx.fillRect(sx1,0,sx2-sx1,h);
+      ctx.strokeStyle='#4A9EFF';ctx.lineWidth=1.5;ctx.setLineDash([5,4]);
+      ctx.beginPath();ctx.moveTo(sx1,0);ctx.lineTo(sx1,h);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(sx2,0);ctx.lineTo(sx2,h);ctx.stroke();
+      ctx.setLineDash([]);
+
+      function ekg(t){const pr=0.832,ph=((t%pr)/pr)*2*Math.PI;let v=0.12*Math.exp(-Math.pow(ph-0.9,2)/0.03);v-=0.08*Math.exp(-Math.pow(ph-1.55,2)/0.004);v+=1.0*Math.exp(-Math.pow(ph-1.65,2)/0.005);v-=0.15*Math.exp(-Math.pow(ph-1.78,2)/0.004);v+=0.2*Math.exp(-Math.pow(ph-2.8,2)/0.06);return v;}
+
+      ctx.strokeStyle='#1A1A2E';ctx.lineWidth=1.2;
+      ctx.beginPath();
+      for(let px=0;px<sw;px++){const t=(px/sw)*10,v=ekg(t),py=midY-v*mvPx;px===0?ctx.moveTo(ss+px,py):ctx.lineTo(ss+px,py);}
+      ctx.stroke();
+      ctx.fillStyle='#1A1A2E';ctx.font='bold 14px monospace';ctx.fillText('II',8,18);
+    });
+  </script>
+</body>
+</html>

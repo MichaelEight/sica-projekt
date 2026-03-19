@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; background: #f5f6f8; color: #1a1a2e; width: 100vw; height: 100vh; overflow: hidden; }
+
+  /* TOP BAR - all text, no SVG icons */
+  .topbar { height: 48px; background: #1a1a2e; display: flex; align-items: center; padding: 0 14px; gap: 8px; }
+  .logo { color: #fff; font-size: 15px; font-weight: 600; white-space: nowrap; }
+  .logo span { color: #4a9eff; }
+  .sep { width: 1px; height: 24px; background: #444; flex-shrink: 0; }
+  .file-info { font-size: 12px; color: #ccc; font-family: monospace; white-space: nowrap; }
+  .spacer { flex: 1; }
+  .seg { display: flex; border-radius: 5px; overflow: hidden; flex-shrink: 0; }
+  .seg-btn { font-size: 12px; padding: 6px 12px; border: none; cursor: pointer; font-weight: 500; background: #2a2a40; color: #888; white-space: nowrap; flex-shrink: 0; }
+  .seg-btn.active { background: #4a9eff; color: #fff; }
+  .tb { font-size: 12px; padding: 6px 10px; border-radius: 5px; border: none; cursor: pointer; font-weight: 500; background: #2a2a40; color: #ccc; white-space: nowrap; }
+  .tb.active { background: #4a9eff; color: #fff; }
+  .btn-primary { background: #4a9eff; color: #fff; font-size: 12px; padding: 6px 14px; border-radius: 5px; border: none; cursor: pointer; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+  .btn-sec { background: #2a2a40; color: #ccc; font-size: 12px; padding: 6px 14px; border-radius: 5px; border: none; cursor: pointer; font-weight: 500; white-space: nowrap; flex-shrink: 0; }
+
+  .content { display: flex; height: calc(100vh - 48px - 48px - 28px); }
+
+  /* BOTTOM NAV BAR */
+  .navbar { height: 48px; background: #fff; border-top: 1px solid #e5e7eb; display: flex; align-items: center; padding: 0 16px; gap: 8px; }
+  .nav-btn { height: 32px; padding: 0 10px; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff; color: #4b5563; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: 500; white-space: nowrap; }
+  .nav-btn:hover { background: #f9fafb; }
+  .scrubber { flex: 1; height: 6px; background: #e5e7eb; border-radius: 3px; position: relative; margin: 0 8px; }
+  .scrubber-fill { width: 35%; height: 100%; background: #4a9eff; border-radius: 3px; }
+  .scrubber-handle { width: 14px; height: 14px; border-radius: 50%; background: #4a9eff; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.2); position: absolute; top: -4px; left: 35%; transform: translateX(-50%); }
+  .time-display { font-size: 12px; font-family: monospace; color: #4b5563; white-space: nowrap; }
+  .time-display b { color: #1a1a2e; }
+  .speed-label { font-size: 11px; color: #9ca3af; white-space: nowrap; }
+
+  /* INFO PANEL */
+  .info-panel { width: 160px; background: #fff; border-right: 1px solid #e5e7eb; padding: 10px 12px; font-size: 12px; overflow-y: auto; }
+  .info-section { margin-bottom: 14px; }
+  .info-section h4 { font-size: 11px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; border-bottom: 1px solid #f3f4f6; padding-bottom: 4px; }
+  .info-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .info-label { color: #6b7280; font-size: 12px; }
+  .info-value { font-weight: 600; font-family: monospace; font-size: 13px; }
+  .info-unit { font-size: 10px; color: #9ca3af; font-weight: 400; }
+
+  /* EKG AREA */
+  .ekg-area { flex: 1; padding: 6px; background: #f9fafb; display: flex; flex-direction: column; gap: 3px; }
+
+  /* Each lead row is a distinct bordered box */
+  .lead-row { display: flex; gap: 3px; flex: 1; }
+  .lead-cell { flex: 1; background: #fff; border: 1.5px solid #d1d5db; border-radius: 4px; position: relative; overflow: hidden; }
+  .lead-cell canvas { width: 100%; height: 100%; }
+  .lead-label { position: absolute; top: 3px; left: 6px; font-size: 13px; font-weight: 700; font-family: monospace; color: #1a1a2e; background: rgba(255,255,255,0.85); padding: 1px 4px; border-radius: 2px; z-index: 2; }
+
+  /* Rhythm strip */
+  .rhythm-strip { height: 100px; background: #fff; border: 1.5px solid #d1d5db; border-radius: 4px; position: relative; overflow: hidden; }
+  .rhythm-strip canvas { width: 100%; height: 100%; }
+
+  /* STATUS BAR */
+  .statusbar { height: 28px; background: #fff; border-top: 1px solid #e5e7eb; display: flex; align-items: center; padding: 0 14px; gap: 16px; }
+  .st { font-size: 11px; color: #6b7280; font-family: monospace; }
+  .st b { color: #1a1a2e; }
+  .st-center { flex: 1; text-align: center; font-size: 10px; color: #9ca3af; }
+</style>
+<script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo"><span>EKG</span> Assistant</div>
+    <div class="sep"></div>
+    <div class="file-info">00888_lr.dat | 500 Hz | 12 odpr. | 10.0 s</div>
+    <div class="spacer"></div>
+    <div class="seg"><button class="seg-btn active">12-Lead</button><button class="seg-btn">1-Lead</button><button class="seg-btn">Monitor</button></div>
+    <div class="sep"></div>
+    <button class="tb active">Wybierz</button>
+    <button class="tb">Suwmiarka</button>
+    <button class="tb">Adnotacja</button>
+    <div class="sep"></div>
+    <button class="tb">10 mm/mV</button>
+    <button class="tb">25 mm/s</button>
+    <button class="tb">0.05-150 Hz</button>
+    <div class="sep"></div>
+    <button class="btn-primary">Analizuj</button>
+    <button class="btn-sec">Wczytaj plik</button>
+  </div>
+
+  <div class="content">
+    <div class="info-panel">
+      <div class="info-section">
+        <h4>Pacjent</h4>
+        <div class="info-row"><span class="info-label">ID</span><span class="info-value">00888</span></div>
+        <div class="info-row"><span class="info-label">Wiek</span><span class="info-value">62 <span class="info-unit">lat</span></span></div>
+        <div class="info-row"><span class="info-label">Płeć</span><span class="info-value">M</span></div>
+        <div class="info-row"><span class="info-label">Data</span><span class="info-value">15.03.26</span></div>
+      </div>
+      <div class="info-section">
+        <h4>Pomiary</h4>
+        <div class="info-row"><span class="info-label">HR</span><span class="info-value">72 <span class="info-unit">bpm</span></span></div>
+        <div class="info-row"><span class="info-label">PR</span><span class="info-value">164 <span class="info-unit">ms</span></span></div>
+        <div class="info-row"><span class="info-label">QRS</span><span class="info-value">88 <span class="info-unit">ms</span></span></div>
+        <div class="info-row"><span class="info-label">QT</span><span class="info-value">392 <span class="info-unit">ms</span></span></div>
+        <div class="info-row"><span class="info-label">QTc</span><span class="info-value">429 <span class="info-unit">ms</span></span></div>
+        <div class="info-row"><span class="info-label">Oś</span><span class="info-value">+55°</span></div>
+      </div>
+    </div>
+
+    <div class="ekg-area" id="ekgArea">
+      <!-- JS will populate lead rows -->
+    </div>
+  </div>
+
+  <!-- Navigation bar -->
+  <div class="navbar">
+    <button class="nav-btn">|◀ Start</button>
+    <button class="nav-btn">◀◀ -1s</button>
+    <button class="nav-btn">◀ -0.2s</button>
+    <button class="nav-btn">+0.2s ▶</button>
+    <button class="nav-btn">+1s ▶▶</button>
+    <button class="nav-btn">Koniec ▶|</button>
+    <div class="scrubber">
+      <div class="scrubber-fill"></div>
+      <div class="scrubber-handle"></div>
+    </div>
+    <div class="time-display"><b>3.50 s</b> / 10.00 s</div>
+    <div class="speed-label">25 mm/s</div>
+  </div>
+
+  <div class="statusbar">
+    <div class="st"><b>10 mm/mV</b> | <b>25 mm/s</b> | 0.05-150 Hz</div>
+    <div class="st-center">V: Wybierz | C: Suwmiarka | A: Adnotacja | G: Wzmocnienie | 1/2/3: Widok</div>
+    <div class="st">t = <b>3.42 s</b> | V = <b>0.85 mV</b></div>
+  </div>
+
+  <script>
+    const leadGrid = [
+      ['I','aVR','V1','V4'],
+      ['II','aVL','V2','V5'],
+      ['III','aVF','V3','V6']
+    ];
+    const seeds = {I:0,II:0.5,III:0.3,aVR:-1,aVL:0.2,aVF:0.6,V1:-0.5,V2:0.1,V3:0.8,V4:1.2,V5:1.0,V6:0.7};
+    const amps = {I:0.7,II:1.0,III:0.5,aVR:-0.6,aVL:0.4,aVF:0.8,V1:-0.3,V2:0.5,V3:1.0,V4:1.3,V5:1.1,V6:0.8};
+
+    function ekg(t, seed) {
+      const period = 0.833, phase = ((t % period) / period) * 2 * Math.PI;
+      let v = 0.12 * Math.exp(-Math.pow(phase - 0.9, 2) / 0.03);
+      v -= 0.08 * Math.exp(-Math.pow(phase - 1.55, 2) / 0.004);
+      v += (0.9 + seed * 0.08) * Math.exp(-Math.pow(phase - 1.65, 2) / 0.005);
+      v -= 0.15 * Math.exp(-Math.pow(phase - 1.78, 2) / 0.004);
+      v += 0.2 * Math.exp(-Math.pow(phase - 2.8, 2) / 0.06);
+      return v;
+    }
+
+    function drawCell(canvas, lead, tStart, tEnd) {
+      const W = canvas.width = canvas.offsetWidth * 2;
+      const H = canvas.height = canvas.offsetHeight * 2;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(2, 2);
+      const w = canvas.offsetWidth, h = canvas.offsetHeight;
+      const seed = seeds[lead] || 0, amp = amps[lead] || 1;
+      const midY = h / 2, mvPx = h / 3;
+
+      // Grid
+      const sqX = w / ((tEnd - tStart) / 0.04);
+      const sqY = h / 30;
+      ctx.strokeStyle = '#FCE4E4'; ctx.lineWidth = 0.4;
+      ctx.beginPath();
+      for (let x = 0; x < w; x += sqX) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+      for (let y = 0; y < h; y += sqY) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+      ctx.stroke();
+      ctx.strokeStyle = '#F0BFBF'; ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      for (let x = 0; x < w; x += sqX * 5) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+      for (let y = 0; y < h; y += sqY * 5) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+      ctx.stroke();
+
+      // Calibration pulse
+      const calW = w * 0.06;
+      ctx.strokeStyle = '#1A1A2E'; ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(3, midY); ctx.lineTo(5, midY); ctx.lineTo(5, midY - mvPx);
+      ctx.lineTo(5 + calW, midY - mvPx); ctx.lineTo(5 + calW, midY);
+      ctx.stroke();
+
+      // Signal
+      const sigStart = 5 + calW + 4;
+      ctx.beginPath();
+      for (let px = 0; px < w - sigStart; px++) {
+        const t = tStart + (px / (w - sigStart)) * (tEnd - tStart);
+        const v = ekg(t, seed) * amp;
+        const py = midY - v * mvPx;
+        px === 0 ? ctx.moveTo(sigStart + px, py) : ctx.lineTo(sigStart + px, py);
+      }
+      ctx.stroke();
+    }
+
+    const area = document.getElementById('ekgArea');
+
+    // 3 lead rows
+    for (let r = 0; r < 3; r++) {
+      const row = document.createElement('div');
+      row.className = 'lead-row';
+      for (let c = 0; c < 4; c++) {
+        const lead = leadGrid[r][c];
+        const cell = document.createElement('div');
+        cell.className = 'lead-cell';
+        const label = document.createElement('div');
+        label.className = 'lead-label';
+        label.textContent = lead;
+        const canvas = document.createElement('canvas');
+        cell.appendChild(label);
+        cell.appendChild(canvas);
+        row.appendChild(cell);
+        // Defer drawing until layout is done
+        requestAnimationFrame(() => drawCell(canvas, lead, c * 2.5, c * 2.5 + 2.5));
+      }
+      area.appendChild(row);
+    }
+
+    // Rhythm strip
+    const strip = document.createElement('div');
+    strip.className = 'rhythm-strip';
+    const stripLabel = document.createElement('div');
+    stripLabel.className = 'lead-label';
+    stripLabel.textContent = 'II (rytm)';
+    const stripCanvas = document.createElement('canvas');
+    strip.appendChild(stripLabel);
+    strip.appendChild(stripCanvas);
+    area.appendChild(strip);
+    requestAnimationFrame(() => drawCell(stripCanvas, 'II', 0, 10));
+  </script>
+</body>
+</html>

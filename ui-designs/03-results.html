@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; background: #f5f6f8; color: #1a1a2e; width: 1280px; height: 800px; overflow: hidden; }
+
+  .topbar {
+    height: 48px; background: #1a1a2e; display: flex; align-items: center; padding: 0 20px; gap: 20px;
+  }
+  .topbar .logo { color: #fff; font-size: 15px; font-weight: 600; }
+  .topbar .logo span { color: #4a9eff; }
+  .topbar .sep { width: 1px; height: 24px; background: #333; }
+  .topbar .file-info { font-size: 12px; color: #9ca3af; font-family: 'SF Mono', monospace; }
+  .topbar .file-info strong { color: #d1d5db; font-weight: 500; }
+  .topbar .spacer { flex: 1; }
+  .topbar .btn {
+    font-size: 12px; padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-weight: 500;
+  }
+  .topbar .btn-secondary { background: #2a2a40; color: #d1d5db; }
+  .topbar .btn-primary { background: #4a9eff; color: #fff; }
+  .topbar .zoom-group { display: flex; align-items: center; gap: 4px; }
+  .topbar .zoom-btn {
+    width: 28px; height: 28px; border-radius: 4px; border: none; background: #2a2a40; color: #d1d5db;
+    font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .topbar .zoom-label { font-size: 11px; color: #9ca3af; width: 36px; text-align: center; }
+  .topbar .result-badge {
+    font-size: 11px; background: #d1fae5; color: #065f46; padding: 4px 10px; border-radius: 4px; font-weight: 600;
+  }
+
+  .content { display: flex; height: calc(800px - 48px - 52px); }
+
+  /* Lead sidebar */
+  .sidebar {
+    width: 56px; background: #fff; border-right: 1px solid #e5e7eb;
+    display: flex; flex-direction: column; padding: 8px 0; gap: 2px; align-items: center;
+  }
+  .sidebar .lead-btn {
+    width: 44px; height: 28px; border: none; border-radius: 4px; cursor: pointer;
+    font-size: 10px; font-weight: 600; font-family: 'SF Mono', monospace;
+    background: transparent; color: #9ca3af;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .sidebar .lead-btn.active { background: #eef4ff; color: #4a9eff; }
+  .sidebar .lead-divider { width: 32px; height: 1px; background: #e5e7eb; margin: 4px 0; }
+
+  /* Graph area */
+  .graph-area {
+    flex: 1; padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; overflow: hidden;
+  }
+  .graph-row {
+    flex: 1; display: flex; align-items: center; background: #fff; border-radius: 6px;
+    border: 1px solid #e5e7eb; overflow: hidden;
+  }
+  .graph-label {
+    width: 36px; font-size: 10px; font-weight: 600; color: #6b7280;
+    font-family: 'SF Mono', monospace; text-align: center; flex-shrink: 0;
+    border-right: 1px solid #eee;
+  }
+  .graph-canvas { flex: 1; height: 100%; position: relative; }
+  .graph-canvas svg { width: 100%; height: 100%; }
+
+  .grid-line { stroke: #fce4e4; stroke-width: 0.5; }
+  .grid-line-major { stroke: #f5c6c6; stroke-width: 0.8; }
+  .signal-line { fill: none; stroke: #1a1a2e; stroke-width: 1.5; }
+
+  /* Results panel */
+  .results-panel {
+    width: 280px; background: #fff; border-left: 1px solid #e5e7eb;
+    display: flex; flex-direction: column; overflow-y: auto;
+  }
+  .panel-header {
+    padding: 14px 16px; border-bottom: 1px solid #e5e7eb;
+  }
+  .panel-header h2 { font-size: 13px; font-weight: 600; color: #1a1a2e; margin-bottom: 4px; }
+  .panel-header .subtitle { font-size: 11px; color: #6b7280; }
+
+  /* Primary prediction */
+  .prediction-card {
+    margin: 12px; padding: 14px; background: #fefce8; border: 1px solid #fde68a;
+    border-radius: 8px;
+  }
+  .prediction-card .diagnosis { font-size: 14px; font-weight: 600; color: #92400e; margin-bottom: 10px; }
+  .prediction-card .big-pct { font-size: 28px; font-weight: 700; color: #92400e; font-family: 'SF Mono', monospace; }
+  .prediction-card .big-pct-label { font-size: 11px; color: #a16207; margin-bottom: 6px; }
+  .prediction-card .conf-bar-big { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin-top: 4px; }
+  .prediction-card .conf-bar-big .fill { height: 100%; border-radius: 4px; background: #f59e0b; }
+
+  /* All classes */
+  .classes-section { padding: 12px; }
+  .classes-section h3 {
+    font-size: 11px; font-weight: 600; color: #9ca3af; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 10px;
+  }
+  .class-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  }
+  .class-row .class-name {
+    font-size: 11px; color: #4b5563; width: 110px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .class-row .class-name.primary { font-weight: 600; color: #1a1a2e; }
+  .class-row .class-bar { flex: 1; height: 6px; background: #f3f4f6; border-radius: 3px; overflow: hidden; }
+  .class-row .class-bar .fill { height: 100%; border-radius: 3px; }
+  .class-row .class-bar .fill.high { background: #f59e0b; }
+  .class-row .class-bar .fill.normal { background: #d1d5db; }
+  .class-row .class-pct {
+    font-size: 10px; font-family: 'SF Mono', monospace; color: #6b7280; width: 32px; text-align: right;
+  }
+  .class-row .class-pct.primary { color: #1a1a2e; font-weight: 600; }
+
+  .panel-footer {
+    padding: 12px; border-top: 1px solid #e5e7eb; margin-top: auto;
+  }
+  .panel-footer .btn-reanalyze {
+    width: 100%; padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px;
+    background: #fff; color: #4b5563; font-size: 12px; font-weight: 500; cursor: pointer;
+    text-align: center;
+  }
+  .panel-footer .btn-reanalyze:hover { background: #f9fafb; }
+  .panel-footer .disclaimer {
+    font-size: 10px; color: #9ca3af; text-align: center; margin-top: 8px; line-height: 1.4;
+  }
+
+  /* Bottom bar */
+  .bottombar {
+    height: 52px; background: #fff; border-top: 1px solid #e5e7eb;
+    display: flex; align-items: center; padding: 0 20px; gap: 12px;
+  }
+  .nav-btn {
+    width: 36px; height: 32px; border: 1px solid #e5e7eb; border-radius: 6px;
+    background: #fff; color: #4b5563; font-size: 12px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .scrubber {
+    flex: 1; height: 6px; background: #e5e7eb; border-radius: 3px; position: relative; margin: 0 8px;
+  }
+  .scrubber-fill { width: 35%; height: 100%; background: #4a9eff; border-radius: 3px; }
+  .scrubber-handle {
+    width: 14px; height: 14px; border-radius: 50%; background: #4a9eff; border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    position: absolute; top: -4px; left: 35%; transform: translateX(-50%);
+  }
+  .time-display { font-size: 11px; font-family: 'SF Mono', monospace; color: #6b7280; white-space: nowrap; }
+  .time-display strong { color: #1a1a2e; }
+  .speed-label { font-size: 11px; color: #9ca3af; margin-left: auto; }
+</style>
+<script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo"><span>EKG</span> Assistant</div>
+    <div class="sep"></div>
+    <div class="file-info"><strong>00888_lr.dat</strong> &nbsp;|&nbsp; 500 Hz &nbsp;|&nbsp; 12 odprowadzeń &nbsp;|&nbsp; 10.0 s</div>
+    <div class="spacer"></div>
+    <div class="result-badge">Analiza zakończona</div>
+    <div class="zoom-group">
+      <button class="zoom-btn">−</button>
+      <div class="zoom-label">100%</div>
+      <button class="zoom-btn">+</button>
+    </div>
+    <button class="btn btn-secondary">Wczytaj plik</button>
+  </div>
+
+  <div class="content">
+    <!-- Lead sidebar -->
+    <div class="sidebar">
+      <button class="lead-btn active">I</button>
+      <button class="lead-btn active">II</button>
+      <button class="lead-btn active">III</button>
+      <div class="lead-divider"></div>
+      <button class="lead-btn active">aVR</button>
+      <button class="lead-btn active">aVL</button>
+      <button class="lead-btn active">aVF</button>
+      <div class="lead-divider"></div>
+      <button class="lead-btn active">V1</button>
+      <button class="lead-btn active">V2</button>
+      <button class="lead-btn active">V3</button>
+      <button class="lead-btn active">V4</button>
+      <button class="lead-btn active">V5</button>
+      <button class="lead-btn active">V6</button>
+    </div>
+
+    <!-- Graph area (clean, no highlights) -->
+    <div class="graph-area" id="graphArea"></div>
+
+    <!-- Results panel -->
+    <div class="results-panel">
+      <div class="panel-header">
+        <h2>Wyniki analizy</h2>
+        <div class="subtitle">Model: Inception1D &nbsp;|&nbsp; Czas: 1.2 s</div>
+      </div>
+
+      <div class="prediction-card">
+        <div class="diagnosis">Zawał serca dolny</div>
+        <div class="big-pct-label">Pewność modelu</div>
+        <div class="big-pct">87%</div>
+        <div class="conf-bar-big"><div class="fill" style="width: 87%"></div></div>
+      </div>
+
+      <div class="classes-section">
+        <h3>Wszystkie klasy</h3>
+
+        <div class="class-row">
+          <div class="class-name primary">Zawał dolny</div>
+          <div class="class-bar"><div class="fill high" style="width: 87%"></div></div>
+          <div class="class-pct primary">87%</div>
+        </div>
+        <div class="class-row">
+          <div class="class-name">Norma</div>
+          <div class="class-bar"><div class="fill normal" style="width: 8%"></div></div>
+          <div class="class-pct">8%</div>
+        </div>
+        <div class="class-row">
+          <div class="class-name">RBBB</div>
+          <div class="class-bar"><div class="fill normal" style="width: 3%"></div></div>
+          <div class="class-pct">3%</div>
+        </div>
+        <div class="class-row">
+          <div class="class-name">Zawał przedni</div>
+          <div class="class-bar"><div class="fill normal" style="width: 1%"></div></div>
+          <div class="class-pct">1%</div>
+        </div>
+        <div class="class-row">
+          <div class="class-name">LBBB</div>
+          <div class="class-bar"><div class="fill normal" style="width: 0.5%"></div></div>
+          <div class="class-pct">&lt;1%</div>
+        </div>
+        <div class="class-row">
+          <div class="class-name">IRBBB</div>
+          <div class="class-bar"><div class="fill normal" style="width: 0.3%"></div></div>
+          <div class="class-pct">&lt;1%</div>
+        </div>
+        <div class="class-row">
+          <div class="class-name">Zawał boczny</div>
+          <div class="class-bar"><div class="fill normal" style="width: 0.2%"></div></div>
+          <div class="class-pct">&lt;1%</div>
+        </div>
+        <div class="class-row">
+          <div class="class-name">Zawał tylny</div>
+          <div class="class-bar"><div class="fill normal" style="width: 0.1%"></div></div>
+          <div class="class-pct">&lt;1%</div>
+        </div>
+      </div>
+
+      <div class="panel-footer">
+        <button class="btn-reanalyze">Ponów analizę</button>
+        <div class="disclaimer">Wynik ma charakter pomocniczy. Ostateczna decyzja diagnostyczna należy do lekarza.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom bar -->
+  <div class="bottombar">
+    <button class="nav-btn">
+      <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M2 3v10h1.5V3H2zm3.5 5l7 5V3l-7 5z"/></svg>
+    </button>
+    <button class="nav-btn">
+      <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M1.5 8l6 4.5V3.5l-6 4.5zm6.5 0l6 4.5V3.5l-6 4.5z"/></svg>
+    </button>
+    <button class="nav-btn">
+      <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M4 8l8 5.5V2.5L4 8z"/></svg>
+    </button>
+    <button class="nav-btn">
+      <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M12 8L4 2.5v11L12 8z"/></svg>
+    </button>
+    <button class="nav-btn">
+      <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M14.5 8l-6-4.5v9l6-4.5zM8 8l-6-4.5v9l6-4.5z"/></svg>
+    </button>
+    <button class="nav-btn">
+      <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M14 3v10h-1.5V3H14zm-3.5 5l-7 5V3l7 5z"/></svg>
+    </button>
+
+    <div class="scrubber">
+      <div class="scrubber-fill"></div>
+      <div class="scrubber-handle"></div>
+    </div>
+
+    <div class="time-display"><strong>3.50 s</strong> / 10.00 s</div>
+    <div class="speed-label">25 mm/s</div>
+  </div>
+
+  <script>
+    const leads = ['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6'];
+    const area = document.getElementById('graphArea');
+
+    function ekg(x, seed) {
+      const t = (x * 6 + seed) % 6.28;
+      let y = 0.08 * Math.exp(-Math.pow(t - 0.8, 2) / 0.02);
+      y -= 0.12 * Math.exp(-Math.pow(t - 1.6, 2) / 0.003);
+      y += (0.8 + seed * 0.05) * Math.exp(-Math.pow(t - 1.72, 2) / 0.004);
+      y -= 0.18 * Math.exp(-Math.pow(t - 1.85, 2) / 0.003);
+      y += 0.15 * Math.exp(-Math.pow(t - 2.6, 2) / 0.04);
+      y += (Math.random() - 0.5) * 0.015;
+      return y;
+    }
+
+    leads.forEach((lead, i) => {
+      const row = document.createElement('div');
+      row.className = 'graph-row';
+
+      const label = document.createElement('div');
+      label.className = 'graph-label';
+      label.textContent = lead;
+      row.appendChild(label);
+
+      const canvas = document.createElement('div');
+      canvas.className = 'graph-canvas';
+
+      const w = 900, h = 50;
+      let svg = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`;
+      for (let gx = 0; gx < w; gx += 40) svg += `<line x1="${gx}" y1="0" x2="${gx}" y2="${h}" class="${gx % 200 === 0 ? 'grid-line-major' : 'grid-line'}"/>`;
+      for (let gy = 0; gy < h; gy += 10) svg += `<line x1="0" y1="${gy}" x2="${w}" y2="${gy}" class="${gy === 25 ? 'grid-line-major' : 'grid-line'}"/>`;
+
+      const pts = [];
+      for (let x = 0; x < w; x += 2) {
+        const val = ekg(x / w * 3.5, i * 0.7);
+        const invert = (lead === 'aVR') ? -1 : 1;
+        const amplitude = (lead.startsWith('V')) ? 1.2 : 0.8;
+        const y = h / 2 - val * invert * amplitude * h * 0.4;
+        pts.push(`${x},${y.toFixed(1)}`);
+      }
+      svg += `<polyline points="${pts.join(' ')}" class="signal-line"/>`;
+      svg += '</svg>';
+      canvas.innerHTML = svg;
+      row.appendChild(canvas);
+      area.appendChild(row);
+    });
+  </script>
+</body>
+</html>

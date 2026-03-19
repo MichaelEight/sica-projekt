@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; background: #f5f6f8; color: #1a1a2e; width: 100vw; height: 100vh; overflow: hidden; }
+  .topbar { height: 48px; background: #1a1a2e; display: flex; align-items: center; padding: 0 20px; }
+  .logo { color: #fff; font-size: 16px; font-weight: 600; }
+  .logo span { color: #4a9eff; }
+  .main { display: flex; flex-direction: column; align-items: center; justify-content: center; height: calc(100vh - 48px - 32px); gap: 24px; }
+  .title-section { text-align: center; }
+  .title-section h1 { font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+  .title-section p { font-size: 14px; color: #6b7280; }
+  .dropzone { width: 520px; height: 200px; border: 2px dashed #c5cad3; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: #fff; }
+  .drop-icon { font-size: 36px; color: #4a9eff; }
+  .drop-text { font-size: 14px; font-weight: 500; text-align: center; }
+  .drop-text a { color: #4a9eff; text-decoration: underline; }
+  .drop-hint { font-size: 12px; color: #9ca3af; }
+  .formats { display: flex; gap: 8px; }
+  .tag { font-size: 12px; font-family: monospace; background: #f0f1f3; color: #6b7280; padding: 4px 12px; border-radius: 4px; }
+  .recent { width: 520px; }
+  .recent h3 { font-size: 12px; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .recent-list { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; }
+  .recent-item { display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid #f3f4f6; gap: 12px; }
+  .recent-item:last-child { border-bottom: none; }
+  .ri-icon { width: 32px; height: 32px; background: #eef4ff; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #4a9eff; font-size: 14px; font-weight: 700; }
+  .ri-info { flex: 1; }
+  .ri-name { font-size: 13px; font-weight: 600; font-family: monospace; }
+  .ri-meta { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+  .ri-date { font-size: 12px; color: #9ca3af; }
+  .statusbar { height: 32px; background: #fff; border-top: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: center; }
+  .statusbar span { font-size: 12px; color: #9ca3af; }
+</style>
+<script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+</head>
+<body>
+  <div class="topbar"><div class="logo"><span>EKG</span> Assistant</div></div>
+  <div class="main">
+    <div class="title-section">
+      <h1>Wczytaj sygnał EKG</h1>
+      <p>Przeciągnij plik WFDB lub wybierz z dysku, aby rozpocząć analizę</p>
+    </div>
+    <div class="dropzone">
+      <div class="drop-icon">⬆</div>
+      <div class="drop-text">Przeciągnij plik tutaj lub <a>wybierz z dysku</a></div>
+      <div class="drop-hint">Obsługiwane formaty WFDB</div>
+      <div class="formats"><div class="tag">.dat</div><div class="tag">.hea</div></div>
+    </div>
+    <div class="recent">
+      <h3>Ostatnie pliki</h3>
+      <div class="recent-list">
+        <div class="recent-item">
+          <div class="ri-icon">E</div>
+          <div class="ri-info"><div class="ri-name">00888_lr.dat</div><div class="ri-meta">500 Hz · 12 odprowadzeń · 10.0 s</div></div>
+          <div class="ri-date">15.03.2026</div>
+        </div>
+        <div class="recent-item">
+          <div class="ri-icon">E</div>
+          <div class="ri-info"><div class="ri-name">01234_hr.dat</div><div class="ri-meta">500 Hz · 12 odprowadzeń · 10.0 s</div></div>
+          <div class="ri-date">14.03.2026</div>
+        </div>
+        <div class="recent-item">
+          <div class="ri-icon">E</div>
+          <div class="ri-info"><div class="ri-name">05678_lr.dat</div><div class="ri-meta">500 Hz · 12 odprowadzeń · 10.0 s</div></div>
+          <div class="ri-date">12.03.2026</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="statusbar"><span>Cyfrowy asystent wspomagający pracę specjalistów z zakresu elektrofizjologii</span></div>
+</body>
+</html>
