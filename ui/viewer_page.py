@@ -6,8 +6,8 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QPushButton, QFrame, QStackedWidget, QSlider,
                                 QSizePolicy)
 
-from ui.theme import (TOPBAR, ACCENT, BTN_DARK, WHITE, BORDER, TEXT, TEXT_MUTED,
-                       TEXT_DIM, STANDARD_LEADS, GREEN, PURPLE)
+import ui.theme as T
+from ui.theme import STANDARD_LEADS
 from ui.ekg_canvas import (EkgCellCanvas, TwelveLeadGrid, SingleLeadCanvas,
                             generate_demo_signal, synth_ekg, LEAD_SEEDS, LEAD_AMPS)
 from ui.panels import (InfoPanel, CaliperPanel, AnnotationPanel, ResultsPanel,
@@ -40,18 +40,21 @@ class SegmentedControl(QWidget):
         if idx == self._active:
             return
         self._active = idx
+        self._apply_styles()
+        self.changed.emit(idx)
+
+    def _apply_styles(self):
         for i, btn in enumerate(self.buttons):
-            if i == idx:
+            if i == self._active:
                 btn.setStyleSheet(f"""
-                    background: {ACCENT}; color: white; border: none;
+                    background: {T.ACCENT}; color: {T.ACCENT_TEXT}; border: none;
                     padding: 6px 12px; font-size: 12px; font-weight: 500;
                 """)
             else:
                 btn.setStyleSheet(f"""
-                    background: {BTN_DARK}; color: #888; border: none;
+                    background: {T.BTN_DARK}; color: {T.TEXT_MUTED}; border: none;
                     padding: 6px 12px; font-size: 12px; font-weight: 500;
                 """)
-        self.changed.emit(idx)
 
     def active(self) -> int:
         return self._active
@@ -68,9 +71,9 @@ class ToolbarBtn(QPushButton):
     def set_active(self, active: bool):
         self._active = active
         if active:
-            self.setStyleSheet(f"background:{ACCENT};color:white;border:none;padding:6px 10px;border-radius:5px;")
+            self.setStyleSheet(f"background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;padding:6px 10px;border-radius:5px;")
         else:
-            self.setStyleSheet(f"background:{BTN_DARK};color:#ccc;border:none;padding:6px 10px;border-radius:5px;")
+            self.setStyleSheet(f"background:{T.BTN_DARK};color:{T.BTN_TEXT};border:none;padding:6px 10px;border-radius:5px;")
 
     def is_active(self) -> bool:
         return self._active
@@ -85,7 +88,7 @@ class LeadSidebar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(58)
-        self.setStyleSheet(f"background: {WHITE}; border-right: 1px solid {BORDER};")
+        self.setStyleSheet(f"background: {T.WHITE}; border-right: 1px solid {T.BORDER};")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -99,7 +102,7 @@ class LeadSidebar(QWidget):
             if gi > 0:
                 sep = QFrame()
                 sep.setFixedSize(36, 1)
-                sep.setStyleSheet(f"background: {BORDER};")
+                sep.setStyleSheet(f"background: {T.BORDER};")
                 layout.addWidget(sep, alignment=Qt.AlignCenter)
             for lead in group:
                 btn = QPushButton(lead)
@@ -120,15 +123,16 @@ class LeadSidebar(QWidget):
         self.lead_selected.emit(lead)
 
     def _update_styles(self):
+        self.setStyleSheet(f"background: {T.WHITE}; border-right: 1px solid {T.BORDER};")
         for lead, btn in self.buttons.items():
             if lead == self._active:
                 btn.setStyleSheet(f"""
-                    background: {ACCENT}; color: white; border: 1px solid {ACCENT};
+                    background: {T.ACCENT}; color: {T.ACCENT_TEXT}; border: 1px solid {T.ACCENT};
                     border-radius: 4px; font-family: Menlo;
                 """)
             else:
                 btn.setStyleSheet(f"""
-                    background: {WHITE}; color: {TEXT_DIM}; border: 1px solid {BORDER};
+                    background: {T.WHITE}; color: {T.TEXT_MUTED}; border: 1px solid {T.BORDER};
                     border-radius: 4px; font-family: Menlo;
                 """)
 
@@ -140,7 +144,7 @@ class LeadSidebar(QWidget):
 def _sep():
     sep = QFrame()
     sep.setFixedSize(1, 24)
-    sep.setStyleSheet("background: #444;")
+    sep.setStyleSheet(f"background: {T.SEPARATOR};")
     return sep
 
 
@@ -150,6 +154,7 @@ class ViewerPage(QWidget):
 
     open_file = Signal()         # request to open a new file
     show_report = Signal()       # request to show report page
+    toggle_dark = Signal()       # request to toggle dark mode
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -187,7 +192,7 @@ class ViewerPage(QWidget):
         # ── Top toolbar ──
         self.toolbar = QWidget()
         self.toolbar.setFixedHeight(48)
-        self.toolbar.setStyleSheet(f"background: {TOPBAR};")
+        self.toolbar.setStyleSheet(f"background: {T.TOPBAR};")
         tb = QHBoxLayout(self.toolbar)
         tb.setContentsMargins(14, 0, 14, 0)
         tb.setSpacing(8)
@@ -203,14 +208,14 @@ class ViewerPage(QWidget):
 
         # File info
         self.file_label = QLabel("00888_lr.dat | 500 Hz | 12 odpr. | 10.0 s")
-        self.file_label.setStyleSheet("font-size:12px; color:#ccc; font-family:Menlo;")
+        self.file_label.setStyleSheet(f"font-size:12px; color:{T.BTN_TEXT}; font-family:Menlo;")
         tb.addWidget(self.file_label)
         tb.addStretch()
 
         # Analysis badge (shown after AI analysis)
         self.analysis_badge = QLabel("Analiza zako\u0144czona")
         self.analysis_badge.setStyleSheet(f"""
-            font-size: 12px; background: #d1fae5; color: #065f46;
+            font-size: 12px; background: {T.BADGE_NORM_BG}; color: {T.BADGE_NORM_TEXT};
             padding: 5px 12px; border-radius: 5px; font-weight: 600;
         """)
         self.analysis_badge.hide()
@@ -240,7 +245,7 @@ class ViewerPage(QWidget):
         # Actions
         self.btn_analyze = QPushButton("Analizuj")
         self.btn_analyze.setStyleSheet(f"""
-            background:{ACCENT};color:white;font-size:12px;padding:6px 14px;
+            background:{T.ACCENT};color:{T.ACCENT_TEXT};font-size:12px;padding:6px 14px;
             border-radius:5px;border:none;font-weight:600;
         """)
         self.btn_analyze.setCursor(Qt.PointingHandCursor)
@@ -249,7 +254,7 @@ class ViewerPage(QWidget):
 
         self.btn_report = QPushButton("Raport")
         self.btn_report.setStyleSheet(f"""
-            background:{BTN_DARK};color:#ccc;font-size:12px;padding:6px 14px;
+            background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;
             border-radius:5px;border:none;
         """)
         self.btn_report.setCursor(Qt.PointingHandCursor)
@@ -258,12 +263,22 @@ class ViewerPage(QWidget):
 
         btn_load = QPushButton("Wczytaj plik")
         btn_load.setStyleSheet(f"""
-            background:{BTN_DARK};color:#ccc;font-size:12px;padding:6px 14px;
+            background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;
             border-radius:5px;border:none;
         """)
         btn_load.setCursor(Qt.PointingHandCursor)
         btn_load.clicked.connect(self.open_file.emit)
         tb.addWidget(btn_load)
+
+        tb.addWidget(_sep())
+        self.btn_dark = QPushButton("Tryb ciemny")
+        self.btn_dark.setStyleSheet(f"""
+            background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;
+            border-radius:5px;border:none;
+        """)
+        self.btn_dark.setCursor(Qt.PointingHandCursor)
+        self.btn_dark.clicked.connect(self.toggle_dark.emit)
+        tb.addWidget(self.btn_dark)
 
         outer.addWidget(self.toolbar)
 
@@ -290,7 +305,7 @@ class ViewerPage(QWidget):
 
         # Center: stacked views
         self.view_stack = QStackedWidget()
-        self.view_stack.setStyleSheet(f"background: #f9fafb;")
+        self.view_stack.setStyleSheet(f"background: {T.BG_SECONDARY};")
 
         self.grid_12 = TwelveLeadGrid()
         self.view_stack.addWidget(self.grid_12)  # idx 0
@@ -300,7 +315,7 @@ class ViewerPage(QWidget):
         self.view_stack.addWidget(self.single_lead)  # idx 1
 
         self.monitor_area = QWidget()
-        self.monitor_area.setStyleSheet(f"background: #f9fafb;")
+        self.monitor_area.setStyleSheet(f"background: {T.BG_SECONDARY};")
         self._monitor_strips: list[EkgCellCanvas] = []
         self._build_monitor_area()
         self.view_stack.addWidget(self.monitor_area)  # idx 2
@@ -327,7 +342,7 @@ class ViewerPage(QWidget):
         # ── Navigation bar ──
         self.navbar = QWidget()
         self.navbar.setFixedHeight(48)
-        self.navbar.setStyleSheet(f"background:{WHITE}; border-top:1px solid {BORDER};")
+        self.navbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
         nav = QHBoxLayout(self.navbar)
         nav.setContentsMargins(16, 0, 16, 0)
         nav.setSpacing(8)
@@ -353,26 +368,26 @@ class ViewerPage(QWidget):
         self.scrubber.setValue(350)
         self.scrubber.setStyleSheet(f"""
             QSlider::groove:horizontal {{
-                height: 6px; background: {BORDER}; border-radius: 3px;
+                height: 6px; background: {T.BORDER}; border-radius: 3px;
             }}
             QSlider::handle:horizontal {{
                 width: 14px; height: 14px; margin: -4px 0;
-                background: {ACCENT}; border: 2px solid white;
+                background: {T.ACCENT}; border: 2px solid {T.WHITE};
                 border-radius: 7px;
             }}
             QSlider::sub-page:horizontal {{
-                background: {ACCENT}; border-radius: 3px;
+                background: {T.ACCENT}; border-radius: 3px;
             }}
         """)
         self.scrubber.valueChanged.connect(self._on_scrubber)
         nav.addWidget(self.scrubber, stretch=1)
 
         self.time_label = QLabel()
-        self.time_label.setStyleSheet("font-size:12px; font-family:Menlo; color:#4b5563;")
+        self.time_label.setStyleSheet(f"font-size:12px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
         nav.addWidget(self.time_label)
 
         self.speed_label = QLabel("25 mm/s")
-        self.speed_label.setStyleSheet(f"font-size:11px; color:{TEXT_DIM};")
+        self.speed_label.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM};")
         nav.addWidget(self.speed_label)
 
         outer.addWidget(self.navbar)
@@ -380,28 +395,94 @@ class ViewerPage(QWidget):
         # ── Status bar ──
         self.statusbar = QWidget()
         self.statusbar.setFixedHeight(28)
-        self.statusbar.setStyleSheet(f"background:{WHITE}; border-top:1px solid {BORDER};")
+        self.statusbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
         sb = QHBoxLayout(self.statusbar)
         sb.setContentsMargins(14, 0, 14, 0)
         sb.setSpacing(16)
 
         self.st_left = QLabel()
-        self.st_left.setStyleSheet(f"font-size:11px; color:{TEXT_MUTED}; font-family:Menlo;")
+        self.st_left.setStyleSheet(f"font-size:11px; color:{T.TEXT_MUTED}; font-family:Menlo;")
         sb.addWidget(self.st_left)
 
         self.st_center = QLabel()
-        self.st_center.setStyleSheet(f"font-size:10px; color:{TEXT_DIM};")
+        self.st_center.setStyleSheet(f"font-size:10px; color:{T.TEXT_DIM};")
         self.st_center.setAlignment(Qt.AlignCenter)
         sb.addWidget(self.st_center, stretch=1)
 
         self.st_right = QLabel()
-        self.st_right.setStyleSheet(f"font-size:11px; color:{TEXT_MUTED}; font-family:Menlo;")
+        self.st_right.setStyleSheet(f"font-size:11px; color:{T.TEXT_MUTED}; font-family:Menlo;")
         sb.addWidget(self.st_right)
 
         outer.addWidget(self.statusbar)
 
         self._update_time_display()
         self._update_statusbar()
+
+    def apply_theme(self):
+        """Re-apply all styles after theme change."""
+        # Toolbar
+        self.toolbar.setStyleSheet(f"background: {T.TOPBAR};")
+        self.file_label.setStyleSheet(f"font-size:12px; color:{T.BTN_TEXT}; font-family:Menlo;")
+        self.analysis_badge.setStyleSheet(f"""
+            font-size: 12px; background: {T.BADGE_NORM_BG}; color: {T.BADGE_NORM_TEXT};
+            padding: 5px 12px; border-radius: 5px; font-weight: 600;
+        """)
+        # Segmented control & tool buttons
+        self.view_seg._apply_styles()
+        for btn in self.tool_btns:
+            btn.set_active(btn._active)
+        # Action buttons
+        self.btn_analyze.setStyleSheet(f"""
+            background:{T.ACCENT};color:{T.ACCENT_TEXT};font-size:12px;padding:6px 14px;
+            border-radius:5px;border:none;font-weight:600;
+        """)
+        self.btn_report.setStyleSheet(f"""
+            background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;
+            border-radius:5px;border:none;
+        """)
+        self.btn_dark.setStyleSheet(f"""
+            background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;
+            border-radius:5px;border:none;
+        """)
+        from ui.theme import is_dark_mode
+        self.btn_dark.setText("Tryb jasny" if is_dark_mode() else "Tryb ciemny")
+        # Lead sidebar
+        self.lead_sidebar._update_styles()
+        # View stack
+        self.view_stack.setStyleSheet(f"background: {T.BG_SECONDARY};")
+        self.monitor_area.setStyleSheet(f"background: {T.BG_SECONDARY};")
+        # Info panel
+        self.info_panel.apply_theme()
+        # Monitor sidebar
+        self.monitor_sidebar.apply_theme()
+        # Right panels
+        self.caliper_panel.apply_theme()
+        self.annot_panel.apply_theme()
+        self.results_panel.apply_theme()
+        # Navigation bar
+        self.navbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
+        self.scrubber.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                height: 6px; background: {T.BORDER}; border-radius: 3px;
+            }}
+            QSlider::handle:horizontal {{
+                width: 14px; height: 14px; margin: -4px 0;
+                background: {T.ACCENT}; border: 2px solid {T.WHITE};
+                border-radius: 7px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {T.ACCENT}; border-radius: 3px;
+            }}
+        """)
+        self.time_label.setStyleSheet(f"font-size:12px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
+        self.speed_label.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM};")
+        # Status bar
+        self.statusbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
+        self.st_left.setStyleSheet(f"font-size:11px; color:{T.TEXT_MUTED}; font-family:Menlo;")
+        self.st_center.setStyleSheet(f"font-size:10px; color:{T.TEXT_DIM};")
+        self.st_right.setStyleSheet(f"font-size:11px; color:{T.TEXT_MUTED}; font-family:Menlo;")
+        # 12-lead grid separators
+        self.grid_12.apply_theme()
 
     def _build_monitor_area(self):
         layout = QVBoxLayout(self.monitor_area)
@@ -499,9 +580,9 @@ class ViewerPage(QWidget):
             # Add demo calipers when in caliper mode
             if self._tool_mode == 1:
                 self.single_lead.calipers = [
-                    (1.220, 1.384, ACCENT, "PR = 164 ms"),
-                    (1.384, 1.472, PURPLE, "QRS = 88 ms"),
-                    (1.432, 2.264, GREEN, "R-R = 832 ms"),
+                    (1.220, 1.384, T.ACCENT, "PR = 164 ms"),
+                    (1.384, 1.472, T.PURPLE, "QRS = 88 ms"),
+                    (1.432, 2.264, T.GREEN, "R-R = 832 ms"),
                 ]
             else:
                 self.single_lead.calipers = []
