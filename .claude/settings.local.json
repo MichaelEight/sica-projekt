@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python data/generate_demo.py)",
+      "Bash(git checkout:*)"
+    ]
+  }
+}
