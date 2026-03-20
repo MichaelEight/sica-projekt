@@ -157,8 +157,13 @@ class ViewerPage(QWidget):
         self.leads = STANDARD_LEADS
         self.fs = 500
         self.filename = ""
-        self.duration = 10.0
-        self.time_pos = 3.5       # current time position
+        self.duration = 0.0
+        self.time_pos = 0.0
+        self._scrubber_max = 0.0
+        self._window_12 = 2.5
+        self._window_1 = 3.0
+        self._v_min = -1.5
+        self._v_max = 1.5
         self._view_mode = 0       # 0=12lead, 1=1lead, 2=monitor
         self._tool_mode = 0       # 0=select, 1=caliper, 2=annotation
         self._show_results = False
@@ -406,6 +411,12 @@ class ViewerPage(QWidget):
 
     # ── Public: set signal data ──
     def set_signal(self, signal: np.ndarray, leads: list[str], fs: int, filename: str = ""):
+        # ── Clear previous state ──
+        self.grid_12.clear()
+        self.single_lead.clear()
+        for _, strip in self._monitor_strips:
+            strip.clear()
+
         self.signal = signal
         self.leads = leads
         self.fs = fs
@@ -413,6 +424,28 @@ class ViewerPage(QWidget):
         self.duration = signal.shape[0] / fs
         self.time_pos = 0.0
         self._show_results = False
+        self._monitor_t = 0.0
+        self._monitor_playing = False
+        self._monitor_timer.stop()
+
+        # ── Analyze signal ranges once ──
+        self._global_min = float(signal.min())
+        self._global_max = float(signal.max())
+        v_range = self._global_max - self._global_min
+        pad = max(v_range * 0.15, 0.2)  # at least 0.2 mV padding
+        self._v_min = self._global_min - pad
+        self._v_max = self._global_max + pad
+
+        # Adaptive time windows based on signal duration
+        if self.duration <= 3.0:
+            self._window_12 = self.duration
+            self._window_1 = self.duration
+        elif self.duration <= 10.0:
+            self._window_12 = min(2.5, self.duration)
+            self._window_1 = min(3.0, self.duration)
+        else:
+            self._window_12 = 2.5
+            self._window_1 = 3.0
 
         self.file_label.setText(
             f"{filename} | {fs} Hz | {len(leads)} odpr. | {self.duration:.1f} s"
@@ -420,7 +453,10 @@ class ViewerPage(QWidget):
         self.analysis_badge.hide()
         self.results_panel.hide()
 
-        self.scrubber.setRange(0, int(self.duration * 100))
+        # Scrubber range: max position is duration minus the view window
+        max_window = max(self._window_12, self._window_1)
+        self._scrubber_max = max(0.0, self.duration - max_window)
+        self.scrubber.setRange(0, int(self._scrubber_max * 100))
         self.scrubber.setValue(0)
 
         self._refresh_views()
@@ -431,7 +467,8 @@ class ViewerPage(QWidget):
         if self.signal is None:
             return
         # 12-lead grid
-        self.grid_12.set_signal(self.signal, self.leads, self.fs)
+        self.grid_12.set_signal(self.signal, self.leads, self.fs, self.time_pos,
+                                self._window_12, self._v_min, self._v_max)
 
         # Single lead
         self._refresh_single_lead()
@@ -445,7 +482,14 @@ class ViewerPage(QWidget):
         lead = self.lead_sidebar.active_lead()
         if lead in self.leads:
             idx = self.leads.index(lead)
-            self.single_lead.set_data(lead, self.signal[:, idx], self.fs, 0, self.duration)
+            window = self._window_1
+            t_start = max(0.0, self.time_pos)
+            t_end = min(self.duration, t_start + window)
+            if t_end - t_start < window:
+                t_start = max(0.0, t_end - window)
+            self.single_lead.v_min = self._v_min
+            self.single_lead.v_max = self._v_max
+            self.single_lead.set_data(lead, self.signal[:, idx], self.fs, t_start, t_end)
             # Add demo calipers when in caliper mode
             if self._tool_mode == 1:
                 self.single_lead.calipers = [
@@ -468,6 +512,8 @@ class ViewerPage(QWidget):
         for lead_name, strip in self._monitor_strips:
             if lead_name in self.leads:
                 idx = self.leads.index(lead_name)
+                strip.v_min = self._v_min
+                strip.v_max = self._v_max
                 strip.set_data(lead_name, self.signal[:, idx], self.fs, 0, self.duration)
                 strip.set_sweep(self._monitor_t / self.duration if self.duration > 0 else 0)
 
@@ -495,7 +541,7 @@ class ViewerPage(QWidget):
         elif idx == 1:
             self.info_panel.hide()
             self._on_tool_mode(self._tool_mode)
-            self.navbar.hide()
+            self.navbar.show()
         elif idx == 2:
             self.info_panel.hide()
             self.caliper_panel.hide()
@@ -542,19 +588,26 @@ class ViewerPage(QWidget):
         self.scrubber.setValue(0)
 
     def _nav_end(self):
-        self.time_pos = self.duration
+        self.time_pos = self._scrubber_max
         self.scrubber.setValue(self.scrubber.maximum())
 
     def _nav_step(self, dt: float):
-        self.time_pos = max(0, min(self.duration, self.time_pos + dt))
+        self.time_pos = max(0, min(self._scrubber_max, self.time_pos + dt))
         self.scrubber.setValue(int(self.time_pos * 100))
 
     def _on_scrubber(self, value: int):
         self.time_pos = value / 100.0
         self._update_time_display()
+        if self._view_mode == 0:
+            self.grid_12.set_signal(self.signal, self.leads, self.fs, self.time_pos,
+                                    self._window_12, self._v_min, self._v_max)
+        elif self._view_mode == 1:
+            self._refresh_single_lead()
 
     def _update_time_display(self):
-        self.time_label.setText(f"{self.time_pos:.2f} s / {self.duration:.2f} s")
+        window = self._window_1 if self._view_mode == 1 else self._window_12
+        t_end = min(self.duration, self.time_pos + window)
+        self.time_label.setText(f"{self.time_pos:.2f} – {t_end:.2f} s / {self.duration:.2f} s")
 
     # ── Monitor ──
     def _start_monitor(self):

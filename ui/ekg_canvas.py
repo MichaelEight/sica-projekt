@@ -52,7 +52,24 @@ class EkgCellCanvas(QWidget):
         self.calipers = []       # list of (t1, t2, color, label)
         self.annotations = []    # list of (t1, t2)
         self._sweep_pos = None   # fraction 0..1 for monitor mode
+        self.v_min = None        # voltage range override (mV)
+        self.v_max = None
+        self.show_zero_line = False
         self.setMinimumSize(80, 40)
+
+    def clear(self):
+        """Reset all data so the cell draws empty."""
+        self.lead_name = ""
+        self.signal = None
+        self.fs = 500
+        self.t_start = 0.0
+        self.t_end = 2.5
+        self.v_min = None
+        self.v_max = None
+        self.calipers = []
+        self.annotations = []
+        self._sweep_pos = None
+        self.update()
 
     def set_data(self, lead_name: str, signal: np.ndarray, fs: int,
                  t_start: float = 0.0, t_end: float = 2.5):
@@ -103,45 +120,65 @@ class EkgCellCanvas(QWidget):
             duration = 2.5
 
         # Minor grid: 0.04s horizontal, adaptive vertical
-        sq_x = w / (duration / 0.04) if duration > 0 else 10
+        px_per_sec = w / duration if duration > 0 else 100
+        sq_x = px_per_sec * 0.04  # 0.04s per minor division
         sq_y = h / 30.0  # ~30 minor divisions vertically
+
+        # Horizontal offset: align grid lines to absolute time
+        time_offset_px = (self.t_start % 0.04) * px_per_sec
 
         # Minor lines
         p.setPen(QPen(QColor(GRID_MINOR), 0.5))
-        x = 0.0
+        x = -time_offset_px
         while x < w:
-            p.drawLine(QPointF(x, 0), QPointF(x, h))
+            if x >= 0:
+                p.drawLine(QPointF(x, 0), QPointF(x, h))
             x += sq_x
         y = 0.0
         while y < h:
             p.drawLine(QPointF(0, y), QPointF(w, y))
             y += sq_y
 
-        # Major lines (every 5)
+        # Major lines (every 5 minor = 0.2s)
+        major_offset_px = (self.t_start % 0.2) * px_per_sec
         p.setPen(QPen(QColor(GRID_MAJOR), 1.0))
-        x = 0.0
+        x = -major_offset_px
         while x < w:
-            p.drawLine(QPointF(x, 0), QPointF(x, h))
+            if x >= 0:
+                p.drawLine(QPointF(x, 0), QPointF(x, h))
             x += sq_x * 5
         y = 0.0
         while y < h:
             p.drawLine(QPointF(0, y), QPointF(w, y))
             y += sq_y * 5
 
-        mid_y = h / 2.0
-        mv_px = h / 3.0  # pixels per mV
+        # Vertical mapping: voltage -> pixel y
+        margin = 0.05 * h  # 5% padding top/bottom
+        if self.v_min is not None and self.v_max is not None:
+            vmin, vmax = self.v_min, self.v_max
+        else:
+            vmin, vmax = -1.5, 1.5
+        v_range = vmax - vmin if vmax != vmin else 3.0
+        mv_px = (h - 2 * margin) / v_range  # pixels per mV
+
+        def v_to_y(v):
+            return margin + (vmax - v) * mv_px
+
+        mid_y = v_to_y(0)
 
         # ── Calibration pulse ──
         sig_start = 0.0
         if self.show_cal:
             cal_w = w * 0.06
+            cal_base_y = v_to_y(0)
+            cal_top_y = v_to_y(1.0)
             p.setPen(QPen(QColor(SIGNAL_COLOR), 1.5))
             path = QPainterPath()
-            path.moveTo(3, mid_y)
-            path.lineTo(5, mid_y)
-            path.lineTo(5, mid_y - mv_px)
-            path.lineTo(5 + cal_w, mid_y - mv_px)
-            path.lineTo(5 + cal_w, mid_y)
+            path.moveTo(3, cal_base_y)
+            path.lineTo(5, cal_base_y)
+            path.lineTo(5, cal_top_y)
+            path.lineTo(5 + cal_w, cal_top_y)
+            path.lineTo(5 + cal_w, cal_base_y)
             p.drawPath(path)
             sig_start = 5 + cal_w + 4
 
@@ -155,9 +192,17 @@ class EkgCellCanvas(QWidget):
                 p.drawLine(QPointF(ax1, 0), QPointF(ax1, h))
                 p.drawLine(QPointF(ax2, 0), QPointF(ax2, h))
 
+        # ── Zero line (drawn under the signal) ──
+        if self.show_zero_line:
+            zero_y = v_to_y(0)
+            if 0 <= zero_y <= h:
+                p.setPen(QPen(QColor("#9ca3af"), 2.0))
+                p.drawLine(QPointF(0, zero_y), QPointF(w, zero_y))
+
         # ── Signal ──
         if self.signal is not None and len(self.signal) > 0:
             n_samples = len(self.signal)
+            total_duration = n_samples / self.fs if self.fs > 0 else duration
             sig_w = w - sig_start
             if sig_w > 0:
                 p.setPen(QPen(QColor(SIGNAL_COLOR), 1.5))
@@ -166,10 +211,10 @@ class EkgCellCanvas(QWidget):
                 for px_i in range(int(sig_w)):
                     frac = px_i / sig_w
                     t = self.t_start + frac * duration
-                    sample_idx = int((t - self.t_start) / duration * n_samples)
+                    sample_idx = int(t * self.fs)
                     sample_idx = max(0, min(sample_idx, n_samples - 1))
                     v = self.signal[sample_idx]
-                    py = mid_y - v * mv_px
+                    py = v_to_y(v)
                     if first:
                         path.moveTo(sig_start + px_i, py)
                         first = False
@@ -226,13 +271,11 @@ class EkgCellCanvas(QWidget):
             duration = self.t_end - self.t_start
             sig_start = 5 + w * 0.06 + 4 if self.show_cal else 0
             sig_w = w - sig_start
-            if sig_w > 0:
+            if sig_w > 0 and duration > 0:
                 frac = (event.position().x() - sig_start) / sig_w
                 t = self.t_start + frac * duration
-                # Approximate voltage at this time
-                n = len(self.signal)
-                idx = int(frac * n)
-                idx = max(0, min(idx, n - 1))
+                idx = int(t * self.fs)
+                idx = max(0, min(idx, len(self.signal) - 1))
                 v = self.signal[idx]
                 self.clicked.emit(t, v)
         super().mousePressEvent(event)
@@ -249,56 +292,98 @@ class TwelveLeadGrid(QWidget):
         self.setStyleSheet("background: #f9fafb;")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(0)
 
         grid_rows = [
             ["I", "aVR", "V1", "V4"],
             ["II", "aVL", "V2", "V5"],
             ["III", "aVF", "V3", "V6"],
         ]
-        for row_leads in grid_rows:
+        for ri, row_leads in enumerate(grid_rows):
             row_layout = QHBoxLayout()
-            row_layout.setSpacing(4)
-            for lead in row_leads:
+            row_layout.setSpacing(0)
+            for ci, lead in enumerate(row_leads):
                 cell = EkgCellCanvas()
-                cell.draw_border = True
+                cell.draw_border = False
+                cell.INSET = 1
                 self.cells[lead] = cell
                 row_layout.addWidget(cell)
+                if ci < len(row_leads) - 1:
+                    vsep = QFrame()
+                    vsep.setFixedWidth(3)
+                    vsep.setStyleSheet("background: #6b7280;")
+                    row_layout.addWidget(vsep)
             layout.addLayout(row_layout, stretch=1)
+            if ri < len(grid_rows) - 1:
+                hsep = QFrame()
+                hsep.setFixedHeight(3)
+                hsep.setStyleSheet("background: #6b7280;")
+                layout.addWidget(hsep)
 
-        # Rhythm strip — separated by more space
-        layout.addSpacing(4)
+        # Rhythm strip — separated visually
+        hsep = QFrame()
+        hsep.setFixedHeight(3)
+        hsep.setStyleSheet(f"background: {ACCENT};")
+        layout.addWidget(hsep)
         self.rhythm = EkgCellCanvas()
-        self.rhythm.draw_border = True
+        self.rhythm.draw_border = False
+        self.rhythm.INSET = 1
         self.rhythm.setFixedHeight(100)
         layout.addWidget(self.rhythm)
 
-    def set_signal(self, signal: np.ndarray, leads: list[str], fs: int):
+    def clear(self):
+        """Clear all cells."""
+        for cell in self.cells.values():
+            cell.clear()
+        self.rhythm.clear()
+
+    def set_signal(self, signal: np.ndarray, leads: list[str], fs: int,
+                   time_pos: float = 0.0, window: float = 2.5,
+                   v_min: float = None, v_max: float = None):
         """Set real or demo signal data into all cells."""
         grid_rows = [
             ["I", "aVR", "V1", "V4"],
             ["II", "aVL", "V2", "V5"],
             ["III", "aVF", "V3", "V6"],
         ]
+        duration = signal.shape[0] / fs
+        t_start = max(0.0, time_pos)
+        t_end = min(duration, t_start + window)
+        if t_end - t_start < window:
+            t_start = max(0.0, t_end - window)
+
+        # Voltage range: use provided or compute from signal
+        if v_min is None or v_max is None:
+            global_min = float(signal.min())
+            global_max = float(signal.max())
+            pad = max((global_max - global_min) * 0.15, 0.2)
+            v_min = global_min - pad
+            v_max = global_max + pad
+
+        # Clear cells for leads not in this file
+        for lead, cell in self.cells.items():
+            if lead not in leads:
+                cell.clear()
+                cell.lead_name = lead  # keep label to show it's empty
+
         for r, row_leads in enumerate(grid_rows):
             for c, lead in enumerate(row_leads):
                 if lead in self.cells and lead in leads:
                     lead_idx = leads.index(lead)
-                    t_start = c * 2.5
-                    t_end = t_start + 2.5
-                    n_start = int(t_start * fs)
-                    n_end = int(t_end * fs)
-                    n_end = min(n_end, signal.shape[0])
-                    if n_start < n_end:
-                        self.cells[lead].set_data(lead, signal[n_start:n_end, lead_idx],
-                                                  fs, t_start, t_end)
+                    self.cells[lead].v_min = v_min
+                    self.cells[lead].v_max = v_max
+                    self.cells[lead].set_data(lead, signal[:, lead_idx],
+                                              fs, t_start, t_end)
 
         # Rhythm strip: lead II, full duration
         if "II" in leads:
             ii_idx = leads.index("II")
-            duration = signal.shape[0] / fs
-            self.rhythm.set_data("II (rytm)", signal[:, ii_idx], fs, 0, duration)
+            self.rhythm.v_min = v_min
+            self.rhythm.v_max = v_max
+            self.rhythm.set_data("II (rytm)", signal[:, ii_idx], fs, t_start, t_end)
+        else:
+            self.rhythm.clear()
 
 
 # ── Single-Lead View ───────────────────────────
@@ -309,6 +394,7 @@ class SingleLeadCanvas(EkgCellCanvas):
         super().__init__(parent)
         self.show_cal = True
         self.show_rulers = True
+        self.show_zero_line = True
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -317,23 +403,56 @@ class SingleLeadCanvas(EkgCellCanvas):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        mid_y = h / 2.0
-        mv_px = h / 3.0
 
-        # Voltage ruler (left)
+        # Use same vertical mapping as parent
+        margin = 0.05 * h
+        if self.v_min is not None and self.v_max is not None:
+            vmin, vmax = self.v_min, self.v_max
+        else:
+            vmin, vmax = -1.5, 1.5
+        v_range = vmax - vmin if vmax != vmin else 3.0
+        mv_px = (h - 2 * margin) / v_range
+
+        def v_to_y(v):
+            return margin + (vmax - v) * mv_px
+
+        # Voltage ruler (left) — generate ticks at 0.5 mV steps
         p.setFont(QFont("Menlo", 9))
         p.setPen(QColor(TEXT_DIM))
-        for mv in [-2.0, -1.5, -1.0, -0.5, 0, 0.5, 1.0, 1.5, 2.0]:
-            y = mid_y - mv * (mv_px * 0.5)
+        step = 0.5
+        mv = math.ceil(vmin / step) * step
+        while mv <= vmax:
+            y = v_to_y(mv)
             if 0 <= y <= h:
                 p.drawText(QPointF(4, y + 4), f"{mv:.1f}")
+            mv += step
+
+        # Min/max markers on left edge
+        if self.signal is not None and len(self.signal) > 0:
+            sig_min = float(self.signal.min())
+            sig_max = float(self.signal.max())
+            p.setPen(QPen(QColor(ACCENT), 2.0))
+            p.setFont(QFont("Menlo", 8, QFont.Bold))
+            for val, label in [(sig_max, f"{sig_max:.2f}"), (sig_min, f"{sig_min:.2f}")]:
+                y = v_to_y(val)
+                if 0 <= y <= h:
+                    # Small triangle marker
+                    tri = QPainterPath()
+                    tri.moveTo(0, y)
+                    tri.lineTo(6, y - 4)
+                    tri.lineTo(6, y + 4)
+                    tri.closeSubpath()
+                    p.setBrush(QColor(ACCENT))
+                    p.drawPath(tri)
+                    p.setBrush(Qt.NoBrush)
 
         # Time ruler (bottom)
         duration = self.t_end - self.t_start
-        for sec in range(int(self.t_start), int(self.t_end) + 1):
-            frac = (sec - self.t_start) / duration if duration > 0 else 0
-            x = 50 + frac * (w - 50)
-            if 0 <= x <= w:
-                p.drawText(QPointF(x - 5, h - 4), f"{sec}s")
+        if duration > 0:
+            px_per_sec = w / duration
+            for sec in range(int(self.t_start), int(self.t_end) + 2):
+                x = (sec - self.t_start) * px_per_sec
+                if 0 <= x <= w:
+                    p.drawText(QPointF(x - 5, h - 4), f"{sec}s")
 
         p.end()
