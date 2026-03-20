@@ -83,6 +83,15 @@ for folder_name, data_array in folders_and_arrays:
                 shutil.copy2(src, dst)
 
 print("Filtering and saving complete based on highest probability.")
+print("Healthy", len(healthy))
+print("Front heart attack", len(front_heart_attack))
+print("Side heart attack", len(side_heart_attack))
+print("Bottom heart attack", len(bottom_heart_attack))
+print("Back heart attack", len(back_heart_attack))
+print("Complete right conduction disorder", len(complete_right_conduction_disorder))
+print("Incomplete right conduction disorder", len(incomplete_right_conduction_disorder))
+print("Complete left conduction disorder", len(complete_left_conduction_disorder))
+print()
 
 # divide on training, validate and test data
 # categories
@@ -113,11 +122,21 @@ train_df, temp_df = train_test_split(
     df_all, test_size=0.3, random_state=42, stratify=df_all['target_label']
 )
 
-# The rest - validation (20%) & test (10%)
+# The rest - validation (10%) & test (20%)
 # 0.33 from 30% is about 10% of all
-val_df, test_df = train_test_split(
+test_df, val_df  = train_test_split(
     temp_df, test_size=0.3333, random_state=42, stratify=temp_df['target_label']
 )
+
+# Check number of data in specific category
+print("--- TRAINING ---")
+print(train_df['target_label'].value_counts())
+
+print("\n--- VALIDATION ---")
+print(val_df['target_label'].value_counts())
+
+print("\n--- TEST ---")
+print(test_df['target_label'].value_counts())
 
 
 # Saving files to folder
