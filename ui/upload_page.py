@@ -7,8 +7,7 @@ from PySide6.QtGui import QFont, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QPushButton, QFileDialog, QFrame)
 
-from ui.theme import (ACCENT, BG, WHITE, BORDER, BORDER_LIGHT, TEXT, TEXT_MUTED,
-                       TEXT_DIM, TOPBAR)
+import ui.theme as T
 
 RECENT_FILE = os.path.expanduser("~/.ekg_assistant_recent.json")
 
@@ -46,7 +45,7 @@ class UploadPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setStyleSheet(f"background: {BG};")
+        self.setStyleSheet(f"background: {T.BG};")
         self._build_ui()
 
     def _build_ui(self):
@@ -57,7 +56,7 @@ class UploadPage(QWidget):
         # ── Top bar ──
         topbar = QWidget()
         topbar.setFixedHeight(48)
-        topbar.setStyleSheet(f"background: {TOPBAR};")
+        topbar.setStyleSheet(f"background: {T.TOPBAR};")
         tb_layout = QHBoxLayout(topbar)
         tb_layout.setContentsMargins(20, 0, 20, 0)
         logo = QLabel()
@@ -71,7 +70,7 @@ class UploadPage(QWidget):
 
         # ── Main content ──
         center = QWidget()
-        center.setStyleSheet(f"background: {BG};")
+        center.setStyleSheet(f"background: {T.BG};")
         main = QVBoxLayout(center)
         main.setAlignment(Qt.AlignCenter)
         main.setSpacing(24)
@@ -83,7 +82,7 @@ class UploadPage(QWidget):
         main.addWidget(title)
 
         subtitle = QLabel("Przeci\u0105gnij plik WFDB lub wybierz z dysku, aby rozpocz\u0105\u0107 analiz\u0119")
-        subtitle.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 14px;")
+        subtitle.setStyleSheet(f"color: {T.TEXT_MUTED}; font-size: 14px;")
         subtitle.setAlignment(Qt.AlignCenter)
         main.addWidget(subtitle)
 
@@ -92,7 +91,7 @@ class UploadPage(QWidget):
         self.dropzone.setFixedSize(520, 200)
         self.dropzone.setStyleSheet(f"""
             QFrame {{
-                background: {WHITE};
+                background: {T.WHITE};
                 border: 2px dashed #c5cad3;
                 border-radius: 12px;
             }}
@@ -103,20 +102,20 @@ class UploadPage(QWidget):
 
         icon = QLabel("\u2b06")
         icon.setFont(QFont(".AppleSystemUIFont", 36))
-        icon.setStyleSheet(f"color: {ACCENT}; border: none;")
+        icon.setStyleSheet(f"color: {T.ACCENT}; border: none;")
         icon.setAlignment(Qt.AlignCenter)
         dz_layout.addWidget(icon)
 
         drop_text = QLabel()
         drop_text.setTextFormat(Qt.RichText)
-        drop_text.setText(f'Przeci\u0105gnij plik tutaj lub <a style="color:{ACCENT};" href="#">wybierz z dysku</a>')
+        drop_text.setText(f'Przeci\u0105gnij plik tutaj lub <a style="color:{T.ACCENT};" href="#">wybierz z dysku</a>')
         drop_text.setStyleSheet("font-size: 14px; font-weight: 500; border: none;")
         drop_text.setAlignment(Qt.AlignCenter)
         drop_text.linkActivated.connect(self._browse)
         dz_layout.addWidget(drop_text)
 
         hint = QLabel("Obs\u0142ugiwane formaty WFDB")
-        hint.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px; border: none;")
+        hint.setStyleSheet(f"color: {T.TEXT_DIM}; font-size: 12px; border: none;")
         hint.setAlignment(Qt.AlignCenter)
         dz_layout.addWidget(hint)
 
@@ -125,7 +124,7 @@ class UploadPage(QWidget):
         for ext in [".dat", ".hea"]:
             tag = QLabel(ext)
             tag.setStyleSheet(f"""
-                background: #f0f1f3; color: {TEXT_MUTED};
+                background: #f0f1f3; color: {T.TEXT_MUTED};
                 font-family: Menlo; font-size: 12px;
                 padding: 4px 12px; border-radius: 4px; border: none;
             """)
@@ -142,13 +141,13 @@ class UploadPage(QWidget):
         rc_layout.setSpacing(8)
 
         rc_header = QLabel("OSTATNIE PLIKI")
-        rc_header.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {TEXT_DIM}; letter-spacing: 0.5px;")
+        rc_header.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {T.TEXT_DIM}; letter-spacing: 0.5px;")
         rc_layout.addWidget(rc_header)
 
         self.recent_list = QVBoxLayout()
         self.recent_list.setSpacing(0)
         self.recent_frame = QFrame()
-        self.recent_frame.setStyleSheet(f"background: {WHITE}; border: 1px solid {BORDER}; border-radius: 8px;")
+        self.recent_frame.setStyleSheet(f"background: {T.WHITE}; border: 1px solid {T.BORDER}; border-radius: 8px;")
         self.recent_frame.setLayout(self.recent_list)
         rc_layout.addWidget(self.recent_frame)
         main.addWidget(recent_container, alignment=Qt.AlignCenter)
@@ -158,11 +157,11 @@ class UploadPage(QWidget):
         # ── Status bar ──
         statusbar = QWidget()
         statusbar.setFixedHeight(32)
-        statusbar.setStyleSheet(f"background: {WHITE}; border-top: 1px solid {BORDER};")
+        statusbar.setStyleSheet(f"background: {T.WHITE}; border-top: 1px solid {T.BORDER};")
         sb_layout = QHBoxLayout(statusbar)
         sb_layout.setContentsMargins(0, 0, 0, 0)
         sb_label = QLabel("Cyfrowy asystent wspomagaj\u0105cy prac\u0119 specjalist\u00f3w z zakresu elektrofizjologii")
-        sb_label.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px;")
+        sb_label.setStyleSheet(f"color: {T.TEXT_DIM}; font-size: 12px;")
         sb_label.setAlignment(Qt.AlignCenter)
         sb_layout.addWidget(sb_label)
         outer.addWidget(statusbar)
@@ -179,7 +178,7 @@ class UploadPage(QWidget):
         entries = load_recent()
         if not entries:
             lbl = QLabel("  Brak ostatnich plik\u00f3w")
-            lbl.setStyleSheet(f"color: {TEXT_DIM}; font-size: 13px; padding: 12px; border: none;")
+            lbl.setStyleSheet(f"color: {T.TEXT_DIM}; font-size: 13px; padding: 12px; border: none;")
             self.recent_list.addWidget(lbl)
             return
 
@@ -190,7 +189,7 @@ class UploadPage(QWidget):
     def _make_recent_row(self, entry: dict, is_last: bool = False) -> QWidget:
         row = QWidget()
         row.setCursor(Qt.PointingHandCursor)
-        border_style = "" if is_last else f"border-bottom: 1px solid {BORDER_LIGHT};"
+        border_style = "" if is_last else f"border-bottom: 1px solid {T.BORDER_LIGHT};"
         row.setStyleSheet(f"padding: 8px 12px; {border_style}")
         layout = QHBoxLayout(row)
         layout.setContentsMargins(12, 8, 12, 8)
@@ -202,7 +201,7 @@ class UploadPage(QWidget):
         icon.setAlignment(Qt.AlignCenter)
         icon.setStyleSheet(f"""
             background: #eef4ff; border-radius: 6px;
-            color: {ACCENT}; font-size: 14px; font-weight: 700; border: none;
+            color: {T.ACCENT}; font-size: 14px; font-weight: 700; border: none;
         """)
         layout.addWidget(icon)
 
@@ -213,12 +212,12 @@ class UploadPage(QWidget):
         name.setStyleSheet("font-size: 13px; font-weight: 600; font-family: Menlo; border: none;")
         info.addWidget(name)
         meta = QLabel(entry.get("info", ""))
-        meta.setStyleSheet(f"font-size: 11px; color: {TEXT_DIM}; border: none;")
+        meta.setStyleSheet(f"font-size: 11px; color: {T.TEXT_DIM}; border: none;")
         info.addWidget(meta)
         layout.addLayout(info, stretch=1)
 
         date = QLabel(entry.get("date", ""))
-        date.setStyleSheet(f"font-size: 12px; color: {TEXT_DIM}; border: none;")
+        date.setStyleSheet(f"font-size: 12px; color: {T.TEXT_DIM}; border: none;")
         layout.addWidget(date)
 
         path = entry.get("path", "")

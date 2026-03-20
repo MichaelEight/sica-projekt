@@ -5,7 +5,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QMessageBox
 
-from ui.theme import STYLESHEET, STANDARD_LEADS, BG
+import ui.theme as T
+from ui.theme import STANDARD_LEADS
 from ui.upload_page import UploadPage, add_recent
 from ui.viewer_page import ViewerPage
 from ui.report_page import ReportPage
@@ -42,7 +43,7 @@ class MainWindow(QMainWindow):
         self.resize(1440, 900)
 
         # Apply theme
-        self.setStyleSheet(STYLESHEET)
+        self.setStyleSheet(T.STYLESHEET)
 
         # Central stacked widget
         self.stack = QStackedWidget()
@@ -62,6 +63,7 @@ class MainWindow(QMainWindow):
         self.upload_page.file_selected.connect(self._load_file)
         self.viewer_page.open_file.connect(self._go_upload)
         self.viewer_page.show_report.connect(self._go_report)
+        self.viewer_page.toggle_dark.connect(self._toggle_dark_mode)
         self.report_page.go_back.connect(self._go_viewer)
 
         # Show upload page
@@ -157,4 +159,15 @@ class MainWindow(QMainWindow):
 
     def _go_report(self):
         self.stack.setCurrentIndex(2)
+
+    def _toggle_dark_mode(self):
+        from ui.theme import is_dark_mode, set_dark_mode
+        set_dark_mode(not is_dark_mode())
+        # Re-apply global stylesheet
+        self.setStyleSheet(T.STYLESHEET)
+        # Re-apply all component styles
+        self.viewer_page.apply_theme()
+        # Refresh views to pick up new colors
+        if self._signal is not None:
+            self.viewer_page._refresh_views()
 
