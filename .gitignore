@@ -1,4 +1,5 @@
-data/ptb-xl*/
+data/ptb-xl/**.*
+!data/ptb-xl/.gitkeep
 models/*.pt
 models/*.pth
 models/*.npy
@@ -9,3 +10,5 @@ __pycache__/
 dist/
 build/
 .env
+*.dat
+*.hea
