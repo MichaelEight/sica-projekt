@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python data/generate_demo.py)"
+      "Bash(python data/generate_demo.py)",
+      "Bash(python -c \":*)",
+      "Bash(python -c \"from ui.theme import *; from ui.ekg_canvas import *; from ui.panels import *; from ui.viewer_page import *; from ui.upload_page import *; from ui.report_page import *; from ui.main_window import *; print\\(''All imports OK''\\)\")",
+      "Bash(python -c \"from ui.main_window import MainWindow; print\\(''OK''\\)\")",
+      "Bash(python -c \"from ui.main_window import MainWindow; print\\(''All OK''\\)\")"
     ]
   }
 }

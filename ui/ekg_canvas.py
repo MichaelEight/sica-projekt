@@ -5,8 +5,8 @@ from PySide6.QtCore import Qt, Signal, QRectF, QPointF
 from PySide6.QtGui import QPainter, QPen, QColor, QFont, QPainterPath, QBrush
 from PySide6.QtWidgets import QWidget
 
-from ui.theme import (GRID_MINOR, GRID_MAJOR, SIGNAL_COLOR, ACCENT, WHITE,
-                       LEAD_SEEDS, LEAD_AMPS, TEXT, TEXT_DIM, BORDER)
+import ui.theme as T
+from ui.theme import LEAD_SEEDS, LEAD_AMPS
 
 
 # ── Synthetic EKG generator ────────────────────
@@ -52,6 +52,9 @@ class EkgCellCanvas(QWidget):
         self.calipers = []       # list of (t1, t2, color, label)
         self.annotations = []    # list of (t1, t2)
         self._sweep_pos = None   # fraction 0..1 for monitor mode
+        self._old_signal = None  # previous page signal data (1-D)
+        self._old_t_start = 0.0
+        self._old_t_end = 2.5
         self.v_min = None        # voltage range override (mV)
         self.v_max = None
         self.show_zero_line = False
@@ -69,6 +72,9 @@ class EkgCellCanvas(QWidget):
         self.calipers = []
         self.annotations = []
         self._sweep_pos = None
+        self._old_signal = None
+        self._old_t_start = 0.0
+        self._old_t_end = 2.5
         self.update()
 
     def set_data(self, lead_name: str, signal: np.ndarray, fs: int,
@@ -97,11 +103,11 @@ class EkgCellCanvas(QWidget):
         ins = self.INSET
 
         # ── Background ──
-        p.fillRect(0, 0, full_w, full_h, QColor(WHITE))
+        p.fillRect(0, 0, full_w, full_h, QColor(T.WHITE))
 
         # ── Border (drawn by this widget, not stylesheet) ──
         if self.draw_border:
-            p.setPen(QPen(QColor(BORDER), 1.5))
+            p.setPen(QPen(QColor(T.BORDER), 1.5))
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(QRectF(0.75, 0.75, full_w - 1.5, full_h - 1.5), 4, 4)
 
@@ -128,7 +134,7 @@ class EkgCellCanvas(QWidget):
         time_offset_px = (self.t_start % 0.04) * px_per_sec
 
         # Minor lines
-        p.setPen(QPen(QColor(GRID_MINOR), 0.5))
+        p.setPen(QPen(QColor(T.GRID_MINOR), 0.5))
         x = -time_offset_px
         while x < w:
             if x >= 0:
@@ -141,7 +147,7 @@ class EkgCellCanvas(QWidget):
 
         # Major lines (every 5 minor = 0.2s)
         major_offset_px = (self.t_start % 0.2) * px_per_sec
-        p.setPen(QPen(QColor(GRID_MAJOR), 1.0))
+        p.setPen(QPen(QColor(T.GRID_MAJOR), 1.0))
         x = -major_offset_px
         while x < w:
             if x >= 0:
@@ -172,7 +178,7 @@ class EkgCellCanvas(QWidget):
             cal_w = w * 0.06
             cal_base_y = v_to_y(0)
             cal_top_y = v_to_y(1.0)
-            p.setPen(QPen(QColor(SIGNAL_COLOR), 1.5))
+            p.setPen(QPen(QColor(T.SIGNAL_COLOR), 1.5))
             path = QPainterPath()
             path.moveTo(3, cal_base_y)
             path.lineTo(5, cal_base_y)
@@ -188,7 +194,7 @@ class EkgCellCanvas(QWidget):
                 ax1 = sig_start + ((a_t1 - self.t_start) / duration) * (w - sig_start)
                 ax2 = sig_start + ((a_t2 - self.t_start) / duration) * (w - sig_start)
                 p.fillRect(QRectF(ax1, 0, ax2 - ax1, h), QColor(74, 158, 255, 30))
-                p.setPen(QPen(QColor(ACCENT), 1.5, Qt.DashLine))
+                p.setPen(QPen(QColor(T.ACCENT), 1.5, Qt.DashLine))
                 p.drawLine(QPointF(ax1, 0), QPointF(ax1, h))
                 p.drawLine(QPointF(ax2, 0), QPointF(ax2, h))
 
@@ -202,13 +208,18 @@ class EkgCellCanvas(QWidget):
         # ── Signal ──
         if self.signal is not None and len(self.signal) > 0:
             n_samples = len(self.signal)
-            total_duration = n_samples / self.fs if self.fs > 0 else duration
             sig_w = w - sig_start
             if sig_w > 0:
-                p.setPen(QPen(QColor(SIGNAL_COLOR), 1.5))
+                # In monitor mode, only draw up to sweep position
+                if self._sweep_pos is not None:
+                    draw_end = int(sig_w * self._sweep_pos)
+                else:
+                    draw_end = int(sig_w)
+
+                p.setPen(QPen(QColor(T.SIGNAL_COLOR), 1.5))
                 path = QPainterPath()
                 first = True
-                for px_i in range(int(sig_w)):
+                for px_i in range(draw_end):
                     frac = px_i / sig_w
                     t = self.t_start + frac * duration
                     sample_idx = int(t * self.fs)
@@ -244,23 +255,52 @@ class EkgCellCanvas(QWidget):
                 fm = p.fontMetrics()
                 lw = fm.horizontalAdvance(label)
                 lx = (x1 + x2) / 2 - lw / 2
-                p.fillRect(QRectF(lx - 4, y_off - 2, lw + 8, 18), QColor(WHITE))
+                p.fillRect(QRectF(lx - 4, y_off - 2, lw + 8, 18), QColor(T.WHITE))
                 p.setPen(QColor(color))
                 p.drawText(QPointF(lx, y_off + 12), label)
 
-        # ── Sweep cursor (monitor mode) ──
+        # ── Sweep cursor + old data (monitor mode) ──
         if self._sweep_pos is not None:
-            sx = w * self._sweep_pos
-            p.setPen(QPen(QColor(ACCENT), 2))
+            sx = sig_start + (w - sig_start) * self._sweep_pos
+
+            # Area after sweep: show old signal (faded) or blank
+            if self._old_signal is not None and len(self._old_signal) > 0:
+                old_n = len(self._old_signal)
+                old_dur = self._old_t_end - self._old_t_start
+                if old_dur > 0 and (w - sig_start) > 0:
+                    # Draw old signal after sweep (faded)
+                    p.setPen(QPen(QColor(T.SIGNAL_COLOR).lighter(170), 1.0))
+                    path_old = QPainterPath()
+                    first_old = True
+                    gap_end = int(sx - sig_start) + 10
+                    for px_i in range(gap_end, int(w - sig_start)):
+                        frac = px_i / (w - sig_start)
+                        t = self._old_t_start + frac * old_dur
+                        si = int(t * self.fs)
+                        si = max(0, min(si, old_n - 1))
+                        py = v_to_y(self._old_signal[si])
+                        if first_old:
+                            path_old.moveTo(sig_start + px_i, py)
+                            first_old = False
+                        else:
+                            path_old.lineTo(sig_start + px_i, py)
+                    p.drawPath(path_old)
+
+            # Gap around cursor (blank zone)
+            gap = 10
+            p.fillRect(QRectF(sx - gap, 0, gap * 2 + 2, h), QColor(T.WHITE))
+
+            # Sweep cursor line
+            p.setPen(QPen(QColor(T.ACCENT), 2))
             p.drawLine(QPointF(sx, 0), QPointF(sx, h))
-            p.fillRect(QRectF(sx + 2, 0, w - sx - 2, h), QColor(249, 250, 251, 180))
 
         # ── Lead label ──
         if self.show_label and self.lead_name:
             p.setFont(QFont("Menlo", 11, QFont.Bold))
-            p.setPen(QColor(TEXT))
-            p.fillRect(QRectF(4, 2, p.fontMetrics().horizontalAdvance(self.lead_name) + 8, 18),
-                       QColor(255, 255, 255, 220))
+            p.setPen(QColor(T.TEXT))
+            bg = QColor(T.WHITE)
+            bg.setAlpha(220)
+            p.fillRect(QRectF(4, 2, p.fontMetrics().horizontalAdvance(self.lead_name) + 8, 18), bg)
             p.drawText(QPointF(8, 16), self.lead_name)
 
         p.end()
@@ -289,7 +329,7 @@ class TwelveLeadGrid(QWidget):
         super().__init__(parent)
         from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QFrame
         self.cells: dict[str, EkgCellCanvas] = {}
-        self.setStyleSheet("background: #f9fafb;")
+        self.setStyleSheet(f"background: {T.BG_SECONDARY};")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -300,6 +340,7 @@ class TwelveLeadGrid(QWidget):
             ["II", "aVL", "V2", "V5"],
             ["III", "aVF", "V3", "V6"],
         ]
+        self._separators = []
         for ri, row_leads in enumerate(grid_rows):
             row_layout = QHBoxLayout()
             row_layout.setSpacing(0)
@@ -312,25 +353,36 @@ class TwelveLeadGrid(QWidget):
                 if ci < len(row_leads) - 1:
                     vsep = QFrame()
                     vsep.setFixedWidth(3)
-                    vsep.setStyleSheet("background: #6b7280;")
+                    vsep.setStyleSheet(f"background: {T.SEPARATOR};")
+                    self._separators.append(vsep)
                     row_layout.addWidget(vsep)
             layout.addLayout(row_layout, stretch=1)
             if ri < len(grid_rows) - 1:
                 hsep = QFrame()
                 hsep.setFixedHeight(3)
-                hsep.setStyleSheet("background: #6b7280;")
+                hsep.setStyleSheet(f"background: {T.SEPARATOR};")
+                self._separators.append(hsep)
                 layout.addWidget(hsep)
 
         # Rhythm strip — separated visually
-        hsep = QFrame()
-        hsep.setFixedHeight(3)
-        hsep.setStyleSheet(f"background: {ACCENT};")
-        layout.addWidget(hsep)
+        self._rhythm_sep = QFrame()
+        self._rhythm_sep.setFixedHeight(3)
+        self._rhythm_sep.setStyleSheet(f"background: {T.ACCENT};")
+        layout.addWidget(self._rhythm_sep)
         self.rhythm = EkgCellCanvas()
         self.rhythm.draw_border = False
         self.rhythm.INSET = 1
         self.rhythm.setFixedHeight(100)
         layout.addWidget(self.rhythm)
+
+    def apply_theme(self):
+        self.setStyleSheet(f"background: {T.BG_SECONDARY};")
+        for sep in self._separators:
+            sep.setStyleSheet(f"background: {T.SEPARATOR};")
+        self._rhythm_sep.setStyleSheet(f"background: {T.ACCENT};")
+        for cell in self.cells.values():
+            cell.update()
+        self.rhythm.update()
 
     def clear(self):
         """Clear all cells."""
@@ -418,7 +470,7 @@ class SingleLeadCanvas(EkgCellCanvas):
 
         # Voltage ruler (left) — generate ticks at 0.5 mV steps
         p.setFont(QFont("Menlo", 9))
-        p.setPen(QColor(TEXT_DIM))
+        p.setPen(QColor(T.TEXT_DIM))
         step = 0.5
         mv = math.ceil(vmin / step) * step
         while mv <= vmax:
@@ -431,7 +483,7 @@ class SingleLeadCanvas(EkgCellCanvas):
         if self.signal is not None and len(self.signal) > 0:
             sig_min = float(self.signal.min())
             sig_max = float(self.signal.max())
-            p.setPen(QPen(QColor(ACCENT), 2.0))
+            p.setPen(QPen(QColor(T.ACCENT), 2.0))
             p.setFont(QFont("Menlo", 8, QFont.Bold))
             for val, label in [(sig_max, f"{sig_max:.2f}"), (sig_min, f"{sig_min:.2f}")]:
                 y = v_to_y(val)
@@ -442,7 +494,7 @@ class SingleLeadCanvas(EkgCellCanvas):
                     tri.lineTo(6, y - 4)
                     tri.lineTo(6, y + 4)
                     tri.closeSubpath()
-                    p.setBrush(QColor(ACCENT))
+                    p.setBrush(QColor(T.ACCENT))
                     p.drawPath(tri)
                     p.setBrush(Qt.NoBrush)
 

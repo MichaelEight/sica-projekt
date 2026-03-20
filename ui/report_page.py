@@ -7,10 +7,8 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QFileDialog)
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 
-from ui.theme import (TOPBAR, ACCENT, BTN_DARK, WHITE, BORDER, BORDER_LIGHT,
-                       TEXT, TEXT_MUTED, TEXT_DIM, GREEN, AMBER_BG, AMBER_BORDER,
-                       AMBER_TEXT, AMBER_SUB, GRID_MINOR, GRID_MAJOR, SIGNAL_COLOR,
-                       LEAD_SEEDS, LEAD_AMPS)
+import ui.theme as T
+from ui.theme import LEAD_SEEDS, LEAD_AMPS
 from ui.ekg_canvas import synth_ekg
 
 
@@ -28,7 +26,7 @@ class EkgPreviewWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         w, h = self.width(), self.height()
-        p.fillRect(0, 0, w, h, QColor(WHITE))
+        p.fillRect(0, 0, w, h, QColor(T.WHITE))
 
         grid = [["I", "aVR", "V1", "V4"], ["II", "aVL", "V2", "V5"],
                 ["III", "aVF", "V3", "V6"]]
@@ -38,12 +36,12 @@ class EkgPreviewWidget(QWidget):
         # Grid
         sq_x = col_w / 60
         sq_y = row_h / 15
-        p.setPen(QPen(QColor(GRID_MINOR), 0.3))
+        p.setPen(QPen(QColor(T.GRID_MINOR), 0.3))
         for x in np.arange(0, w, sq_x):
             p.drawLine(int(x), 0, int(x), h)
         for y in np.arange(0, h, sq_y):
             p.drawLine(0, int(y), w, int(y))
-        p.setPen(QPen(QColor(GRID_MAJOR), 0.6))
+        p.setPen(QPen(QColor(T.GRID_MAJOR), 0.6))
         for x in np.arange(0, w, sq_x * 5):
             p.drawLine(int(x), 0, int(x), h)
         for y in np.arange(0, h, sq_y * 5):
@@ -57,7 +55,7 @@ class EkgPreviewWidget(QWidget):
             p.drawLine(0, int(r * row_h), w, int(r * row_h))
 
         # Signal traces
-        p.setPen(QPen(QColor(SIGNAL_COLOR), 1.2))
+        p.setPen(QPen(QColor(T.SIGNAL_COLOR), 1.2))
         for r_i, row_leads in enumerate(grid):
             for c_i, lead in enumerate(row_leads):
                 x_off = c_i * col_w
@@ -98,10 +96,10 @@ class EkgPreviewWidget(QWidget):
                     p.drawPath(path)
 
                 # Lead label
-                p.setPen(QColor(TEXT))
+                p.setPen(QColor(T.TEXT))
                 p.setFont(QFont("Menlo", 8, QFont.Bold))
                 p.drawText(int(x_off + 4), int(r_i * row_h + 14), lead)
-                p.setPen(QPen(QColor(SIGNAL_COLOR), 1.2))
+                p.setPen(QPen(QColor(T.SIGNAL_COLOR), 1.2))
 
         # Rhythm strip (row 4 = II)
         y_mid = 3 * row_h + row_h / 2
@@ -131,7 +129,7 @@ class EkgPreviewWidget(QWidget):
                     path.lineTo(px_i, py)
             p.drawPath(path)
 
-        p.setPen(QColor(TEXT))
+        p.setPen(QColor(T.TEXT))
         p.setFont(QFont("Menlo", 8, QFont.Bold))
         p.drawText(4, int(3 * row_h + 14), "II")
         p.end()
@@ -157,7 +155,7 @@ class ReportPage(QWidget):
         # ── Top bar ──
         topbar = QWidget()
         topbar.setFixedHeight(48)
-        topbar.setStyleSheet(f"background: {TOPBAR};")
+        topbar.setStyleSheet(f"background: {T.TOPBAR};")
         tb = QHBoxLayout(topbar)
         tb.setContentsMargins(14, 0, 14, 0)
         tb.setSpacing(8)
@@ -171,11 +169,11 @@ class ReportPage(QWidget):
 
         sep = QFrame()
         sep.setFixedSize(1, 24)
-        sep.setStyleSheet("background: #444;")
+        sep.setStyleSheet(f"background: {T.SEPARATOR};")
         tb.addWidget(sep)
 
         self.file_info = QLabel("00888_lr.dat")
-        self.file_info.setStyleSheet("font-size:12px; color:#ccc; font-family:Menlo;")
+        self.file_info.setStyleSheet(f"font-size:12px; color:{T.BTN_TEXT}; font-family:Menlo;")
         tb.addWidget(self.file_info)
         tb.addStretch()
 
@@ -188,11 +186,11 @@ class ReportPage(QWidget):
 
         sep2 = QFrame()
         sep2.setFixedSize(1, 24)
-        sep2.setStyleSheet("background: #444;")
+        sep2.setStyleSheet(f"background: {T.SEPARATOR};")
         tb.addWidget(sep2)
 
         btn_back = QPushButton("Powr\u00f3t do widoku")
-        btn_back.setStyleSheet(f"background:{BTN_DARK};color:#ccc;font-size:12px;padding:6px 14px;border-radius:5px;border:none;")
+        btn_back.setStyleSheet(f"background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;border-radius:5px;border:none;")
         btn_back.setCursor(Qt.PointingHandCursor)
         btn_back.clicked.connect(self.go_back.emit)
         tb.addWidget(btn_back)
@@ -201,14 +199,14 @@ class ReportPage(QWidget):
         # ── Content (scrollable report) ──
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(f"background: {WHITE}; border: none;")
+        scroll.setStyleSheet(f"background: {T.WHITE}; border: none;")
         scroll.setAlignment(Qt.AlignCenter)
 
         self.report = QWidget()
         self.report.setFixedWidth(780)
         self.report.setStyleSheet(f"""
             QWidget {{
-                background: {WHITE}; border: 1px solid {BORDER};
+                background: {T.WHITE}; border: 1px solid {T.BORDER};
                 border-radius: 8px;
             }}
         """)
@@ -223,13 +221,13 @@ class ReportPage(QWidget):
         r_layout.addWidget(title)
 
         date = QLabel("Wygenerowano: 15.03.2026, 22:15 | Plik: 00888_lr.dat")
-        date.setStyleSheet(f"font-size: 12px; color: {TEXT_MUTED};")
+        date.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED};")
         date.setAlignment(Qt.AlignCenter)
         r_layout.addWidget(date)
 
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet(f"background: {TEXT}; border: none; max-height: 2px;")
+        line.setStyleSheet(f"background: {T.TEXT}; border: none; max-height: 2px;")
         r_layout.addWidget(line)
 
         # Patient info grid
@@ -245,7 +243,7 @@ class ReportPage(QWidget):
         for row_i, (l1, v1, l2, v2) in enumerate(patient_data):
             for col_i, (label, value) in enumerate([(l1, v1), (l2, v2)]):
                 lbl = QLabel(label)
-                lbl.setStyleSheet(f"font-size: 12px; color: {TEXT_MUTED}; min-width: 110px;")
+                lbl.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED}; min-width: 110px;")
                 val = QLabel(value)
                 val.setStyleSheet("font-size: 13px; font-weight: 600; font-family: Menlo;")
                 pg.addWidget(lbl, row_i, col_i * 2)
@@ -254,7 +252,7 @@ class ReportPage(QWidget):
 
         sep_line = QFrame()
         sep_line.setFrameShape(QFrame.HLine)
-        sep_line.setStyleSheet(f"background: {BORDER}; border: none; max-height: 1px;")
+        sep_line.setStyleSheet(f"background: {T.BORDER}; border: none; max-height: 1px;")
         r_layout.addWidget(sep_line)
 
         # EKG preview
@@ -263,11 +261,11 @@ class ReportPage(QWidget):
         r_layout.addWidget(sec_ecg)
 
         self.ecg_preview = EkgPreviewWidget()
-        self.ecg_preview.setStyleSheet(f"border: 1px solid {BORDER}; border-radius: 4px;")
+        self.ecg_preview.setStyleSheet(f"border: 1px solid {T.BORDER}; border-radius: 4px;")
         r_layout.addWidget(self.ecg_preview)
 
         ecg_meta = QLabel("25 mm/s | 10 mm/mV | 0.05-150 Hz")
-        ecg_meta.setStyleSheet(f"font-size: 11px; color: {TEXT_MUTED}; font-family: Menlo;")
+        ecg_meta.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED}; font-family: Menlo;")
         r_layout.addWidget(ecg_meta)
 
         # Measurements table
@@ -286,9 +284,9 @@ class ReportPage(QWidget):
         for text, w_pct in [("Parametr", 150), ("Warto\u015b\u0107", 100), ("Norma", 130), ("Status", 80)]:
             lbl = QLabel(text)
             lbl.setFixedWidth(w_pct)
-            lbl.setStyleSheet(f"font-size: 12px; color: {TEXT_MUTED}; font-weight: 500;")
+            lbl.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED}; font-weight: 500;")
             hr_layout.addWidget(lbl)
-        header_row.setStyleSheet(f"border-bottom: 1px solid {BORDER};")
+        header_row.setStyleSheet(f"border-bottom: 1px solid {T.BORDER};")
         t_layout.addWidget(header_row)
 
         measurements = [
@@ -313,10 +311,10 @@ class ReportPage(QWidget):
                 if is_mono:
                     style += " font-family: Menlo;"
                 if is_green:
-                    style += f" color: {GREEN}; font-weight: 600;"
+                    style += f" color: {T.GREEN}; font-weight: 600;"
                 lbl.setStyleSheet(style)
                 rl.addWidget(lbl)
-            row.setStyleSheet(f"border-bottom: 1px solid {BORDER_LIGHT};")
+            row.setStyleSheet(f"border-bottom: 1px solid {T.BORDER_LIGHT};")
             t_layout.addWidget(row)
         r_layout.addWidget(table)
 
@@ -328,21 +326,21 @@ class ReportPage(QWidget):
         ai_box = QFrame()
         ai_box.setStyleSheet(f"""
             QFrame {{
-                background: {AMBER_BG}; border: 1px solid {AMBER_BORDER};
+                background: {T.AMBER_BG}; border: 1px solid {T.AMBER_BORDER};
                 border-radius: 8px; padding: 12px;
             }}
         """)
         ai_layout = QVBoxLayout(ai_box)
         ai_layout.setContentsMargins(12, 12, 12, 12)
         ai_diag = QLabel("Zawa\u0142 mi\u0119\u015bnia sercowego (MI) \u2014 87.2%")
-        ai_diag.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {AMBER_TEXT};")
+        ai_diag.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {T.AMBER_TEXT};")
         ai_layout.addWidget(ai_diag)
         ai_conf = QLabel("NORM: 5.8% | ISC_: 3.1% | NST_: 1.9% | LBBB: 0.8% | RBBB: 0.5%")
-        ai_conf.setStyleSheet(f"font-size: 12px; color: {AMBER_SUB};")
+        ai_conf.setStyleSheet(f"font-size: 12px; color: {T.AMBER_SUB};")
         ai_conf.setWordWrap(True)
         ai_layout.addWidget(ai_conf)
         ai_model = QLabel("Model: Inception1D | Czas: 1.2 s")
-        ai_model.setStyleSheet(f"font-size: 11px; color: {TEXT_MUTED};")
+        ai_model.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
         ai_layout.addWidget(ai_model)
         r_layout.addWidget(ai_box)
 
@@ -356,14 +354,14 @@ class ReportPage(QWidget):
             ("V1: 3.10 \u2014 3.60 s | Do weryfikacji", "Szerokie S, mo\u017cliwe RBBB"),
         ]:
             item = QWidget()
-            item.setStyleSheet(f"border-bottom: 1px solid {BORDER_LIGHT};")
+            item.setStyleSheet(f"border-bottom: 1px solid {T.BORDER_LIGHT};")
             il = QVBoxLayout(item)
             il.setContentsMargins(0, 5, 0, 5)
             meta_lbl = QLabel(meta)
-            meta_lbl.setStyleSheet(f"font-family: Menlo; color: {TEXT_MUTED}; font-size: 12px;")
+            meta_lbl.setStyleSheet(f"font-family: Menlo; color: {T.TEXT_MUTED}; font-size: 12px;")
             il.addWidget(meta_lbl)
             text_lbl = QLabel(text)
-            text_lbl.setStyleSheet("color: #4b5563; font-size: 12px;")
+            text_lbl.setStyleSheet(f"color: {T.TEXT_SECONDARY}; font-size: 12px;")
             il.addWidget(text_lbl)
             r_layout.addWidget(item)
 
@@ -373,9 +371,9 @@ class ReportPage(QWidget):
             "Ostateczna decyzja diagnostyczna nale\u017cy do lekarza specjalisty."
         )
         disc.setStyleSheet(f"""
-            font-size: 11px; color: {TEXT_DIM}; text-align: center;
+            font-size: 11px; color: {T.TEXT_DIM}; text-align: center;
             margin-top: 16px; padding-top: 12px;
-            border-top: 1px solid {BORDER};
+            border-top: 1px solid {T.BORDER};
         """)
         disc.setAlignment(Qt.AlignCenter)
         disc.setWordWrap(True)
@@ -396,7 +394,7 @@ class ReportPage(QWidget):
         # ── Export bar ──
         export_bar = QWidget()
         export_bar.setFixedHeight(48)
-        export_bar.setStyleSheet(f"background: {WHITE}; border-top: 1px solid {BORDER};")
+        export_bar.setStyleSheet(f"background: {T.WHITE}; border-top: 1px solid {T.BORDER};")
         eb = QHBoxLayout(export_bar)
         eb.setContentsMargins(20, 0, 20, 0)
         eb.setSpacing(12)
@@ -405,7 +403,7 @@ class ReportPage(QWidget):
         btn_pdf = QPushButton("Eksportuj PDF")
         btn_pdf.setStyleSheet(f"""
             padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 500;
-            background: {ACCENT}; color: white; border: 1px solid {ACCENT};
+            background: {T.ACCENT}; color: {T.ACCENT_TEXT}; border: 1px solid {T.ACCENT};
         """)
         btn_pdf.setCursor(Qt.PointingHandCursor)
         btn_pdf.clicked.connect(self._export_pdf)
@@ -414,7 +412,7 @@ class ReportPage(QWidget):
         btn_png = QPushButton("Eksportuj PNG")
         btn_png.setStyleSheet(f"""
             padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 500;
-            background: {WHITE}; color: #4b5563; border: 1px solid {BORDER};
+            background: {T.WHITE}; color: {T.TEXT_SECONDARY}; border: 1px solid {T.BORDER};
         """)
         btn_png.setCursor(Qt.PointingHandCursor)
         btn_png.clicked.connect(self._export_png)
@@ -423,7 +421,7 @@ class ReportPage(QWidget):
         btn_print = QPushButton("Drukuj")
         btn_print.setStyleSheet(f"""
             padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 500;
-            background: {WHITE}; color: #4b5563; border: 1px solid {BORDER};
+            background: {T.WHITE}; color: {T.TEXT_SECONDARY}; border: 1px solid {T.BORDER};
         """)
         btn_print.setCursor(Qt.PointingHandCursor)
         btn_print.clicked.connect(self._print)
@@ -432,7 +430,7 @@ class ReportPage(QWidget):
         eb.addStretch()
         page_sel = QComboBox()
         page_sel.addItems(["A4", "Letter"])
-        page_sel.setStyleSheet(f"font-size: 12px; padding: 6px 10px; border: 1px solid {BORDER}; border-radius: 6px;")
+        page_sel.setStyleSheet(f"font-size: 12px; padding: 6px 10px; border: 1px solid {T.BORDER}; border-radius: 6px;")
         eb.addWidget(page_sel)
 
         outer.addWidget(export_bar)
