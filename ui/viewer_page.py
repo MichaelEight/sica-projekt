@@ -172,6 +172,9 @@ class ViewerPage(QWidget):
         self._monitor_timer.timeout.connect(self._monitor_tick)
         self._monitor_playing = False
         self._monitor_t = 0.0
+        self._monitor_speed = 1.0
+        self._monitor_window = 3.0
+        self._monitor_page_start = 0.0
 
         self._build_ui()
 
@@ -274,6 +277,9 @@ class ViewerPage(QWidget):
         self.content.addWidget(self.info_panel)
 
         self.monitor_sidebar = MonitorSidebar()
+        self.monitor_sidebar.pause_toggled.connect(self._on_monitor_pause)
+        self.monitor_sidebar.speed_changed.connect(self._on_monitor_speed)
+        self.monitor_sidebar.leads_changed.connect(self._on_monitor_leads)
         self.monitor_sidebar.hide()
         self.content.addWidget(self.monitor_sidebar)
 
@@ -509,13 +515,18 @@ class ViewerPage(QWidget):
     def _refresh_monitor(self):
         if self.signal is None:
             return
+        sweep_frac = (self._monitor_t - self._monitor_page_start) / self._monitor_window \
+            if self._monitor_window > 0 else 0
+        sweep_frac = max(0.0, min(1.0, sweep_frac))
         for lead_name, strip in self._monitor_strips:
             if lead_name in self.leads:
                 idx = self.leads.index(lead_name)
                 strip.v_min = self._v_min
                 strip.v_max = self._v_max
-                strip.set_data(lead_name, self.signal[:, idx], self.fs, 0, self.duration)
-                strip.set_sweep(self._monitor_t / self.duration if self.duration > 0 else 0)
+                strip.set_data(lead_name, self.signal[:, idx], self.fs,
+                               self._monitor_page_start,
+                               self._monitor_page_start + self._monitor_window)
+                strip.set_sweep(sweep_frac)
 
     # ── View mode switching ──
     def _on_view_mode(self, idx: int):
@@ -612,7 +623,13 @@ class ViewerPage(QWidget):
     # ── Monitor ──
     def _start_monitor(self):
         self._monitor_t = 0.0
+        self._monitor_window = 3.0
+        self._monitor_page_start = 0.0
         self._monitor_playing = True
+        # Clear old signal data
+        for _, strip in self._monitor_strips:
+            strip._old_signal = None
+            strip._sweep_pos = None
         self._monitor_timer.start()
         self._refresh_monitor()
 
@@ -620,16 +637,55 @@ class ViewerPage(QWidget):
         if not self._monitor_playing:
             return
         self._monitor_t += 0.05
-        if self._monitor_t > self.duration:
-            self._monitor_t = 0.0
-        for lead_name, strip in self._monitor_strips:
-            strip.set_sweep(self._monitor_t / self.duration if self.duration > 0 else 0)
-        # Update scrubber
-        self.scrubber.blockSignals(True)
-        self.scrubber.setValue(int(self._monitor_t * 100))
-        self.scrubber.blockSignals(False)
+        page_end = self._monitor_page_start + self._monitor_window
+
+        # If sweep reached end of current page, advance to next page
+        if self._monitor_t >= page_end:
+            # Save current page signal as "old" for each strip
+            for lead_name, strip in self._monitor_strips:
+                if lead_name in self.leads:
+                    idx = self.leads.index(lead_name)
+                    strip._old_signal = self.signal[:, idx]
+                    strip._old_t_start = self._monitor_page_start
+                    strip._old_t_end = page_end
+            self._monitor_page_start = page_end
+            # If past end of signal, loop back
+            if self._monitor_page_start >= self.duration:
+                self._monitor_page_start = 0.0
+                self._monitor_t = 0.0
+
+        self._refresh_monitor()
         self.time_pos = self._monitor_t
         self._update_time_display()
+
+    def _on_monitor_pause(self, paused: bool):
+        self._monitor_playing = not paused
+        if self._monitor_playing:
+            self._monitor_timer.start()
+        else:
+            self._monitor_timer.stop()
+
+    def _on_monitor_speed(self, speed: float):
+        # Base interval is 50ms at 1x speed
+        self._monitor_timer.setInterval(int(50 / speed))
+
+    def _on_monitor_leads(self, active_leads: list):
+        """Rebuild monitor strips with selected leads."""
+        layout = self.monitor_area.layout()
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self._monitor_strips = []
+        for lead_name in active_leads:
+            strip = EkgCellCanvas()
+            strip.draw_border = True
+            strip.show_cal = False
+            self._monitor_strips.append((lead_name, strip))
+            layout.addWidget(strip, stretch=1)
+
+        self._refresh_monitor()
 
     # ── Status bar ──
     def _update_statusbar(self):

@@ -52,6 +52,9 @@ class EkgCellCanvas(QWidget):
         self.calipers = []       # list of (t1, t2, color, label)
         self.annotations = []    # list of (t1, t2)
         self._sweep_pos = None   # fraction 0..1 for monitor mode
+        self._old_signal = None  # previous page signal data (1-D)
+        self._old_t_start = 0.0
+        self._old_t_end = 2.5
         self.v_min = None        # voltage range override (mV)
         self.v_max = None
         self.show_zero_line = False
@@ -69,6 +72,9 @@ class EkgCellCanvas(QWidget):
         self.calipers = []
         self.annotations = []
         self._sweep_pos = None
+        self._old_signal = None
+        self._old_t_start = 0.0
+        self._old_t_end = 2.5
         self.update()
 
     def set_data(self, lead_name: str, signal: np.ndarray, fs: int,
@@ -202,13 +208,18 @@ class EkgCellCanvas(QWidget):
         # ── Signal ──
         if self.signal is not None and len(self.signal) > 0:
             n_samples = len(self.signal)
-            total_duration = n_samples / self.fs if self.fs > 0 else duration
             sig_w = w - sig_start
             if sig_w > 0:
+                # In monitor mode, only draw up to sweep position
+                if self._sweep_pos is not None:
+                    draw_end = int(sig_w * self._sweep_pos)
+                else:
+                    draw_end = int(sig_w)
+
                 p.setPen(QPen(QColor(SIGNAL_COLOR), 1.5))
                 path = QPainterPath()
                 first = True
-                for px_i in range(int(sig_w)):
+                for px_i in range(draw_end):
                     frac = px_i / sig_w
                     t = self.t_start + frac * duration
                     sample_idx = int(t * self.fs)
@@ -248,12 +259,40 @@ class EkgCellCanvas(QWidget):
                 p.setPen(QColor(color))
                 p.drawText(QPointF(lx, y_off + 12), label)
 
-        # ── Sweep cursor (monitor mode) ──
+        # ── Sweep cursor + old data (monitor mode) ──
         if self._sweep_pos is not None:
-            sx = w * self._sweep_pos
+            sx = sig_start + (w - sig_start) * self._sweep_pos
+
+            # Area after sweep: show old signal (faded) or blank
+            if self._old_signal is not None and len(self._old_signal) > 0:
+                old_n = len(self._old_signal)
+                old_dur = self._old_t_end - self._old_t_start
+                if old_dur > 0 and (w - sig_start) > 0:
+                    # Draw old signal after sweep (faded)
+                    p.setPen(QPen(QColor(SIGNAL_COLOR).lighter(170), 1.0))
+                    path_old = QPainterPath()
+                    first_old = True
+                    gap_end = int(sx - sig_start) + 10
+                    for px_i in range(gap_end, int(w - sig_start)):
+                        frac = px_i / (w - sig_start)
+                        t = self._old_t_start + frac * old_dur
+                        si = int(t * self.fs)
+                        si = max(0, min(si, old_n - 1))
+                        py = v_to_y(self._old_signal[si])
+                        if first_old:
+                            path_old.moveTo(sig_start + px_i, py)
+                            first_old = False
+                        else:
+                            path_old.lineTo(sig_start + px_i, py)
+                    p.drawPath(path_old)
+
+            # Gap around cursor (blank zone)
+            gap = 10
+            p.fillRect(QRectF(sx - gap, 0, gap * 2 + 2, h), QColor(WHITE))
+
+            # Sweep cursor line
             p.setPen(QPen(QColor(ACCENT), 2))
             p.drawLine(QPointF(sx, 0), QPointF(sx, h))
-            p.fillRect(QRectF(sx + 2, 0, w - sx - 2, h), QColor(249, 250, 251, 180))
 
         # ── Lead label ──
         if self.show_label and self.lead_name:

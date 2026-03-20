@@ -2,7 +2,7 @@
 import os
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QMessageBox
 
 from ui.theme import STYLESHEET, STANDARD_LEADS, BG
@@ -73,6 +73,48 @@ class MainWindow(QMainWindow):
         self._fs = 500
         self._filename = ""
 
+        # ── Keyboard shortcuts (work regardless of focus) ──
+        self._setup_shortcuts()
+
+    def _setup_shortcuts(self):
+        def _sc(key, handler):
+            s = QShortcut(QKeySequence(key), self)
+            s.setContext(Qt.ApplicationShortcut)
+            s.activated.connect(handler)
+            return s
+
+        def _on_viewer(fn):
+            """Wrap handler to only run when on viewer page."""
+            def wrapper():
+                if self.stack.currentIndex() == 1:
+                    fn()
+            return wrapper
+
+        _sc(Qt.Key_1, _on_viewer(lambda: self.viewer_page.view_seg.set_active(0)))
+        _sc(Qt.Key_2, _on_viewer(lambda: self.viewer_page.view_seg.set_active(1)))
+        _sc(Qt.Key_3, _on_viewer(lambda: self.viewer_page.view_seg.set_active(2)))
+        _sc(Qt.Key_V, _on_viewer(lambda: self.viewer_page._on_tool_mode(0)))
+        _sc(Qt.Key_C, _on_viewer(lambda: self.viewer_page._on_tool_mode(1)))
+        _sc(Qt.Key_A, _on_viewer(lambda: self.viewer_page._on_tool_mode(2)))
+        _sc(Qt.Key_Left, _on_viewer(lambda: self.viewer_page._nav_step(-0.2)))
+        _sc(Qt.Key_Right, _on_viewer(lambda: self.viewer_page._nav_step(0.2)))
+        _sc(Qt.Key_Home, _on_viewer(self.viewer_page._nav_start))
+        _sc(Qt.Key_End, _on_viewer(self.viewer_page._nav_end))
+        _sc(Qt.Key_Space, _on_viewer(lambda: self.viewer_page.monitor_sidebar._on_pause()
+                                     if self.viewer_page._view_mode == 2 else None))
+        _sc(QKeySequence("Ctrl+E"), _on_viewer(self._go_report))
+        _sc(QKeySequence("Ctrl+Return"), _on_viewer(self.viewer_page._on_analyze))
+
+        def _on_escape():
+            if self.stack.currentIndex() == 1:
+                if self.viewer_page._view_mode == 2:
+                    self.viewer_page.view_seg.set_active(0)
+                elif self.viewer_page._tool_mode != 0:
+                    self.viewer_page._on_tool_mode(0)
+            elif self.stack.currentIndex() == 2:
+                self._go_viewer()
+        _sc(Qt.Key_Escape, _on_escape)
+
     def _load_file(self, base_path: str):
         """Load a WFDB record or generate demo data."""
         dat_path = base_path + ".dat"
@@ -116,57 +158,3 @@ class MainWindow(QMainWindow):
     def _go_report(self):
         self.stack.setCurrentIndex(2)
 
-    def keyPressEvent(self, event):
-        """Global keyboard shortcuts matching the v2 status bar hints."""
-        key = event.key()
-        mods = event.modifiers()
-
-        if self.stack.currentIndex() == 1:  # Viewer page
-            # View mode shortcuts
-            if key == Qt.Key_1:
-                self.viewer_page.view_seg.set_active(0)
-            elif key == Qt.Key_2:
-                self.viewer_page.view_seg.set_active(1)
-            elif key == Qt.Key_3:
-                self.viewer_page.view_seg.set_active(2)
-            # Tool shortcuts
-            elif key == Qt.Key_V:
-                self.viewer_page._on_tool_mode(0)
-            elif key == Qt.Key_C:
-                self.viewer_page._on_tool_mode(1)
-            elif key == Qt.Key_A:
-                self.viewer_page._on_tool_mode(2)
-            # Navigation
-            elif key == Qt.Key_Left:
-                self.viewer_page._nav_step(-0.2)
-            elif key == Qt.Key_Right:
-                self.viewer_page._nav_step(0.2)
-            elif key == Qt.Key_Home:
-                self.viewer_page._nav_start()
-            elif key == Qt.Key_End:
-                self.viewer_page._nav_end()
-            # Monitor pause
-            elif key == Qt.Key_Space and self.viewer_page._view_mode == 2:
-                self.viewer_page._monitor_playing = not self.viewer_page._monitor_playing
-                if self.viewer_page._monitor_playing:
-                    self.viewer_page._monitor_timer.start()
-                else:
-                    self.viewer_page._monitor_timer.stop()
-            # Report shortcut
-            elif key == Qt.Key_E and mods & Qt.ControlModifier:
-                self._go_report()
-            # Analyze shortcut
-            elif key == Qt.Key_Return and mods & Qt.ControlModifier:
-                self.viewer_page._on_analyze()
-            # Escape
-            elif key == Qt.Key_Escape:
-                if self.viewer_page._view_mode == 2:
-                    self.viewer_page.view_seg.set_active(0)
-                elif self.viewer_page._tool_mode != 0:
-                    self.viewer_page._on_tool_mode(0)
-
-        elif self.stack.currentIndex() == 2:  # Report page
-            if key == Qt.Key_Escape:
-                self._go_viewer()
-
-        super().keyPressEvent(event)
