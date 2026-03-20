@@ -518,6 +518,7 @@ class MonitorSidebar(QWidget):
 
     speed_changed = Signal(float)
     leads_changed = Signal(list)
+    pause_toggled = Signal(bool)  # True = paused
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -528,37 +529,22 @@ class MonitorSidebar(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(14)
 
-        # HR display
-        hr_frame = QFrame()
-        hr_frame.setStyleSheet(f"""
-            QFrame {{
-                border: 2px solid {GREEN}; border-radius: 10px;
-                background: #f0fdf4; padding: 16px 0;
-            }}
+        # Pause button
+        self.pause_btn = QPushButton("⏸  Pauza")
+        self.pause_btn.setCursor(Qt.PointingHandCursor)
+        self.pause_btn.setFocusPolicy(Qt.NoFocus)
+        self.pause_btn.setStyleSheet(f"""
+            font-size: 12px; padding: 8px 14px; border: 1px solid {BORDER};
+            border-radius: 6px; background: {WHITE}; color: {TEXT};
+            font-weight: 600;
         """)
-        hr_layout = QVBoxLayout(hr_frame)
-        hr_layout.setAlignment(Qt.AlignCenter)
-        heart = QLabel("\u2665")
-        heart.setStyleSheet("font-size: 18px;")
-        heart.setAlignment(Qt.AlignCenter)
-        hr_layout.addWidget(heart)
-        self.hr_num = QLabel("72")
-        self.hr_num.setStyleSheet(f"font-size: 48px; font-weight: 700; font-family: Menlo; color: {GREEN};")
-        self.hr_num.setAlignment(Qt.AlignCenter)
-        hr_layout.addWidget(self.hr_num)
-        hr_unit = QLabel("BPM")
-        hr_unit.setStyleSheet(f"font-size: 14px; color: {GREEN};")
-        hr_unit.setAlignment(Qt.AlignCenter)
-        hr_layout.addWidget(hr_unit)
-        layout.addWidget(hr_frame)
+        self.pause_btn.clicked.connect(self._on_pause)
+        self._paused = False
+        layout.addWidget(self.pause_btn)
 
         # Playback speed
         self._add_pills_section(layout, "Pr\u0119dko\u015b\u0107 odtwarzania",
-                                ["0.5x", "1x", "2x"], 1)
-
-        # Sweep speed
-        self._add_pills_section(layout, "Pr\u0119dko\u015b\u0107 przesuwu",
-                                ["25 mm/s", "50 mm/s"], 0)
+                                ["0.5x", "1x", "2x"], 1, "speed")
 
         # Lead selection
         sec_lbl = QLabel("ODPROWADZENIA")
@@ -579,6 +565,7 @@ class MonitorSidebar(QWidget):
             is_active = lead in active
             btn.setStyleSheet(self._lead_btn_style(is_active))
             btn.setFixedSize(48, 28)
+            btn.setFocusPolicy(Qt.NoFocus)
             btn.setProperty("active", is_active)
             btn.clicked.connect(lambda checked, b=btn, l=lead: self._toggle_lead(b, l))
             self.lead_btns[lead] = btn
@@ -607,7 +594,33 @@ class MonitorSidebar(QWidget):
         active_leads = [l for l, b in self.lead_btns.items() if b.property("active")]
         self.leads_changed.emit(active_leads)
 
-    def _add_pills_section(self, layout, title, options, active_idx):
+    def _on_pause(self):
+        self._paused = not self._paused
+        if self._paused:
+            self.pause_btn.setText("▶  Wznów")
+            self.pause_btn.setStyleSheet(f"""
+                font-size: 12px; padding: 8px 14px; border: 1px solid {ACCENT};
+                border-radius: 6px; background: {ACCENT}; color: white;
+                font-weight: 600;
+            """)
+        else:
+            self.pause_btn.setText("⏸  Pauza")
+            self.pause_btn.setStyleSheet(f"""
+                font-size: 12px; padding: 8px 14px; border: 1px solid {BORDER};
+                border-radius: 6px; background: {WHITE}; color: {TEXT};
+                font-weight: 600;
+            """)
+        self.pause_toggled.emit(self._paused)
+
+    def _pill_style(self, active: bool) -> str:
+        return f"""
+            font-size: 11px; padding: 4px 10px; border: 1px solid {BORDER};
+            border-radius: 4px;
+            background: {ACCENT if active else WHITE};
+            color: {'white' if active else TEXT_MUTED};
+        """
+
+    def _add_pills_section(self, layout, title, options, active_idx, group_name=""):
         lbl = QLabel(title.upper())
         lbl.setStyleSheet(f"""
             font-size: 11px; font-weight: 700; color: {TEXT_DIM};
@@ -616,14 +629,27 @@ class MonitorSidebar(QWidget):
         layout.addWidget(lbl)
         pills = QHBoxLayout()
         pills.setSpacing(3)
+        btns = []
         for i, opt in enumerate(options):
             btn = QPushButton(opt)
-            is_active = i == active_idx
-            btn.setStyleSheet(f"""
-                font-size: 11px; padding: 4px 10px; border: 1px solid {BORDER};
-                border-radius: 4px;
-                background: {ACCENT if is_active else WHITE};
-                color: {'white' if is_active else TEXT_MUTED};
-            """)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.setStyleSheet(self._pill_style(i == active_idx))
+            btn.clicked.connect(lambda checked, idx=i, g=group_name, bl=None: self._on_pill(g, idx))
+            btns.append(btn)
             pills.addWidget(btn)
+        # Store button list for updating styles
+        if not hasattr(self, '_pill_groups'):
+            self._pill_groups = {}
+        self._pill_groups[group_name] = btns
         layout.addLayout(pills)
+
+    def _on_pill(self, group_name, idx):
+        btns = self._pill_groups.get(group_name, [])
+        for i, btn in enumerate(btns):
+            btn.setStyleSheet(self._pill_style(i == idx))
+        if group_name == "speed":
+            speeds = [0.5, 1.0, 2.0]
+            self.speed_changed.emit(speeds[idx])
+        elif group_name == "sweep":
+            pass  # sweep speed visual only for now
