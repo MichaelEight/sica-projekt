@@ -121,11 +121,30 @@ def save_split(df, split_name):
         target_dir = os.path.join(training_path, split_name, row['category'])
         os.makedirs(target_dir, exist_ok=True)
 
-        # Grab original filename from the CSV
+        # Copy both .dat and .hea files
+        target_array = mapping[best_label]
+        target_array.append(sample_row)
+
+# save data to specific folders
+folders_and_arrays = [
+    ("healthy", healthy),
+    ("front_heart_attack", front_heart_attack),
+    ("side_heart_attack", side_heart_attack),
+    ("bottom_heart_attack", bottom_heart_attack),
+    ("back_heart_attack", back_heart_attack),
+    ("complete_right_conduction_disorder", complete_right_conduction_disorder),
+    ("incomplete_right_conduction_disorder", incomplete_right_conduction_disorder),
+    ("complete_left_conduction_disorder", complete_left_conduction_disorder)
+]
+
+for folder_name, data_array in folders_and_arrays:
+    target_dir = os.path.join(filtered_path, folder_name)
+    os.makedirs(target_dir, exist_ok=True)
+
+    for row in data_array:
         source_base = os.path.join(folder_path, row['filename_hr'])
         base_name = os.path.basename(row['filename_hr'])
 
-        # Copy both .dat and .hea files
         for ext in ['.dat', '.hea']:
             src = source_base + ext
             dst = os.path.join(target_dir, base_name + ext)
