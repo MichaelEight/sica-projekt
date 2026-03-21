@@ -120,10 +120,15 @@ def save_split(df, split_name):
         target_dir = os.path.join(training_path, split_name, row['category'])
         os.makedirs(target_dir, exist_ok=True)
 
-        # Copy both .dat and .hea files
-        target_array = mapping[best_label]
-        target_array.append(sample_row)
+        # Copy both .dat and .hea files for this record
+        source_base = os.path.join(folder_path, row['filename_hr'])
+        base_name = os.path.basename(row['filename_hr'])
 
+        for ext in ['.dat', '.hea']:
+            src = source_base + ext
+            dst = os.path.join(target_dir, base_name + ext)
+            if os.path.exists(src):
+                shutil.copy2(src, dst)
 # save data to specific folders
 folders_and_arrays = [
     ("healthy", healthy),
