@@ -85,9 +85,8 @@ csv_output_path = os.path.join(filtered_path, 'disease_probabilities.csv')
 probabilities_df.to_csv(csv_output_path, index=False)
 print(f"Probability data successfully saved to: {csv_output_path}\n")
 
-# 1. Load the CSV we created in the first step
-csv_path = os.path.join(filtered_path, 'disease_probabilities.csv')
-df_all = pd.read_csv(csv_path)
+# Use the in-memory DataFrame directly for subsequent processing
+df_all = probabilities_df
 
 # 2. Stratified Split
 # First, split into 70% train and 30% temporary (which will become val and test)
