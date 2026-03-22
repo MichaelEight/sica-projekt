@@ -42,6 +42,19 @@ mapping = {
     'CLBBB': complete_left_conduction_disorder
 }
 
+category_map = {
+    'NORM': 'healthy',
+    'AMI': 'front_heart_attack', 'ASMI': 'front_heart_attack', 'ALMI': 'front_heart_attack', 'INJAS': 'front_heart_attack', 'INJAL': 'front_heart_attack',
+    'LMI': 'side_heart_attack', 'INJLA': 'side_heart_attack',
+    'IMI': 'bottom_heart_attack', 'ILMI': 'bottom_heart_attack', 'INJIN': 'bottom_heart_attack',
+    'PMI': 'back_heart_attack',
+    'CRBBB': 'complete_right_conduction_disorder',
+    'IRBBB': 'incomplete_right_conduction_disorder',
+    'CLBBB': 'complete_left_conduction_disorder'
+}
+
+results_for_csv = []
+
 for i in range(df_500.shape[0]):
     sample_row = df_500.iloc[i]
     filename = sample_row['filename_hr']
@@ -53,8 +66,69 @@ for i in range(df_500.shape[0]):
 
     if relevant_labels:
         best_label = max(relevant_labels, key=relevant_labels.get)
+        percentage = relevant_labels[best_label]
+
         target_array = mapping[best_label]
         target_array.append(sample_row)
+
+        results_for_csv.append({
+            'ecg_id': sample_row.name,
+            'filename_hr': filename,
+            'scp_code': best_label,
+            'category': category_map[best_label],
+            'probability_percentage': percentage
+        })
+
+os.makedirs(filtered_path, exist_ok=True)
+probabilities_df = pd.DataFrame(results_for_csv)
+csv_output_path = os.path.join(filtered_path, 'disease_probabilities.csv')
+probabilities_df.to_csv(csv_output_path, index=False)
+print(f"Probability data successfully saved to: {csv_output_path}\n")
+
+# Use the in-memory DataFrame directly for subsequent processing
+df_all = probabilities_df
+
+# 2. Stratified Split
+# First, split into 70% train and 30% temporary (which will become val and test)
+train_df, temp_df = train_test_split(
+    df_all, test_size=0.30, random_state=42, stratify=df_all['category']
+)
+
+# Now, split the temporary 30% into validation (10% overall) and test (20% overall).
+# 20% is exactly 2/3 of 30%, so our test_size here is 2/3.
+val_df, test_df = train_test_split(
+    temp_df, test_size=(2/3), random_state=42, stratify=temp_df['category']
+)
+
+# Check number of data in specific category
+print("--- TOTAL DATA ---")
+print(len(df_all))
+
+print("\n--- TRAINING (70%) ---")
+print(train_df['category'].value_counts())
+
+print("\n--- VALIDATION (10%) ---")
+print(val_df['category'].value_counts())
+
+print("\n--- TEST (20%) ---")
+print(test_df['category'].value_counts())
+
+# 3. Saving files to folder based on the splits
+def save_split(df, split_name):
+    for _, row in df.iterrows():
+        # Aim path: ./training/train/healthy/
+        target_dir = os.path.join(training_path, split_name, row['category'])
+        os.makedirs(target_dir, exist_ok=True)
+
+        # Copy both .dat and .hea files
+        source_base = os.path.join(folder_path, row['filename_hr'])
+        base_name = os.path.basename(row['filename_hr'])
+
+        for ext in ['.dat', '.hea']:
+            src = source_base + ext
+            dst = os.path.join(target_dir, base_name + ext)
+            if os.path.exists(src):
+                shutil.copy2(src, dst)
 
 # save data to specific folders
 folders_and_arrays = [
@@ -68,97 +142,15 @@ folders_and_arrays = [
     ("complete_left_conduction_disorder", complete_left_conduction_disorder)
 ]
 
-for folder_name, data_array in folders_and_arrays:
-    target_dir = os.path.join(filtered_path, folder_name)
-    os.makedirs(target_dir, exist_ok=True)
-
-    for row in data_array:
-        source_base = os.path.join(folder_path, row['filename_hr'])
-        base_name = os.path.basename(row['filename_hr'])
-
-        for ext in ['.dat', '.hea']:
-            src = source_base + ext
-            dst = os.path.join(target_dir, base_name + ext)
-            if os.path.exists(src):
-                shutil.copy2(src, dst)
-
-print("Filtering and saving complete based on highest probability.")
-print("Healthy", len(healthy))
-print("Front heart attack", len(front_heart_attack))
-print("Side heart attack", len(side_heart_attack))
-print("Bottom heart attack", len(bottom_heart_attack))
-print("Back heart attack", len(back_heart_attack))
-print("Complete right conduction disorder", len(complete_right_conduction_disorder))
-print("Incomplete right conduction disorder", len(incomplete_right_conduction_disorder))
-print("Complete left conduction disorder", len(complete_left_conduction_disorder))
-print()
-
-# divide on training, validate and test data
-# categories
-all_data = []
-categories = {
-    "healthy": healthy,
-    "front_heart_attack": front_heart_attack,
-    "side_heart_attack": side_heart_attack,
-    "bottom_heart_attack": bottom_heart_attack,
-    "back_heart_attack": back_heart_attack,
-    "complete_right_conduction": complete_right_conduction_disorder,
-    "incomplete_right_conduction": incomplete_right_conduction_disorder,
-    "complete_left_conduction": complete_left_conduction_disorder
-}
-
-for label, data_list in categories.items():
-    for row in data_list:
-        # Supervise data (add label to each data)
-        row_dict = row.to_dict()
-        row_dict['target_label'] = label
-        all_data.append(row_dict)
-
-df_all = pd.DataFrame(all_data)
-
-# Stratified Split
-# 70% training, 30% the rest
-train_df, temp_df = train_test_split(
-    df_all, test_size=0.3, random_state=42, stratify=df_all['target_label']
-)
-
-# The rest - validation (10%) & test (20%)
-# 0.33 from 30% is about 10% of all
-test_df, val_df  = train_test_split(
-    temp_df, test_size=0.3333, random_state=42, stratify=temp_df['target_label']
-)
-
-# Check number of data in specific category
-print("--- TRAINING ---")
-print(train_df['target_label'].value_counts())
-
-print("\n--- VALIDATION ---")
-print(val_df['target_label'].value_counts())
-
-print("\n--- TEST ---")
-print(test_df['target_label'].value_counts())
-
-
-# Saving files to folder
-def save_split(df, split_name):
-    for _, row in df.iterrows():
-        # Aim path: ./filtered/train/healthy/filename.dat
-        target_dir = os.path.join(training_path, split_name, row['target_label'])
-        os.makedirs(target_dir, exist_ok=True)
-
-        source_base = os.path.join(folder_path, row['filename_hr'])
-        base_name = os.path.basename(row['filename_hr'])
-
-        for ext in ['.dat', '.hea']:
-            src = source_base + ext
-            dst = os.path.join(target_dir, base_name + ext)
-            if os.path.exists(src):
-                shutil.copy2(src, dst)
-
-
 # Save
-print("Copying files...")
+print("\nCopying files to train, val, and test folders...")
 save_split(train_df, 'train')
 save_split(val_df, 'val')
 save_split(test_df, 'test')
+print("Ready.")
+
+if os.path.exists(filtered_path):
+    print(f"Removing temporary directory: {filtered_path}")
+    shutil.rmtree(filtered_path)
+
 print("Ready.")
