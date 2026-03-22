@@ -130,18 +130,6 @@ def save_split(df, split_name):
             if os.path.exists(src):
                 shutil.copy2(src, dst)
 
-# save data to specific folders
-folders_and_arrays = [
-    ("healthy", healthy),
-    ("front_heart_attack", front_heart_attack),
-    ("side_heart_attack", side_heart_attack),
-    ("bottom_heart_attack", bottom_heart_attack),
-    ("back_heart_attack", back_heart_attack),
-    ("complete_right_conduction_disorder", complete_right_conduction_disorder),
-    ("incomplete_right_conduction_disorder", incomplete_right_conduction_disorder),
-    ("complete_left_conduction_disorder", complete_left_conduction_disorder)
-]
-
 # Save
 print("\nCopying files to train, val, and test folders...")
 save_split(train_df, 'train')
