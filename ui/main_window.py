@@ -166,7 +166,9 @@ class MainWindow(QMainWindow):
 
         def _on_escape():
             if self.stack.currentIndex() == 1:
-                if self.viewer_page._view_mode == 2:
+                if self.viewer_page._analysis_mode:
+                    self.viewer_page._toggle_analysis_mode()
+                elif self.viewer_page._view_mode == 2:
                     self.viewer_page.view_seg.set_active(0)
                 elif self.viewer_page._tool_mode != 0:
                     self.viewer_page._on_tool_mode(0)

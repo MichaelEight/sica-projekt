@@ -57,6 +57,8 @@ class EkgCellCanvas(QWidget):
         self.v_min = None
         self.v_max = None
         self.show_zero_line = False
+        self.analysis_region = None       # (t_start, t_end) or None
+        self.analysis_clickable_end = None  # max clickable time or None
         self.setMinimumSize(80, 40)
 
     def clear(self):
@@ -74,6 +76,8 @@ class EkgCellCanvas(QWidget):
         self._old_signal = None
         self._old_t_start = 0.0
         self._old_t_end = 2.5
+        self.analysis_region = None
+        self.analysis_clickable_end = None
         self.update()
 
     def set_data(self, lead_name: str, signal: np.ndarray, fs: int,
@@ -281,6 +285,45 @@ class EkgCellCanvas(QWidget):
             painter.setPen(QPen(QColor(T.ACCENT), 2))
             painter.drawLine(QPointF(sx, 0), QPointF(sx, h))
 
+        # Analysis overlay
+        if self.analysis_clickable_end is not None or self.analysis_region is not None:
+            cal_w = w * 0.06 if self.show_cal else 0
+            sig_s = (5 + cal_w + 4) if self.show_cal else 0
+            sig_w = w - sig_s
+            if sig_w > 0 and duration > 0:
+                def t_to_x(t_val):
+                    return sig_s + ((t_val - self.t_start) / duration) * sig_w
+
+                # Grayed-out unclickable zone
+                if self.analysis_clickable_end is not None:
+                    ce = self.analysis_clickable_end
+                    if ce < self.t_end:
+                        gx = t_to_x(ce)
+                        gray = QColor(128, 128, 128, 60)
+                        painter.fillRect(QRectF(gx, 0, w - gx, h), gray)
+
+                # Selected 10s region
+                if self.analysis_region is not None:
+                    ar_start, ar_end = self.analysis_region
+                    ax1 = max(sig_s, t_to_x(ar_start))
+                    ax2 = min(float(w), t_to_x(ar_end))
+                    if ax2 > ax1:
+                        sel = QColor(74, 158, 255, 35)
+                        painter.fillRect(QRectF(ax1, 0, ax2 - ax1, h), sel)
+                        painter.setPen(QPen(QColor(T.ACCENT), 1.5, Qt.DashLine))
+                        painter.drawLine(QPointF(ax1, 0), QPointF(ax1, h))
+                        painter.drawLine(QPointF(ax2, 0), QPointF(ax2, h))
+                        # Label
+                        label = f"{ar_start:.1f} – {ar_end:.1f} s"
+                        painter.setFont(QFont("Menlo", 8))
+                        painter.setPen(QColor(T.ACCENT))
+                        lbl_bg = QColor(T.WHITE)
+                        lbl_bg.setAlpha(200)
+                        lw = painter.fontMetrics().horizontalAdvance(label) + 6
+                        lx = (ax1 + ax2) / 2 - lw / 2
+                        painter.fillRect(QRectF(lx, 2, lw, 14), lbl_bg)
+                        painter.drawText(QPointF(lx + 3, 12), label)
+
         # Lead label
         if self.show_label and self.lead_name:
             painter.setFont(QFont("Menlo", 11, QFont.Bold))
@@ -369,6 +412,19 @@ class TwelveLeadGrid(QWidget):
         for cell in self.cells.values():
             cell.update()
         self.rhythm.update()
+
+    def set_analysis_overlay(self, region: tuple | None, clickable_end: float | None):
+        """Set analysis overlay on all cells."""
+        for cell in self.cells.values():
+            cell.analysis_region = region
+            cell.analysis_clickable_end = clickable_end
+            cell.update()
+        self.rhythm.analysis_region = region
+        self.rhythm.analysis_clickable_end = clickable_end
+        self.rhythm.update()
+
+    def clear_analysis_overlay(self):
+        self.set_analysis_overlay(None, None)
 
     def clear(self):
         """Clear all cells."""

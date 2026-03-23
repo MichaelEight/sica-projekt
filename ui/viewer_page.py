@@ -183,6 +183,8 @@ class ViewerPage(QWidget):
         self._model_device = None
         self._model_path = None
         self._last_results = None
+        self._analysis_mode = False
+        self._analysis_start = None
         self._monitor_timer = QTimer(self)
         self._monitor_timer.setInterval(50)
         self._monitor_timer.timeout.connect(self._monitor_tick)
@@ -213,35 +215,59 @@ class ViewerPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # Top toolbar
+        # ── Row 1: Navigation & view ──
         self.toolbar = QWidget()
-        self.toolbar.setFixedHeight(48)
+        self.toolbar.setFixedHeight(36)
         self.toolbar.setStyleSheet(f"background: {T.TOPBAR};")
         tb = QHBoxLayout(self.toolbar)
-        tb.setContentsMargins(14, 0, 14, 0)
-        tb.setSpacing(8)
+        tb.setContentsMargins(10, 0, 10, 0)
+        tb.setSpacing(6)
 
-        logo = make_logo(14)
+        logo = make_logo(12)
         tb.addWidget(logo)
         tb.addWidget(make_separator())
 
         self.file_label = QLabel("00888_lr.dat | 500 Hz | 12 odpr. | 10.0 s")
-        self.file_label.setStyleSheet(f"font-size:12px; color:{T.BTN_TEXT}; font-family:Menlo;")
+        self.file_label.setStyleSheet(f"font-size:11px; color:{T.BTN_TEXT}; font-family:Menlo;")
         tb.addWidget(self.file_label)
         tb.addStretch()
 
         self.analysis_badge = QLabel("Analiza zakończona")
         self.analysis_badge.setStyleSheet(f"""
-            font-size: 12px; background: {T.BADGE_NORM_BG}; color: {T.BADGE_NORM_TEXT};
-            padding: 5px 12px; border-radius: 5px; font-weight: 600;
+            font-size: 11px; background: {T.BADGE_NORM_BG}; color: {T.BADGE_NORM_TEXT};
+            padding: 4px 10px; border-radius: 4px; font-weight: 600;
         """)
         self.analysis_badge.hide()
         tb.addWidget(self.analysis_badge)
 
+        tb.addWidget(make_separator())
+
+        btn_load = QPushButton("Wczytaj plik")
+        btn_load.setObjectName("secondary")
+        btn_load.setCursor(Qt.PointingHandCursor)
+        btn_load.clicked.connect(self.open_file.emit)
+        tb.addWidget(btn_load)
+
+        self.btn_dark = QPushButton("Tryb ciemny")
+        self.btn_dark.setObjectName("secondary")
+        self.btn_dark.setCursor(Qt.PointingHandCursor)
+        self.btn_dark.clicked.connect(self.toggle_dark.emit)
+        tb.addWidget(self.btn_dark)
+
+        outer.addWidget(self.toolbar)
+
+        # ── Row 2: Tools & analysis ──
+        self.toolbar2 = QWidget()
+        self.toolbar2.setFixedHeight(36)
+        self.toolbar2.setStyleSheet(f"background: {T.TOPBAR};")
+        tb2 = QHBoxLayout(self.toolbar2)
+        tb2.setContentsMargins(10, 0, 10, 0)
+        tb2.setSpacing(6)
+
         self.view_seg = SegmentedControl(["12-Lead", "1-Lead", "Monitor"])
         self.view_seg.changed.connect(self._on_view_mode)
-        tb.addWidget(self.view_seg)
-        tb.addWidget(make_separator())
+        tb2.addWidget(self.view_seg)
+        tb2.addWidget(make_separator())
 
         # Tool buttons
         self.tool_btns: list[ToolbarBtn] = []
@@ -249,23 +275,19 @@ class ViewerPage(QWidget):
             btn = ToolbarBtn(label, active)
             btn.clicked.connect(lambda checked, idx=i: self._on_tool_mode(idx))
             self.tool_btns.append(btn)
-            tb.addWidget(btn)
-        tb.addWidget(make_separator())
+            tb2.addWidget(btn)
 
-        # Settings
-        for label in ["10 mm/mV", "25 mm/s", "0.05-150 Hz"]:
-            btn = ToolbarBtn(label, False)
-            tb.addWidget(btn)
-        tb.addWidget(make_separator())
+        tb2.addWidget(make_separator())
+        tb2.addStretch()
 
         # Model selector
         self.model_combo = QComboBox()
-        self.model_combo.setFixedWidth(160)
+        self.model_combo.setFixedWidth(140)
         self.model_combo.setStyleSheet(f"""
             QComboBox {{
                 color: {T.BTN_TEXT}; background: {T.BTN_DARK};
                 border: 1px solid {T.SEPARATOR}; border-radius: 5px;
-                padding: 4px 8px; font-size: 11px;
+                padding: 3px 6px; font-size: 11px;
             }}
             QComboBox::drop-down {{ border: none; }}
             QComboBox QAbstractItemView {{
@@ -276,39 +298,33 @@ class ViewerPage(QWidget):
         """)
         self._populate_model_combo()
         self.model_combo.currentIndexChanged.connect(self._on_model_changed)
-        tb.addWidget(self.model_combo)
+        tb2.addWidget(self.model_combo)
 
-        # Action buttons
+        # Analysis selection toggle
+        self.btn_mark_analysis = ToolbarBtn("Zaznacz do analizy", False)
+        self.btn_mark_analysis.clicked.connect(self._toggle_analysis_mode)
+        tb2.addWidget(self.btn_mark_analysis)
+
+        # Analyze
         self.btn_analyze = QPushButton("Analizuj")
         self.btn_analyze.setObjectName("primary")
         self.btn_analyze.setCursor(Qt.PointingHandCursor)
         self.btn_analyze.setStyleSheet(
             f"background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;"
-            f"padding:6px 12px;border-radius:5px;font-weight:600;font-size:12px;"
+            f"padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px;"
         )
         self.btn_analyze.clicked.connect(self._on_analyze)
-        tb.addWidget(self.btn_analyze)
+        tb2.addWidget(self.btn_analyze)
+
+        tb2.addWidget(make_separator())
 
         self.btn_report = QPushButton("Raport")
         self.btn_report.setObjectName("secondary")
         self.btn_report.setCursor(Qt.PointingHandCursor)
         self.btn_report.clicked.connect(self.show_report.emit)
-        tb.addWidget(self.btn_report)
+        tb2.addWidget(self.btn_report)
 
-        btn_load = QPushButton("Wczytaj plik")
-        btn_load.setObjectName("secondary")
-        btn_load.setCursor(Qt.PointingHandCursor)
-        btn_load.clicked.connect(self.open_file.emit)
-        tb.addWidget(btn_load)
-
-        tb.addWidget(make_separator())
-        self.btn_dark = QPushButton("Tryb ciemny")
-        self.btn_dark.setObjectName("secondary")
-        self.btn_dark.setCursor(Qt.PointingHandCursor)
-        self.btn_dark.clicked.connect(self.toggle_dark.emit)
-        tb.addWidget(self.btn_dark)
-
-        outer.addWidget(self.toolbar)
+        outer.addWidget(self.toolbar2)
 
         # Content area
         self.content = QHBoxLayout()
@@ -336,9 +352,14 @@ class ViewerPage(QWidget):
 
         self.grid_12 = TwelveLeadGrid()
         self.view_stack.addWidget(self.grid_12)
+        # Connect grid cell clicks for analysis mode
+        for cell in self.grid_12.cells.values():
+            cell.clicked.connect(self._on_canvas_click)
+        self.grid_12.rhythm.clicked.connect(self._on_canvas_click)
 
         self.single_lead = SingleLeadCanvas()
         self.single_lead.draw_border = True
+        self.single_lead.clicked.connect(self._on_canvas_click)
         self.view_stack.addWidget(self.single_lead)
 
         self.monitor_area = QWidget()
@@ -434,10 +455,11 @@ class ViewerPage(QWidget):
     def apply_theme(self):
         """Re-apply all styles after theme change."""
         self.toolbar.setStyleSheet(f"background: {T.TOPBAR};")
-        self.file_label.setStyleSheet(f"font-size:12px; color:{T.BTN_TEXT}; font-family:Menlo;")
+        self.toolbar2.setStyleSheet(f"background: {T.TOPBAR};")
+        self.file_label.setStyleSheet(f"font-size:11px; color:{T.BTN_TEXT}; font-family:Menlo;")
         self.analysis_badge.setStyleSheet(f"""
-            font-size: 12px; background: {T.BADGE_NORM_BG}; color: {T.BADGE_NORM_TEXT};
-            padding: 5px 12px; border-radius: 5px; font-weight: 600;
+            font-size: 11px; background: {T.BADGE_NORM_BG}; color: {T.BADGE_NORM_TEXT};
+            padding: 4px 10px; border-radius: 4px; font-weight: 600;
         """)
         self.view_seg._apply_styles()
         for btn in self.tool_btns:
@@ -445,8 +467,9 @@ class ViewerPage(QWidget):
 
         self.btn_analyze.setStyleSheet(
             f"background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;"
-            f"padding:6px 12px;border-radius:5px;font-weight:600;font-size:12px;"
+            f"padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px;"
         )
+        self.btn_mark_analysis.set_active(self._analysis_mode)
         self.model_combo.setStyleSheet(f"""
             QComboBox {{
                 color: {T.BTN_TEXT}; background: {T.BTN_DARK};
@@ -539,6 +562,30 @@ class ViewerPage(QWidget):
         )
         self.analysis_badge.hide()
         self.results_panel.hide()
+
+        # Reset analysis mode
+        self._analysis_mode = False
+        self._analysis_start = None
+        self.btn_mark_analysis.set_active(False)
+        self._clear_analysis_overlay()
+
+        # Enable/disable analysis based on duration
+        min_samples = int(10.0 * self.fs)
+        if self.signal.shape[0] < min_samples:
+            # Too short — block analysis entirely
+            self.btn_analyze.setEnabled(False)
+            self.btn_analyze.setToolTip("Analiza wymaga co najmniej 10s nagrania")
+            self.btn_mark_analysis.hide()
+        elif self.signal.shape[0] == min_samples:
+            # Exactly 10s — analyze whole file, no marking needed
+            self.btn_analyze.setEnabled(True)
+            self.btn_analyze.setToolTip("")
+            self.btn_mark_analysis.hide()
+        else:
+            # Longer than 10s — require explicit window selection
+            self.btn_analyze.setEnabled(True)
+            self.btn_analyze.setToolTip("")
+            self.btn_mark_analysis.show()
 
         max_window = max(self._window_12, self._window_1)
         self._scrubber_max = max(0.0, self.duration - max_window)
@@ -679,22 +726,66 @@ class ViewerPage(QWidget):
         self._model_path = path
         return model, device
 
+    def _toggle_analysis_mode(self):
+        """Toggle the analysis window selection mode."""
+        self._analysis_mode = not self._analysis_mode
+        self.btn_mark_analysis.set_active(self._analysis_mode)
+        if self._analysis_mode:
+            self._analysis_start = None
+            self._apply_analysis_overlay()
+            self._update_statusbar()
+        else:
+            self._analysis_start = None
+            self._clear_analysis_overlay()
+            self._update_statusbar()
+
+    def _on_canvas_click(self, t: float, v: float):
+        """Handle click on EKG canvas — place analysis window if in analysis mode."""
+        if not self._analysis_mode or self.signal is None:
+            return
+        max_start = self.duration - 10.0
+        if max_start <= 0:
+            return
+        t = max(0.0, min(t, max_start))
+        self._analysis_start = t
+        self._apply_analysis_overlay()
+        self._update_statusbar()
+
+    def _apply_analysis_overlay(self):
+        """Set the analysis overlay on all visible canvases."""
+        if self.signal is None:
+            return
+        clickable_end = max(0.0, self.duration - 10.0)
+        region = None
+        if self._analysis_start is not None:
+            region = (self._analysis_start, self._analysis_start + 10.0)
+        self.grid_12.set_analysis_overlay(region, clickable_end)
+        self.single_lead.analysis_region = region
+        self.single_lead.analysis_clickable_end = clickable_end
+        self.single_lead.update()
+
+    def _clear_analysis_overlay(self):
+        """Remove analysis overlay from all canvases."""
+        self.grid_12.clear_analysis_overlay()
+        self.single_lead.analysis_region = None
+        self.single_lead.analysis_clickable_end = None
+        self.single_lead.update()
+
     def _get_analysis_window(self):
-        """Extract a 10-second signal window starting at current view position.
+        """Extract a 10-second signal window for analysis.
 
         Returns (window_signal, t_start, t_end) where window_signal has shape (N, 12).
         """
-        target_samples = int(10.0 * self.fs)  # 10s window
+        target_samples = int(10.0 * self.fs)
         total_samples = self.signal.shape[0]
 
-        start_sample = int(self.time_pos * self.fs)
+        if self._analysis_start is not None:
+            start_sample = int(self._analysis_start * self.fs)
+        else:
+            start_sample = int(self.time_pos * self.fs)
+
         start_sample = max(0, min(start_sample, total_samples - target_samples))
         end_sample = min(start_sample + target_samples, total_samples)
-
-        # If signal is shorter than 10s, use the whole thing
-        if total_samples <= target_samples:
-            start_sample = 0
-            end_sample = total_samples
 
         window = self.signal[start_sample:end_sample]
         t_start = start_sample / self.fs
@@ -703,6 +794,13 @@ class ViewerPage(QWidget):
 
     def _on_analyze(self):
         if self.signal is None:
+            return
+        # For signals > 10s, require explicit window selection
+        if self.duration > 10.0 and self._analysis_start is None:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Zaznacz okno",
+                                   "Użyj 'Zaznacz do analizy' i kliknij na sygnał,\n"
+                                   "aby wybrać 10-sekundowe okno.")
             return
 
         # Show loading state immediately
@@ -919,9 +1017,23 @@ class ViewerPage(QWidget):
         self._start_monitor()
 
     def _update_statusbar(self):
+        # Analysis mode overrides center statusbar
+        if self._analysis_mode:
+            if self._analysis_start is not None:
+                ae = self._analysis_start + 10.0
+                self.st_center.setText(
+                    f"Okno: <b>{self._analysis_start:.1f} – {ae:.1f} s</b> | "
+                    f"Kliknij Analizuj lub wybierz inny punkt | Esc: Wyjdź"
+                )
+            else:
+                self.st_center.setText(
+                    "Kliknij na sygnał, aby wybrać okno 10s do analizy | Esc: Wyjdź"
+                )
+
         if self._view_mode == 0:
             self.st_left.setText("<b>10 mm/mV</b> | <b>25 mm/s</b> | 0.05-150 Hz")
-            self.st_center.setText("V: Wybierz | C: Suwmiarka | A: Adnotacja | G: Wzmocnienie | 1/2/3: Widok")
+            if not self._analysis_mode:
+                self.st_center.setText("V: Wybierz | C: Suwmiarka | A: Adnotacja | G: Wzmocnienie | 1/2/3: Widok")
             self.st_right.setText(f"t = <b>{self.time_pos:.2f} s</b> | V = <b>0.85 mV</b>")
         elif self._view_mode == 1:
             if self._tool_mode == 1:

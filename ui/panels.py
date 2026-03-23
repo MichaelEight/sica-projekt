@@ -561,7 +561,7 @@ class ResultsPanel(QWidget):
             bar_row.addWidget(pct_lbl)
             r_layout.addLayout(bar_row)
 
-            # Ground truth bar (if available)
+            # Ground truth indicator (if available)
             if gt_val is not None:
                 gt_row = QHBoxLayout()
                 gt_row.setSpacing(4)
@@ -569,24 +569,17 @@ class ResultsPanel(QWidget):
 
                 gt_label = QLabel("A")
                 gt_label.setFixedWidth(12)
-                gt_label.setStyleSheet(f"font-size: 9px; color: {T.GREEN}; font-weight: 600;")
+                present = gt_val > 0.0
+                color = T.GREEN if present else T.TEXT_DIM
+                gt_label.setStyleSheet(f"font-size: 9px; color: {color}; font-weight: 600;")
                 gt_row.addWidget(gt_label)
 
-                gt_bar = QFrame()
-                gt_bar.setFixedHeight(6)
-                gt_bar.setStyleSheet(f"background: {T.BORDER_LIGHT}; border-radius: 3px;")
-                gt_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-                gt_fill = QFrame(gt_bar)
-                gt_fill.setFixedHeight(6)
-                gt_fill.setFixedWidth(max(1, int(gt_val * 200)))
-                gt_fill.setStyleSheet(f"background: {T.GREEN}; border-radius: 3px;")
-                gt_row.addWidget(gt_bar)
-
-                gt_pct = QLabel(f"{gt_val * 100:.1f}%")
-                gt_pct.setFixedWidth(50)
-                gt_pct.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                gt_pct.setStyleSheet(f"font-size: 11px; font-family: Menlo; color: {T.GREEN};")
-                gt_row.addWidget(gt_pct)
+                gt_text = QLabel("TAK" if present else "NIE")
+                gt_text.setStyleSheet(
+                    f"font-size: 11px; font-weight: 600; color: {color};"
+                )
+                gt_row.addWidget(gt_text)
+                gt_row.addStretch()
                 r_layout.addLayout(gt_row)
 
             self._classes_layout.addWidget(row)
