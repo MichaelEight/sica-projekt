@@ -1,18 +1,33 @@
 """Main EKG viewer page with toolbar, view modes, panels, navigation bar."""
+import glob
+import os
+import time
+
 import numpy as np
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QPushButton, QFrame, QStackedWidget, QSlider,
-                                QSizePolicy)
+                                QSizePolicy, QComboBox, QApplication)
 
 import ui.theme as T
-from ui.theme import STANDARD_LEADS
+from ui.theme import STANDARD_LEADS, TARGET_CLASSES
 from ui.widgets import make_logo, make_separator
 from ui.ekg_canvas import (EkgCellCanvas, TwelveLeadGrid, SingleLeadCanvas,
                             generate_demo_signal, synth_ekg, LEAD_SEEDS, LEAD_AMPS)
 from ui.panels import (InfoPanel, CaliperPanel, AnnotationPanel, ResultsPanel,
                         MonitorSidebar)
+
+
+def discover_models():
+    """Scan known directories for .pt checkpoint files."""
+    search_dirs = ["model/annotations", "models"]
+    found = []
+    for d in search_dirs:
+        if os.path.isdir(d):
+            found.extend(glob.glob(os.path.join(d, "*.pt")))
+    found.sort(key=lambda p: (0 if "model-sota" in os.path.basename(p) else 1, p))
+    return found
 
 
 # Segmented Control
@@ -164,6 +179,10 @@ class ViewerPage(QWidget):
         self._view_mode = 0       # 0=12lead, 1=1lead, 2=monitor
         self._tool_mode = 0       # 0=select, 1=caliper, 2=annotation
         self._show_results = False
+        self._model = None
+        self._model_device = None
+        self._model_path = None
+        self._last_results = None
         self._monitor_timer = QTimer(self)
         self._monitor_timer.setInterval(50)
         self._monitor_timer.timeout.connect(self._monitor_tick)
@@ -239,10 +258,34 @@ class ViewerPage(QWidget):
             tb.addWidget(btn)
         tb.addWidget(make_separator())
 
+        # Model selector
+        self.model_combo = QComboBox()
+        self.model_combo.setFixedWidth(160)
+        self.model_combo.setStyleSheet(f"""
+            QComboBox {{
+                color: {T.BTN_TEXT}; background: {T.BTN_DARK};
+                border: 1px solid {T.SEPARATOR}; border-radius: 5px;
+                padding: 4px 8px; font-size: 11px;
+            }}
+            QComboBox::drop-down {{ border: none; }}
+            QComboBox QAbstractItemView {{
+                color: {T.TEXT}; background: {T.WHITE};
+                selection-background-color: {T.ACCENT};
+                selection-color: {T.ACCENT_TEXT};
+            }}
+        """)
+        self._populate_model_combo()
+        self.model_combo.currentIndexChanged.connect(self._on_model_changed)
+        tb.addWidget(self.model_combo)
+
         # Action buttons
         self.btn_analyze = QPushButton("Analizuj")
         self.btn_analyze.setObjectName("primary")
         self.btn_analyze.setCursor(Qt.PointingHandCursor)
+        self.btn_analyze.setStyleSheet(
+            f"background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;"
+            f"padding:6px 12px;border-radius:5px;font-weight:600;font-size:12px;"
+        )
         self.btn_analyze.clicked.connect(self._on_analyze)
         tb.addWidget(self.btn_analyze)
 
@@ -400,6 +443,24 @@ class ViewerPage(QWidget):
         for btn in self.tool_btns:
             btn.set_active(btn._active)
 
+        self.btn_analyze.setStyleSheet(
+            f"background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;"
+            f"padding:6px 12px;border-radius:5px;font-weight:600;font-size:12px;"
+        )
+        self.model_combo.setStyleSheet(f"""
+            QComboBox {{
+                color: {T.BTN_TEXT}; background: {T.BTN_DARK};
+                border: 1px solid {T.SEPARATOR}; border-radius: 5px;
+                padding: 4px 8px; font-size: 11px;
+            }}
+            QComboBox::drop-down {{ border: none; }}
+            QComboBox QAbstractItemView {{
+                color: {T.TEXT}; background: {T.WHITE};
+                selection-background-color: {T.ACCENT};
+                selection-color: {T.ACCENT_TEXT};
+            }}
+        """)
+
         from ui.theme import is_dark_mode
         self.btn_dark.setText("Tryb jasny" if is_dark_mode() else "Tryb ciemny")
 
@@ -436,8 +497,10 @@ class ViewerPage(QWidget):
             self._monitor_strips.append((lead_name, strip))
             layout.addWidget(strip, stretch=1)
 
-    def set_signal(self, signal: np.ndarray, leads: list[str], fs: int, filename: str = ""):
+    def set_signal(self, signal: np.ndarray, leads: list[str], fs: int, filename: str = "",
+                   ground_truth: dict | None = None):
         """Load new signal data into the viewer."""
+        self._ground_truth = ground_truth
         self.grid_12.clear()
         self.single_lead.clear()
         for _, strip in self._monitor_strips:
@@ -586,10 +649,110 @@ class ViewerPage(QWidget):
     def _on_lead_selected(self, lead: str):
         self._refresh_single_lead()
 
+    def _populate_model_combo(self):
+        models = discover_models()
+        self.model_combo.clear()
+        if models:
+            for path in models:
+                self.model_combo.addItem(os.path.basename(path), path)
+        else:
+            self.model_combo.addItem("(brak modeli)", "")
+
+    def _on_model_changed(self, idx: int):
+        new_path = self.model_combo.currentData()
+        if new_path != self._model_path:
+            self._model = None
+            self._model_device = None
+            self._model_path = None
+
+    def _ensure_model_loaded(self):
+        """Load model if not cached. Returns (model, device) or raises."""
+        from model.inference_api import load_checkpoint_model
+        path = self.model_combo.currentData()
+        if not path or not os.path.exists(path):
+            raise FileNotFoundError(f"Nie znaleziono modelu: {path}")
+        if self._model is not None and self._model_path == path:
+            return self._model, self._model_device
+        model, device = load_checkpoint_model(path, num_classes=len(TARGET_CLASSES))
+        self._model = model
+        self._model_device = device
+        self._model_path = path
+        return model, device
+
+    def _get_analysis_window(self):
+        """Extract a 10-second signal window starting at current view position.
+
+        Returns (window_signal, t_start, t_end) where window_signal has shape (N, 12).
+        """
+        target_samples = int(10.0 * self.fs)  # 10s window
+        total_samples = self.signal.shape[0]
+
+        start_sample = int(self.time_pos * self.fs)
+        start_sample = max(0, min(start_sample, total_samples - target_samples))
+        end_sample = min(start_sample + target_samples, total_samples)
+
+        # If signal is shorter than 10s, use the whole thing
+        if total_samples <= target_samples:
+            start_sample = 0
+            end_sample = total_samples
+
+        window = self.signal[start_sample:end_sample]
+        t_start = start_sample / self.fs
+        t_end = end_sample / self.fs
+        return window, t_start, t_end
+
     def _on_analyze(self):
+        if self.signal is None:
+            return
+
+        # Show loading state immediately
+        self.results_panel.set_loading()
+        self.results_panel.show()
+        self.analysis_badge.hide()
+        QApplication.processEvents()
+
+        try:
+            model, device = self._ensure_model_loaded()
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Błąd", f"Nie udało się załadować modelu:\n{e}")
+            self.results_panel.hide()
+            return
+
+        window_signal, t_start, t_end = self._get_analysis_window()
+
+        from model.inference_api import predict_with_model
+        t0 = time.time()
+        try:
+            result = predict_with_model(
+                model=model,
+                data=window_signal,
+                threshold=0.5,
+                class_names=TARGET_CLASSES,
+                device=device,
+            )
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Błąd", f"Błąd predykcji:\n{e}")
+            self.results_panel.hide()
+            return
+        elapsed = time.time() - t0
+
+        probs = result["probabilities"][0]
+        probabilities = {cls: float(probs[i]) for i, cls in enumerate(TARGET_CLASSES)}
+        model_name = os.path.basename(self._model_path)
+
+        self._last_results = {
+            "probabilities": probabilities,
+            "model_name": model_name,
+            "elapsed": elapsed,
+        }
+
+        window_label = f"{t_start:.1f} – {t_end:.1f} s"
         self._show_results = True
         self.analysis_badge.show()
-        self.results_panel.show()
+        self.results_panel.set_results(probabilities, model_name, elapsed, window_label,
+                                       ground_truth=self._ground_truth)
         if self._view_mode == 0:
             self.info_panel.show()
 

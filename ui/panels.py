@@ -326,7 +326,7 @@ class ResultsPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(270)
+        self.setFixedWidth(280)
         self.setStyleSheet(f"background: {T.WHITE}; border-left: 1px solid {T.BORDER};")
 
         layout = QVBoxLayout(self)
@@ -335,89 +335,210 @@ class ResultsPanel(QWidget):
 
         # Header
         header = QWidget()
-        header.setStyleSheet(f"padding: 12px 14px; border-bottom: 1px solid {T.BORDER};")
+        header.setStyleSheet(f"border-bottom: 1px solid {T.BORDER};")
         h_layout = QVBoxLayout(header)
-        h_layout.setContentsMargins(14, 12, 14, 12)
+        h_layout.setContentsMargins(10, 8, 10, 8)
+        h_layout.setSpacing(2)
         h_title = QLabel("Wyniki analizy")
         h_title.setFont(QFont(".AppleSystemUIFont", 13, QFont.DemiBold))
         h_layout.addWidget(h_title)
-        h_sub = QLabel("Model: Inception1D | Czas: 1.2 s")
-        h_sub.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
-        h_layout.addWidget(h_sub)
+        self._model_label = QLabel("")
+        self._model_label.setStyleSheet(f"font-size: 10px; color: {T.TEXT_MUTED};")
+        self._model_label.setWordWrap(True)
+        h_layout.addWidget(self._model_label)
         layout.addWidget(header)
 
+        # Loading indicator
+        self._loading_label = QLabel("Analizuję...")
+        self._loading_label.setAlignment(Qt.AlignCenter)
+        self._loading_label.setStyleSheet(
+            f"font-size: 14px; font-weight: 600; color: {T.ACCENT}; padding: 40px;"
+        )
+        self._loading_label.hide()
+        layout.addWidget(self._loading_label)
+
         # Scroll area for results
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("border: none;")
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setAlignment(Qt.AlignTop)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setStyleSheet("border: none;")
+        self._content = QWidget()
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(0, 0, 0, 0)
+        self._content_layout.setSpacing(0)
+        self._content_layout.setAlignment(Qt.AlignTop)
 
         # Top prediction card
-        pred_card = QFrame()
-        pred_card.setStyleSheet(f"""
+        self._pred_card = QFrame()
+        self._pred_card.setStyleSheet(f"""
             QFrame {{
                 background: {T.AMBER_BG}; border: 1px solid {T.AMBER_BORDER};
-                border-radius: 8px; margin: 10px 12px; padding: 12px;
+                border-radius: 6px; margin: 6px 8px;
             }}
         """)
-        pc_layout = QVBoxLayout(pred_card)
-        pc_layout.setContentsMargins(12, 12, 12, 12)
-        pc_layout.setSpacing(4)
-        pred_name = QLabel("Zawał mięśnia sercowego (MI)")
-        pred_name.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {T.AMBER_TEXT};")
-        pred_name.setWordWrap(True)
-        pc_layout.addWidget(pred_name)
-        pred_conf_lbl = QLabel("Pewność modelu")
-        pred_conf_lbl.setStyleSheet(f"font-size: 11px; color: {T.AMBER_SUB};")
-        pc_layout.addWidget(pred_conf_lbl)
-        pred_pct = QLabel("87.2%")
-        pred_pct.setStyleSheet(f"font-size: 30px; font-weight: 700; font-family: Menlo; color: {T.AMBER_TEXT};")
-        pc_layout.addWidget(pred_pct)
-        bar_bg = QFrame()
-        bar_bg.setFixedHeight(8)
-        bar_bg.setStyleSheet(f"background: {T.BORDER}; border-radius: 4px;")
-        bar_fill = QFrame(bar_bg)
-        bar_fill.setFixedHeight(8)
-        bar_fill.setFixedWidth(int(200 * 0.87))
-        bar_fill.setStyleSheet(f"background: {T.AMBER}; border-radius: 4px;")
-        pc_layout.addWidget(bar_bg)
-        content_layout.addWidget(pred_card)
+        pc_layout = QVBoxLayout(self._pred_card)
+        pc_layout.setContentsMargins(10, 8, 10, 8)
+        pc_layout.setSpacing(2)
+        self._pred_name = QLabel("")
+        self._pred_name.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {T.AMBER_TEXT};")
+        self._pred_name.setWordWrap(True)
+        pc_layout.addWidget(self._pred_name)
+        # Percentage + bar in one row
+        pct_row = QHBoxLayout()
+        pct_row.setSpacing(8)
+        self._pred_pct = QLabel("")
+        self._pred_pct.setStyleSheet(f"font-size: 26px; font-weight: 700; font-family: Menlo; color: {T.AMBER_TEXT};")
+        pct_row.addWidget(self._pred_pct)
+        self._bar_bg = QFrame()
+        self._bar_bg.setFixedHeight(8)
+        self._bar_bg.setStyleSheet(f"background: {T.BORDER}; border-radius: 4px;")
+        self._bar_bg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._bar_fill = QFrame(self._bar_bg)
+        self._bar_fill.setFixedHeight(8)
+        self._bar_fill.setFixedWidth(0)
+        self._bar_fill.setStyleSheet(f"background: {T.AMBER}; border-radius: 4px;")
+        pct_row.addWidget(self._bar_bg)
+        pc_layout.addLayout(pct_row)
+        self._content_layout.addWidget(self._pred_card)
 
-        # All classes section
+        # All classes header
         cls_header = QLabel("WSZYSTKIE KLASY")
         cls_header.setStyleSheet(f"""
-            font-size: 11px; font-weight: 700; color: {T.TEXT_DIM};
-            text-transform: uppercase; margin: 8px 12px;
+            font-size: 10px; font-weight: 700; color: {T.TEXT_DIM};
+            text-transform: uppercase; padding: 4px 8px 2px 8px;
         """)
-        content_layout.addWidget(cls_header)
+        self._content_layout.addWidget(cls_header)
 
-        classes = [
-            ("Zawał (MI)", 87.2, True),
-            ("Zdrowy (NORM)", 5.8, False),
-            ("Niedokrwienne (ISC_)", 3.1, False),
-            ("Niespecyficzne (NST_)", 1.9, False),
-            ("LBBB", 0.8, False),
-            ("RBBB", 0.5, False),
-            ("Przerost LK (LVH)", 0.4, False),
-            ("Przerost PK (RVH)", 0.3, False),
-        ]
-        for name, pct, is_top in classes:
+        # Container for dynamic class rows
+        self._classes_container = QWidget()
+        self._classes_layout = QVBoxLayout(self._classes_container)
+        self._classes_layout.setContentsMargins(0, 0, 0, 0)
+        self._classes_layout.setSpacing(0)
+        self._content_layout.addWidget(self._classes_container)
+
+        self._content_layout.addStretch()
+        self._scroll.setWidget(self._content)
+        layout.addWidget(self._scroll, stretch=1)
+
+        # Footer
+        footer = QWidget()
+        footer.setStyleSheet(f"border-top: 1px solid {T.BORDER};")
+        ft_layout = QVBoxLayout(footer)
+        ft_layout.setContentsMargins(8, 6, 8, 6)
+        ft_layout.setSpacing(4)
+        self._btn_rerun = make_action_btn("Ponów analizę")
+        self._btn_rerun.clicked.connect(self.rerun.emit)
+        ft_layout.addWidget(self._btn_rerun)
+        disc = QLabel("Wynik ma charakter pomocniczy.\nDecyzja diagnostyczna należy do lekarza.")
+        disc.setStyleSheet(f"font-size: 10px; color: {T.TEXT_DIM};")
+        disc.setAlignment(Qt.AlignCenter)
+        disc.setWordWrap(True)
+        ft_layout.addWidget(disc)
+        layout.addWidget(footer)
+
+    def set_loading(self):
+        """Show loading state before inference starts."""
+        self._scroll.hide()
+        self._loading_label.show()
+        self._model_label.setText("Ładowanie modelu...")
+        self._btn_rerun.setEnabled(False)
+
+    def set_results(self, probabilities: dict, model_name: str = "",
+                    elapsed: float = 0.0, window_label: str = "",
+                    ground_truth: dict | None = None):
+        """Populate panel with real inference results."""
+        from ui.theme import CLASS_NAMES_PL
+
+        self._loading_label.hide()
+        self._scroll.show()
+        self._btn_rerun.setEnabled(True)
+
+        # Header — model info on one line, window + time on second
+        line1 = f"Model: {model_name}"
+        line2_parts = []
+        if window_label:
+            line2_parts.append(f"Okno: {window_label}")
+        line2_parts.append(f"Obliczenia: {elapsed:.2f} s")
+        self._model_label.setText(f"{line1}\n{' | '.join(line2_parts)}")
+
+        # Sort by probability descending
+        sorted_items = sorted(probabilities.items(), key=lambda x: x[1], reverse=True)
+        top_cls, top_prob = sorted_items[0]
+
+        # Top prediction card
+        pred_text = CLASS_NAMES_PL.get(top_cls, top_cls)
+        if ground_truth:
+            gt_sorted = sorted(ground_truth.items(), key=lambda x: x[1], reverse=True)
+            gt_top_cls, gt_top_prob = gt_sorted[0]
+            if gt_top_prob > 0:
+                gt_name = CLASS_NAMES_PL.get(gt_top_cls, gt_top_cls)
+                match = top_cls == gt_top_cls
+                self._pred_card.setStyleSheet(f"""
+                    QFrame {{
+                        background: {T.GREEN_BG if match else T.AMBER_BG};
+                        border: 1px solid {T.GREEN_BORDER if match else T.AMBER_BORDER};
+                        border-radius: 6px; margin: 6px 8px;
+                    }}
+                """)
+            else:
+                match = None
+        else:
+            match = None
+
+        if match is None:
+            self._pred_card.setStyleSheet(f"""
+                QFrame {{
+                    background: {T.AMBER_BG}; border: 1px solid {T.AMBER_BORDER};
+                    border-radius: 6px; margin: 6px 8px;
+                }}
+            """)
+
+        self._pred_name.setText(pred_text)
+        self._pred_pct.setText(f"{top_prob * 100:.1f}%")
+        bar_max_w = self._bar_bg.width() if self._bar_bg.width() > 10 else 150
+        self._bar_fill.setFixedWidth(max(1, int(bar_max_w * top_prob)))
+
+        # Clear old class rows
+        while self._classes_layout.count():
+            item = self._classes_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Ground truth header if available
+        if ground_truth:
+            gt_header = QLabel("PREDYKCJA vs ADNOTACJA")
+            gt_header.setStyleSheet(f"""
+                font-size: 10px; font-weight: 700; color: {T.TEXT_DIM};
+                text-transform: uppercase; padding: 2px 0;
+            """)
+            self._classes_layout.addWidget(gt_header)
+
+        # Build class rows — stacked: name line, then bar+pct line
+        for cls, prob in sorted_items:
+            is_top = (cls == top_cls)
+            gt_val = ground_truth.get(cls, 0.0) if ground_truth else None
+
             row = QWidget()
-            row.setStyleSheet("margin: 0 12px;")
-            r_layout = QHBoxLayout(row)
-            r_layout.setContentsMargins(12, 3, 12, 3)
-            r_layout.setSpacing(6)
+            r_layout = QVBoxLayout(row)
+            r_layout.setContentsMargins(8, 2, 8, 2)
+            r_layout.setSpacing(1)
 
-            name_lbl = QLabel(name)
-            name_lbl.setFixedWidth(150)
+            # Name
+            name_lbl = QLabel(CLASS_NAMES_PL.get(cls, cls))
             name_lbl.setStyleSheet(
-                f"font-size: 12px; font-weight: {'600' if is_top else '400'}; "
+                f"font-size: 11px; font-weight: {'600' if is_top else '400'}; "
                 f"color: {T.TEXT if is_top else T.TEXT_SECONDARY};"
             )
             r_layout.addWidget(name_lbl)
+
+            # Prediction bar + percentage
+            bar_row = QHBoxLayout()
+            bar_row.setSpacing(4)
+            bar_row.setContentsMargins(0, 0, 0, 0)
+
+            pred_lbl = QLabel("P")
+            pred_lbl.setFixedWidth(12)
+            pred_lbl.setStyleSheet(f"font-size: 9px; color: {T.TEXT_DIM}; font-weight: 600;")
+            bar_row.addWidget(pred_lbl)
 
             bar = QFrame()
             bar.setFixedHeight(6)
@@ -425,40 +546,50 @@ class ResultsPanel(QWidget):
             bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             fill = QFrame(bar)
             fill.setFixedHeight(6)
-            fill.setFixedWidth(max(1, int(pct)))
+            fill.setFixedWidth(max(1, int(prob * 200)))
             fill.setStyleSheet(f"background: {T.AMBER if is_top else T.BAR_BG}; border-radius: 3px;")
-            r_layout.addWidget(bar)
+            bar_row.addWidget(bar)
 
-            pct_lbl = QLabel(f"{pct}%")
-            pct_lbl.setFixedWidth(40)
-            pct_lbl.setAlignment(Qt.AlignRight)
+            pct_lbl = QLabel(f"{prob * 100:.1f}%")
+            pct_lbl.setFixedWidth(50)
+            pct_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             pct_lbl.setStyleSheet(
                 f"font-size: 11px; font-family: Menlo; "
                 f"color: {T.TEXT if is_top else T.TEXT_MUTED}; "
                 f"font-weight: {'600' if is_top else '400'};"
             )
-            r_layout.addWidget(pct_lbl)
-            content_layout.addWidget(row)
+            bar_row.addWidget(pct_lbl)
+            r_layout.addLayout(bar_row)
 
-        content_layout.addStretch()
-        scroll.setWidget(content)
-        layout.addWidget(scroll, stretch=1)
+            # Ground truth bar (if available)
+            if gt_val is not None:
+                gt_row = QHBoxLayout()
+                gt_row.setSpacing(4)
+                gt_row.setContentsMargins(0, 0, 0, 0)
 
-        # Footer
-        footer = QWidget()
-        footer.setStyleSheet(f"border-top: 1px solid {T.BORDER};")
-        ft_layout = QVBoxLayout(footer)
-        ft_layout.setContentsMargins(10, 10, 10, 10)
-        ft_layout.setSpacing(6)
-        btn_rerun = make_action_btn("Ponów analizę")
-        btn_rerun.clicked.connect(self.rerun.emit)
-        ft_layout.addWidget(btn_rerun)
-        disc = QLabel("Wynik ma charakter pomocniczy.\nOstateczna decyzja diagnostyczna należy do lekarza.")
-        disc.setStyleSheet(f"font-size: 11px; color: {T.TEXT_DIM}; text-align: center;")
-        disc.setAlignment(Qt.AlignCenter)
-        disc.setWordWrap(True)
-        ft_layout.addWidget(disc)
-        layout.addWidget(footer)
+                gt_label = QLabel("A")
+                gt_label.setFixedWidth(12)
+                gt_label.setStyleSheet(f"font-size: 9px; color: {T.GREEN}; font-weight: 600;")
+                gt_row.addWidget(gt_label)
+
+                gt_bar = QFrame()
+                gt_bar.setFixedHeight(6)
+                gt_bar.setStyleSheet(f"background: {T.BORDER_LIGHT}; border-radius: 3px;")
+                gt_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                gt_fill = QFrame(gt_bar)
+                gt_fill.setFixedHeight(6)
+                gt_fill.setFixedWidth(max(1, int(gt_val * 200)))
+                gt_fill.setStyleSheet(f"background: {T.GREEN}; border-radius: 3px;")
+                gt_row.addWidget(gt_bar)
+
+                gt_pct = QLabel(f"{gt_val * 100:.1f}%")
+                gt_pct.setFixedWidth(50)
+                gt_pct.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                gt_pct.setStyleSheet(f"font-size: 11px; font-family: Menlo; color: {T.GREEN};")
+                gt_row.addWidget(gt_pct)
+                r_layout.addLayout(gt_row)
+
+            self._classes_layout.addWidget(row)
 
     def apply_theme(self):
         self.setStyleSheet(f"background: {T.WHITE}; border-left: 1px solid {T.BORDER};")

@@ -202,6 +202,29 @@ QTextEdit {{
 
 set_dark_mode(False)
 
+# AI model class definitions
+TARGET_CLASSES = [
+    "class_healthy",
+    "class_front_heart_attack",
+    "class_side_heart_attack",
+    "class_bottom_heart_attack",
+    "class_back_heart_attack",
+    "class_complete_right_conduction_disorder",
+    "class_incomplete_right_conduction_disorder",
+    "class_complete_left_conduction_disorder",
+]
+
+CLASS_NAMES_PL = {
+    "class_healthy": "Zdrowy (NORM)",
+    "class_front_heart_attack": "Zawał przedniej ściany",
+    "class_side_heart_attack": "Zawał ściany bocznej",
+    "class_bottom_heart_attack": "Zawał ściany dolnej",
+    "class_back_heart_attack": "Zawał ściany tylnej",
+    "class_complete_right_conduction_disorder": "Całkowity blok prawej odnogi (CRBBB)",
+    "class_incomplete_right_conduction_disorder": "Niepełny blok prawej odnogi (IRBBB)",
+    "class_complete_left_conduction_disorder": "Całkowity blok lewej odnogi (CLBBB)",
+}
+
 # Lead definitions
 STANDARD_LEADS = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
 LEAD_GRID = [["I", "aVR", "V1", "V4"], ["II", "aVL", "V2", "V5"], ["III", "aVF", "V3", "V6"]]

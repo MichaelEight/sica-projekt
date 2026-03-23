@@ -317,16 +317,16 @@ class ReportPage(QWidget):
         """)
         ai_layout = QVBoxLayout(ai_box)
         ai_layout.setContentsMargins(12, 12, 12, 12)
-        ai_diag = QLabel("Zawał mięśnia sercowego (MI) — 87.2%")
-        ai_diag.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {T.AMBER_TEXT};")
-        ai_layout.addWidget(ai_diag)
-        ai_conf = QLabel("NORM: 5.8% | ISC_: 3.1% | NST_: 1.9% | LBBB: 0.8% | RBBB: 0.5%")
-        ai_conf.setStyleSheet(f"font-size: 12px; color: {T.AMBER_SUB};")
-        ai_conf.setWordWrap(True)
-        ai_layout.addWidget(ai_conf)
-        ai_model = QLabel("Model: Inception1D | Czas: 1.2 s")
-        ai_model.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
-        ai_layout.addWidget(ai_model)
+        self._ai_diag = QLabel("Brak analizy")
+        self._ai_diag.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {T.AMBER_TEXT};")
+        ai_layout.addWidget(self._ai_diag)
+        self._ai_conf = QLabel("")
+        self._ai_conf.setStyleSheet(f"font-size: 12px; color: {T.AMBER_SUB};")
+        self._ai_conf.setWordWrap(True)
+        ai_layout.addWidget(self._ai_conf)
+        self._ai_model = QLabel("")
+        self._ai_model.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
+        ai_layout.addWidget(self._ai_model)
         r_layout.addWidget(ai_box)
 
         # Annotations
@@ -421,6 +421,16 @@ class ReportPage(QWidget):
         self.ecg_preview.leads = leads
         self.ecg_preview.fs = fs
         self.ecg_preview.update()
+
+    def set_results(self, probabilities: dict, model_name: str = "", elapsed: float = 0.0):
+        """Update AI analysis section with real results."""
+        from ui.theme import CLASS_NAMES_PL
+        sorted_items = sorted(probabilities.items(), key=lambda x: x[1], reverse=True)
+        top_cls, top_prob = sorted_items[0]
+        self._ai_diag.setText(f"{CLASS_NAMES_PL.get(top_cls, top_cls)} — {top_prob * 100:.1f}%")
+        others = [f"{CLASS_NAMES_PL.get(c, c)}: {p * 100:.1f}%" for c, p in sorted_items[1:]]
+        self._ai_conf.setText(" | ".join(others))
+        self._ai_model.setText(f"Model: {model_name} | Czas: {elapsed:.1f} s")
 
     def _export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(self, "Eksportuj PDF", "raport_ekg.pdf", "PDF (*.pdf)")

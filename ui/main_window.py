@@ -1,9 +1,12 @@
 """Main application window orchestrating all pages."""
+import ast
 import os
+import pickle
+import threading
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
-from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QMessageBox
+from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QMessageBox, QApplication
 
 import ui.theme as T
 from ui.theme import STANDARD_LEADS
@@ -17,6 +20,62 @@ try:
     HAS_WFDB = True
 except ImportError:
     HAS_WFDB = False
+
+# ── Ground truth cache ──────────────────────────────────────
+_GT_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".cache")
+_GT_CACHE_PATH = os.path.join(_GT_CACHE_DIR, "gt_lookup.pkl")
+_CSV_PATH = os.path.join("data", "ptb-xl", "ptbxl_database.csv")
+
+
+def _build_gt_lookup() -> dict:
+    """Build {filename: ground_truth_dict} from ptbxl_database.csv.
+
+    This avoids repeated pandas loads and string matching at runtime.
+    """
+    import pandas as pd
+    from data.filter_data import parse_scp_codes, aggregate_classes
+    from ui.theme import TARGET_CLASSES
+
+    db = pd.read_csv(_CSV_PATH, index_col="ecg_id")
+    lookup = {}
+    for _, row in db.iterrows():
+        scp = parse_scp_codes(row["scp_codes"])
+        scores = aggregate_classes(scp)
+        gt = {}
+        for cls in TARGET_CLASSES:
+            key = cls.replace("class_", "")
+            gt[cls] = scores.get(key, 0.0) / 100.0
+        for col in ["filename_hr", "filename_lr"]:
+            fn = row[col].strip() if isinstance(row[col], str) else ""
+            if fn:
+                lookup[fn] = gt
+    return lookup
+
+
+def _load_or_build_gt_cache() -> dict:
+    """Load cached lookup or build + save it."""
+    if not os.path.exists(_CSV_PATH):
+        return {}
+
+    csv_mtime = os.path.getmtime(_CSV_PATH)
+
+    if os.path.exists(_GT_CACHE_PATH):
+        try:
+            cache_mtime = os.path.getmtime(_GT_CACHE_PATH)
+            if cache_mtime >= csv_mtime:
+                with open(_GT_CACHE_PATH, "rb") as f:
+                    return pickle.load(f)
+        except Exception:
+            pass
+
+    lookup = _build_gt_lookup()
+    try:
+        os.makedirs(_GT_CACHE_DIR, exist_ok=True)
+        with open(_GT_CACHE_PATH, "wb") as f:
+            pickle.dump(lookup, f, protocol=pickle.HIGHEST_PROTOCOL)
+    except Exception:
+        pass
+    return lookup
 
 
 _LEAD_ALIASES = {
@@ -68,6 +127,12 @@ class MainWindow(QMainWindow):
         self._fs = 500
         self._filename = ""
 
+        # Ground truth lookup — loaded in background thread
+        self._gt_lookup = {}
+        self._gt_ready = threading.Event()
+        self._gt_thread = threading.Thread(target=self._bg_load_gt, daemon=True)
+        self._gt_thread.start()
+
         self._setup_shortcuts()
 
     def _setup_shortcuts(self):
@@ -109,8 +174,34 @@ class MainWindow(QMainWindow):
                 self._go_viewer()
         _sc(Qt.Key_Escape, _on_escape)
 
+    def _bg_load_gt(self):
+        """Background thread: load or build ground truth cache."""
+        try:
+            self._gt_lookup = _load_or_build_gt_cache()
+        except Exception:
+            self._gt_lookup = {}
+        self._gt_ready.set()
+
+    def _lookup_ground_truth(self, base_path: str) -> dict | None:
+        """Fast dict lookup for ground truth. Waits for cache if still loading."""
+        if not self._gt_ready.wait(timeout=10.0):
+            return None
+        if not self._gt_lookup:
+            return None
+
+        path = base_path.replace("\\", "/")
+        for suffix in ["records500/", "records100/"]:
+            idx = path.find(suffix)
+            if idx >= 0:
+                return self._gt_lookup.get(path[idx:])
+        return None
+
     def _load_file(self, base_path: str):
         """Load a WFDB record or generate demo data."""
+        # Show loading indicator
+        self.statusBar().showMessage("Wczytywanie pliku...")
+        QApplication.processEvents()
+
         dat_path = base_path + ".dat"
         hea_path = base_path + ".hea"
 
@@ -125,6 +216,7 @@ class MainWindow(QMainWindow):
                 info = f"{self._fs} Hz · {len(self._leads)} odprowadzeń · {self._signal.shape[0] / self._fs:.1f} s"
                 add_recent(base_path, info)
             except Exception as e:
+                self.statusBar().clearMessage()
                 QMessageBox.warning(self, "Błąd", f"Nie udało się wczytać pliku:\n{e}")
                 return
         else:
@@ -134,9 +226,16 @@ class MainWindow(QMainWindow):
             self._filename = os.path.basename(base_path) + ".dat" if base_path else "demo.dat"
             add_recent(base_path or "demo", f"{self._fs} Hz · 12 odprowadzeń · 10.0 s")
 
-        self.viewer_page.set_signal(self._signal, self._leads, self._fs, self._filename)
+        # Look up ground truth (fast dict lookup, cache built in background)
+        self.statusBar().showMessage("Wczytywanie adnotacji...")
+        QApplication.processEvents()
+        ground_truth = self._lookup_ground_truth(base_path)
+
+        self.viewer_page.set_signal(self._signal, self._leads, self._fs, self._filename,
+                                    ground_truth=ground_truth)
         self.report_page.set_signal(self._signal, self._leads, self._fs, self._filename)
 
+        self.statusBar().clearMessage()
         self.stack.setCurrentIndex(1)
 
     def _go_upload(self):
@@ -147,6 +246,9 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(1)
 
     def _go_report(self):
+        if self.viewer_page._last_results:
+            r = self.viewer_page._last_results
+            self.report_page.set_results(r["probabilities"], r["model_name"], r["elapsed"])
         self.stack.setCurrentIndex(2)
 
     def _toggle_dark_mode(self):
