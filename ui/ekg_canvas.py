@@ -59,6 +59,7 @@ class EkgCellCanvas(QWidget):
         self.show_zero_line = False
         self.analysis_region = None       # (t_start, t_end) or None
         self.analysis_clickable_end = None  # max clickable time or None
+        self.autoscan_regions = []        # list of (t_start, t_end, color_code)
         self.setMinimumSize(80, 40)
 
     def clear(self):
@@ -78,6 +79,7 @@ class EkgCellCanvas(QWidget):
         self._old_t_end = 2.5
         self.analysis_region = None
         self.analysis_clickable_end = None
+        self.autoscan_regions = []
         self.update()
 
     def set_data(self, lead_name: str, signal: np.ndarray, fs: int,
@@ -285,6 +287,27 @@ class EkgCellCanvas(QWidget):
             painter.setPen(QPen(QColor(T.ACCENT), 2))
             painter.drawLine(QPointF(sx, 0), QPointF(sx, h))
 
+        # Autoscan colored regions
+        if self.autoscan_regions:
+            cal_w_a = w * 0.06 if self.show_cal else 0
+            sig_s_a = (5 + cal_w_a + 4) if self.show_cal else 0
+            sig_w_a = w - sig_s_a
+            if sig_w_a > 0 and duration > 0:
+                _AUTOSCAN_COLORS = {
+                    1: QColor(250, 204, 21, 45),   # yellow (borderline)
+                    2: QColor(239, 68, 68, 40),     # red (illness)
+                }
+                for ar_s, ar_e, code in self.autoscan_regions:
+                    if code == 0:
+                        continue  # healthy = no overlay
+                    ax1 = sig_s_a + ((ar_s - self.t_start) / duration) * sig_w_a
+                    ax2 = sig_s_a + ((ar_e - self.t_start) / duration) * sig_w_a
+                    ax1 = max(sig_s_a, ax1)
+                    ax2 = min(float(w), ax2)
+                    if ax2 > ax1:
+                        painter.fillRect(QRectF(ax1, 0, ax2 - ax1, h),
+                                         _AUTOSCAN_COLORS[min(code, 2)])
+
         # Analysis overlay
         if self.analysis_clickable_end is not None or self.analysis_region is not None:
             cal_w = w * 0.06 if self.show_cal else 0
@@ -425,6 +448,17 @@ class TwelveLeadGrid(QWidget):
 
     def clear_analysis_overlay(self):
         self.set_analysis_overlay(None, None)
+
+    def set_autoscan_regions(self, regions: list):
+        """Set colored autoscan regions on all cells."""
+        for cell in self.cells.values():
+            cell.autoscan_regions = regions
+            cell.update()
+        self.rhythm.autoscan_regions = regions
+        self.rhythm.update()
+
+    def clear_autoscan_regions(self):
+        self.set_autoscan_regions([])
 
     def clear(self):
         """Clear all cells."""

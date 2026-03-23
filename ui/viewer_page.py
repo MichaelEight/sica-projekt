@@ -1,5 +1,7 @@
 """Main EKG viewer page with toolbar, view modes, panels, navigation bar."""
 import glob
+import hashlib
+import json
 import os
 import time
 
@@ -185,6 +187,9 @@ class ViewerPage(QWidget):
         self._last_results = None
         self._analysis_mode = False
         self._analysis_start = None
+        self._autoscan_active = False
+        self._autoscan_results = None
+        self._autoscan_file_path = None
         self._monitor_timer = QTimer(self)
         self._monitor_timer.setInterval(50)
         self._monitor_timer.timeout.connect(self._monitor_tick)
@@ -233,9 +238,11 @@ class ViewerPage(QWidget):
         tb.addStretch()
 
         self.analysis_badge = QLabel("Analiza zakończona")
+        self.analysis_badge.setFont(QFont(".AppleSystemUIFont", 11))
+        self.analysis_badge.setFixedHeight(24)
         self.analysis_badge.setStyleSheet(f"""
             font-size: 11px; background: {T.BADGE_NORM_BG}; color: {T.BADGE_NORM_TEXT};
-            padding: 4px 10px; border-radius: 4px; font-weight: 600;
+            padding: 0px 8px; border-radius: 3px; font-weight: 600;
         """)
         self.analysis_badge.hide()
         tb.addWidget(self.analysis_badge)
@@ -299,6 +306,11 @@ class ViewerPage(QWidget):
         self._populate_model_combo()
         self.model_combo.currentIndexChanged.connect(self._on_model_changed)
         tb2.addWidget(self.model_combo)
+
+        # Autoscan toggle
+        self.btn_autoscan = ToolbarBtn("Autoskan", False)
+        self.btn_autoscan.clicked.connect(self._toggle_autoscan)
+        tb2.addWidget(self.btn_autoscan)
 
         # Analysis selection toggle
         self.btn_mark_analysis = ToolbarBtn("Zaznacz do analizy", False)
@@ -459,7 +471,7 @@ class ViewerPage(QWidget):
         self.file_label.setStyleSheet(f"font-size:11px; color:{T.BTN_TEXT}; font-family:Menlo;")
         self.analysis_badge.setStyleSheet(f"""
             font-size: 11px; background: {T.BADGE_NORM_BG}; color: {T.BADGE_NORM_TEXT};
-            padding: 4px 10px; border-radius: 4px; font-weight: 600;
+            padding: 0px 8px; border-radius: 3px; font-weight: 600;
         """)
         self.view_seg._apply_styles()
         for btn in self.tool_btns:
@@ -569,6 +581,14 @@ class ViewerPage(QWidget):
         self.btn_mark_analysis.set_active(False)
         self._clear_analysis_overlay()
 
+        # Reset autoscan
+        self._autoscan_active = False
+        self._autoscan_results = None
+        self._autoscan_file_path = None
+        self.btn_autoscan.set_active(False)
+        self.grid_12.clear_autoscan_regions()
+        self.single_lead.autoscan_regions = []
+
         # Enable/disable analysis based on duration
         min_samples = int(10.0 * self.fs)
         if self.signal.shape[0] < min_samples:
@@ -576,15 +596,18 @@ class ViewerPage(QWidget):
             self.btn_analyze.setEnabled(False)
             self.btn_analyze.setToolTip("Analiza wymaga co najmniej 10s nagrania")
             self.btn_mark_analysis.hide()
+            self.btn_autoscan.hide()
         elif self.signal.shape[0] == min_samples:
             # Exactly 10s — analyze whole file, no marking needed
             self.btn_analyze.setEnabled(True)
             self.btn_analyze.setToolTip("")
             self.btn_mark_analysis.hide()
+            self.btn_autoscan.hide()
         else:
             # Longer than 10s — require explicit window selection
             self.btn_analyze.setEnabled(True)
             self.btn_analyze.setToolTip("")
+            self.btn_autoscan.show()
             self.btn_mark_analysis.show()
 
         max_window = max(self._window_12, self._window_1)
@@ -769,6 +792,128 @@ class ViewerPage(QWidget):
         self.grid_12.clear_analysis_overlay()
         self.single_lead.analysis_region = None
         self.single_lead.analysis_clickable_end = None
+        self.single_lead.update()
+
+    # ── Autoscan ────────────────────────────────────────────────
+
+    def _autoscan_cache_path(self) -> str:
+        key = f"{self._autoscan_file_path}:{self._model_path}"
+        h = hashlib.md5(key.encode()).hexdigest()
+        return os.path.join(".cache", "autoscan", f"{h}.json")
+
+    def _load_autoscan_cache(self) -> list | None:
+        path = self._autoscan_cache_path()
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            return data.get("windows")
+        except Exception:
+            return None
+
+    def _save_autoscan_cache(self, results: list):
+        path = self._autoscan_cache_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump({"windows": results}, f)
+
+    def _toggle_autoscan(self):
+        if self.signal is None:
+            return
+        self._autoscan_active = not self._autoscan_active
+        self.btn_autoscan.set_active(self._autoscan_active)
+
+        if self._autoscan_active:
+            # Try cache first
+            self._autoscan_file_path = self.filename
+            cached = self._load_autoscan_cache() if self._model_path else None
+            if cached:
+                self._autoscan_results = cached
+                self._apply_autoscan_overlay()
+            else:
+                self._run_autoscan()
+        else:
+            self._clear_autoscan_overlay()
+
+    def _run_autoscan(self):
+        """Slide a 10s window across the signal and classify each segment."""
+        try:
+            model, device = self._ensure_model_loaded()
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Błąd", f"Nie udało się załadować modelu:\n{e}")
+            self._autoscan_active = False
+            self.btn_autoscan.set_active(False)
+            return
+
+        from model.inference_api import predict_with_model
+
+        window_sec = 10.0
+        step_sec = 5.0
+        window_samples = int(window_sec * self.fs)
+        step_samples = int(step_sec * self.fs)
+        total = self.signal.shape[0]
+
+        # Build window starts
+        starts = list(range(0, total - window_samples + 1, step_samples))
+        # Ensure last window ends at signal end
+        last_start = total - window_samples
+        if not starts or starts[-1] != last_start:
+            starts.append(last_start)
+
+        n_windows = len(starts)
+        results = []
+
+        for i, s in enumerate(starts):
+            self.st_center.setText(f"Autoskan: {i + 1}/{n_windows} okien...")
+            QApplication.processEvents()
+
+            window = self.signal[s:s + window_samples]
+            t_start = s / self.fs
+            t_end = (s + window_samples) / self.fs
+
+            try:
+                res = predict_with_model(
+                    model=model, data=window, threshold=0.5,
+                    class_names=TARGET_CLASSES, device=device,
+                )
+                probs = res["probabilities"][0]
+                prob_dict = {cls: float(probs[j]) for j, cls in enumerate(TARGET_CLASSES)}
+            except Exception:
+                prob_dict = {cls: 0.0 for cls in TARGET_CLASSES}
+
+            # Determine color
+            top_cls = max(prob_dict, key=prob_dict.get)
+            top_prob = prob_dict[top_cls]
+            if top_cls == "class_healthy" and top_prob >= 0.5:
+                color = 0  # green
+            elif top_cls != "class_healthy" and top_prob >= 0.5:
+                color = 2  # red
+            else:
+                color = 1  # yellow
+
+            results.append({
+                "t_start": t_start, "t_end": t_end,
+                "color": color, "probs": prob_dict,
+            })
+
+        self._autoscan_results = results
+        self._save_autoscan_cache(results)
+        self._apply_autoscan_overlay()
+        self._update_statusbar()
+
+    def _apply_autoscan_overlay(self):
+        if not self._autoscan_results:
+            return
+        regions = [(r["t_start"], r["t_end"], r["color"]) for r in self._autoscan_results]
+        self.grid_12.set_autoscan_regions(regions)
+        self.single_lead.autoscan_regions = regions
+        self.single_lead.update()
+
+    def _clear_autoscan_overlay(self):
+        self.grid_12.clear_autoscan_regions()
+        self.single_lead.autoscan_regions = []
         self.single_lead.update()
 
     def _resolve_ground_truth(self, t_start: float, t_end: float) -> dict | None:
