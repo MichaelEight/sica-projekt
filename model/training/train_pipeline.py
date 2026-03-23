@@ -219,10 +219,14 @@ def _append_train_log(log_path: Path, epoch: int, train_loss: float, val_loss: f
 
 def _plot_curves(history: dict[str, list[float]]) -> None:
     epochs = np.arange(1, len(history["train_loss"]) + 1)
+    val_losses = np.asarray(history["val_loss"], dtype=np.float32)
+    val_mask = np.isfinite(val_losses)
+    val_epochs = epochs[val_mask]
 
     plt.figure(figsize=(8, 5))
     plt.plot(epochs, history["train_loss"], label="train_loss")
-    plt.plot(epochs, history["val_loss"], label="val_loss")
+    if np.any(val_mask):
+        plt.plot(val_epochs, val_losses[val_mask], marker="o", linewidth=1.8, label="val_loss")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.title("Training/Validation Loss")
@@ -230,17 +234,6 @@ def _plot_curves(history: dict[str, list[float]]) -> None:
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(ANNOTATIONS_DIR / "loss_curve.png", dpi=150)
-    plt.close()
-
-    plt.figure(figsize=(8, 5))
-    plt.plot(epochs, history["val_macro_auc"], label="val_macro_auc")
-    plt.xlabel("Epoch")
-    plt.ylabel("AUC")
-    plt.title("Validation Macro AUC")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(ANNOTATIONS_DIR / "auc_curve.png", dpi=150)
     plt.close()
 
 
