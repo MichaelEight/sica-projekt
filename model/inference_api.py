@@ -5,8 +5,14 @@ from typing import Any
 
 import numpy as np
 import torch
+import wfdb
 
 from model.models import Inception1DNet
+
+
+TARGET_FS = 500
+MIN_SECONDS = 10
+TARGET_LENGTH = TARGET_FS * MIN_SECONDS
 
 
 def _normalize_input_shape(data: np.ndarray | torch.Tensor) -> np.ndarray:
@@ -36,18 +42,63 @@ def _normalize_input_shape(data: np.ndarray | torch.Tensor) -> np.ndarray:
     return arr.astype(np.float32, copy=False)
 
 
-def _fix_length(batch: np.ndarray, target_length: int = 5000) -> np.ndarray:
-    """Center-crop or right-pad each sample to target_length."""
-    fixed = np.zeros((batch.shape[0], 12, target_length), dtype=np.float32)
-    for i in range(batch.shape[0]):
-        sample = batch[i]
-        n = sample.shape[1]
-        if n >= target_length:
-            start = (n - target_length) // 2
-            fixed[i] = sample[:, start : start + target_length]
-        else:
-            fixed[i, :, :n] = sample
-    return fixed
+def _resolve_wfdb_base(path_like: str | Path) -> str:
+    path = Path(path_like)
+    if path.suffix.lower() in {".hea", ".dat"}:
+        path = path.with_suffix("")
+    return str(path)
+
+
+def _read_wfdb_record(path_like: str | Path) -> np.ndarray:
+    """Read WFDB record and return array with shape (12, N)."""
+    base = _resolve_wfdb_base(path_like)
+    signal_arr, _ = wfdb.rdsamp(base)
+    signal = np.asarray(signal_arr, dtype=np.float32).T
+    if signal.shape[0] != 12:
+        raise ValueError(f"Expected 12 leads, got {signal.shape[0]} for record: {path_like}")
+    return signal
+
+
+def _split_sample_windows(sample: np.ndarray, target_length: int = TARGET_LENGTH) -> tuple[list[np.ndarray], list[tuple[int, int]]]:
+    """Split one sample (12, N) into windows of target_length.
+
+    For N > target_length, creates non-overlapping chunks and an extra last chunk
+    ending at N when remainder exists.
+    """
+    n = sample.shape[1]
+    if n < target_length:
+        raise ValueError(
+            f"Record is shorter than {MIN_SECONDS}s ({target_length} samples at {TARGET_FS} Hz): got {n}."
+        )
+
+    if n == target_length:
+        return [sample], [(0, target_length)]
+
+    starts = list(range(0, n - target_length + 1, target_length))
+    last_start = n - target_length
+    if starts[-1] != last_start:
+        starts.append(last_start)
+
+    windows = [sample[:, s : s + target_length] for s in starts]
+    ranges = [(s, s + target_length) for s in starts]
+    return windows, ranges
+
+
+def _load_samples(data: np.ndarray | torch.Tensor | str | Path | list[str] | list[Path]) -> tuple[list[np.ndarray], list[str]]:
+    """Load input into a list of arrays (12, N) and source ids."""
+    if isinstance(data, (str, Path)):
+        sample = _read_wfdb_record(data)
+        return [sample], [str(data)]
+
+    if isinstance(data, list) and data and isinstance(data[0], (str, Path)):
+        samples = [_read_wfdb_record(p) for p in data]
+        sources = [str(p) for p in data]
+        return samples, sources
+
+    arr = _normalize_input_shape(data)  # type: ignore[arg-type]
+    samples = [arr[i] for i in range(arr.shape[0])]
+    sources = [f"input_{i}" for i in range(arr.shape[0])]
+    return samples, sources
 
 
 def _resolve_device(device: str | torch.device | None = None) -> torch.device:
@@ -82,14 +133,35 @@ def load_checkpoint_model(
 
 def predict_with_model(
     model: Inception1DNet,
-    data: np.ndarray | torch.Tensor,
+    data: np.ndarray | torch.Tensor | str | Path | list[str] | list[Path],
     threshold: float = 0.5,
     class_names: list[str] | None = None,
     device: str | torch.device | None = None,
 ) -> dict[str, Any]:
-    """Run model inference and return probabilities plus binary predictions."""
-    arr = _normalize_input_shape(data)
-    arr = _fix_length(arr, target_length=5000)
+    """Run inference for tensor/ndarray input or WFDB record path(s).
+
+    Input records can be longer than 10s and are automatically split into
+    10-second windows (5000 samples). Predictions are aggregated per input item
+    by mean probability across windows.
+    """
+    samples, sources = _load_samples(data)
+
+    segment_arrays: list[np.ndarray] = []
+    segment_meta: list[dict[str, Any]] = []
+    for source_idx, sample in enumerate(samples):
+        windows, ranges = _split_sample_windows(sample, target_length=TARGET_LENGTH)
+        for win, (start, end) in zip(windows, ranges):
+            segment_arrays.append(win)
+            segment_meta.append(
+                {
+                    "source_index": source_idx,
+                    "source_id": sources[source_idx],
+                    "start": int(start),
+                    "end": int(end),
+                }
+            )
+
+    arr = np.stack(segment_arrays, axis=0).astype(np.float32, copy=False)
 
     if device is None or str(device) == "auto":
         resolved_device = next(model.parameters()).device
@@ -102,27 +174,39 @@ def predict_with_model(
     with torch.no_grad():
         probs = model.forward_inference(x).detach().cpu().numpy()
 
-    preds = (probs >= threshold).astype(np.int32)
+    segment_preds = (probs >= threshold).astype(np.int32)
     num_classes = probs.shape[1]
     classes = class_names if class_names is not None else [f"class_{i}" for i in range(num_classes)]
 
+    per_input_probs: list[np.ndarray] = []
+    for i in range(len(samples)):
+        idxs = [k for k, m in enumerate(segment_meta) if int(m["source_index"]) == i]
+        per_input_probs.append(probs[idxs].mean(axis=0))
+
+    agg_probs = np.stack(per_input_probs, axis=0)
+    agg_preds = (agg_probs >= threshold).astype(np.int32)
+
     positive_labels = [
-        [classes[j] for j in range(num_classes) if preds[i, j] == 1]
-        for i in range(preds.shape[0])
+        [classes[j] for j in range(num_classes) if agg_preds[i, j] == 1]
+        for i in range(agg_preds.shape[0])
     ]
 
     return {
         "class_names": classes,
         "threshold": float(threshold),
-        "probabilities": probs.tolist(),
-        "predictions": preds.tolist(),
+        "probabilities": agg_probs.tolist(),
+        "predictions": agg_preds.tolist(),
         "positive_labels": positive_labels,
+        "source_ids": sources,
+        "segment_probabilities": probs.tolist(),
+        "segment_predictions": segment_preds.tolist(),
+        "segments": segment_meta,
     }
 
 
 def predict_from_checkpoint(
     weights_path: str | Path,
-    data: np.ndarray | torch.Tensor,
+    data: np.ndarray | torch.Tensor | str | Path | list[str] | list[Path],
     threshold: float = 0.5,
     class_names: list[str] | None = None,
     device: str | torch.device | None = None,
