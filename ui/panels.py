@@ -6,39 +6,11 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QScrollArea, QSizePolicy)
 
 import ui.theme as T
+from ui.widgets import section_header, info_row, make_action_btn
 
 
-def _section_header(text: str) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setStyleSheet(f"""
-        font-size: 11px; font-weight: 700; color: {T.TEXT_DIM};
-        text-transform: uppercase; letter-spacing: 0.5px;
-        padding-bottom: 4px; border-bottom: 1px solid {T.BORDER_LIGHT};
-    """)
-    return lbl
-
-
-def _info_row(label: str, value: str, unit: str = "") -> QWidget:
-    row = QWidget()
-    layout = QHBoxLayout(row)
-    layout.setContentsMargins(0, 0, 0, 0)
-    lbl = QLabel(label)
-    lbl.setStyleSheet(f"color: {T.TEXT_MUTED}; font-size: 12px;")
-    val_text = f'{value} <span style="font-size:10px;color:{T.TEXT_DIM};">{unit}</span>' if unit else value
-    val = QLabel(val_text)
-    val.setTextFormat(Qt.RichText)
-    val.setStyleSheet("font-weight: 600; font-family: Menlo; font-size: 13px;")
-    val.setAlignment(Qt.AlignRight)
-    layout.addWidget(lbl)
-    layout.addStretch()
-    layout.addWidget(val)
-    return row
-
-
-# ── Info Panel (Patient + Measurements) ────────
+# Info Panel (Patient + Measurements)
 class InfoPanel(QWidget):
-    """Left info panel for 12-lead view."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(160)
@@ -48,23 +20,21 @@ class InfoPanel(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(4)
 
-        # Patient section
-        layout.addWidget(_section_header("Pacjent"))
+        layout.addWidget(section_header("Pacjent"))
         self.patient_rows = {}
         for key, label, val, unit in [
             ("id", "ID", "00888", ""),
             ("age", "Wiek", "62", "lat"),
-            ("sex", "P\u0142e\u0107", "M", ""),
+            ("sex", "Płeć", "M", ""),
             ("date", "Data", "15.03.26", ""),
         ]:
-            row = _info_row(label, val, unit)
+            row = info_row(label, val, unit)
             self.patient_rows[key] = row
             layout.addWidget(row)
 
         layout.addSpacing(10)
 
-        # Measurements section
-        layout.addWidget(_section_header("Pomiary"))
+        layout.addWidget(section_header("Pomiary"))
         self.meas_rows = {}
         for key, label, val, unit in [
             ("hr", "HR", "72", "bpm"),
@@ -72,30 +42,26 @@ class InfoPanel(QWidget):
             ("qrs", "QRS", "88", "ms"),
             ("qt", "QT", "392", "ms"),
             ("qtc", "QTc", "429", "ms"),
-            ("axis", "O\u015b", "+55\u00b0", ""),
+            ("axis", "Oś", "+55°", ""),
         ]:
-            row = _info_row(label, val, unit)
+            row = info_row(label, val, unit)
             self.meas_rows[key] = row
             layout.addWidget(row)
 
         layout.addStretch()
 
     def set_patient(self, patient_id="", age="", sex="", date=""):
-        """Update patient info — placeholder for real data."""
         pass
 
     def set_measurements(self, hr="", pr="", qrs="", qt_val="", qtc="", axis=""):
-        """Update measurements — placeholder for real data."""
         pass
 
     def apply_theme(self):
         self.setStyleSheet(f"background: {T.WHITE}; border-right: 1px solid {T.BORDER};")
 
 
-# ── Caliper Panel ──────────────────────────────
+# Caliper Panel
 class CaliperPanel(QWidget):
-    """Right panel for caliper measurements."""
-
     add_caliper = Signal()
     clear_all = Signal()
 
@@ -116,7 +82,7 @@ class CaliperPanel(QWidget):
         h_title = QLabel("Suwmiarka")
         h_title.setFont(QFont(".AppleSystemUIFont", 13, QFont.DemiBold))
         h_layout.addWidget(h_title)
-        h_sub = QLabel("Kliknij 2 punkty na sygnale, aby zmierzy\u0107")
+        h_sub = QLabel("Kliknij 2 punkty na sygnale, aby zmierzyć")
         h_sub.setStyleSheet(f"color: {T.TEXT_MUTED}; font-size: 11px;")
         h_layout.addWidget(h_sub)
         layout.addWidget(header)
@@ -134,17 +100,17 @@ class CaliperPanel(QWidget):
         layout.addWidget(scroll, stretch=1)
 
         # Demo measurements
-        self._add_measurement("Pomiar 1 \u2014 PR interval", "164 ms", "Odpr: II | 1.220 s \u2192 1.384 s",
-                              T.ACCENT, "blue")
-        self._add_measurement("Pomiar 2 \u2014 QRS", "88 ms", "Odpr: II | 1.384 s \u2192 1.472 s",
-                              T.PURPLE, "purple")
-        self._add_measurement("Pomiar 3 \u2014 R-R", "832 ms", "Odpr: II | 1.432 s \u2192 2.264 s",
-                              T.GREEN, "green")
+        self._add_measurement("Pomiar 1 — PR interval", "164 ms",
+                              "Odpr: II | 1.220 s → 1.384 s", T.ACCENT, "blue")
+        self._add_measurement("Pomiar 2 — QRS", "88 ms",
+                              "Odpr: II | 1.384 s → 1.472 s", T.PURPLE, "purple")
+        self._add_measurement("Pomiar 3 — R-R", "832 ms",
+                              "Odpr: II | 1.432 s → 2.264 s", T.GREEN, "green")
 
         # HR box
         hr_box = QFrame()
         hr_box.setStyleSheet(f"""
-            QFrame {{ background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px;
+            QFrame {{ background: {T.GREEN_BG}; border: 1px solid {T.GREEN_BORDER}; border-radius: 6px;
                       margin: 6px 10px; padding: 10px 12px; }}
         """)
         hr_layout = QVBoxLayout(hr_box)
@@ -166,46 +132,41 @@ class CaliperPanel(QWidget):
         a_layout = QVBoxLayout(actions)
         a_layout.setContentsMargins(10, 10, 10, 10)
         a_layout.setSpacing(6)
-        btn_add = QPushButton("Dodaj suwmiark\u0119")
-        btn_add.setObjectName("primary")
+        btn_add = make_action_btn("Dodaj suwmiarkę", primary=True)
         btn_add.clicked.connect(self.add_caliper.emit)
         a_layout.addWidget(btn_add)
-        btn_clear = QPushButton("Wyczy\u015b\u0107 wszystkie")
-        btn_clear.setStyleSheet(f"""
-            padding: 8px; border-radius: 6px; border: 1px solid {T.BORDER};
-            background: {T.WHITE}; color: {T.TEXT_SECONDARY}; font-size: 12px;
-        """)
+        btn_clear = make_action_btn("Wyczyść wszystkie")
         btn_clear.clicked.connect(self.clear_all.emit)
         a_layout.addWidget(btn_clear)
         layout.addWidget(actions)
 
-    def _add_measurement(self, title: str, value: str, detail: str, color: str, color_class: str):
-        bg_colors = {"blue": "#eff6ff", "purple": "#f5f3ff", "green": "#f0fdf4"}
+    def _add_measurement(self, title, value, detail, color, color_class):
+        bg_colors = {"blue": T.BLUE_BG, "purple": T.PURPLE_BG, "green": T.GREEN_BG}
         card = QFrame()
         card.setStyleSheet(f"""
             QFrame {{
-                background: {bg_colors.get(color_class, '#f9fafb')};
+                background: {bg_colors.get(color_class, T.BG_SECONDARY)};
                 border-left: 4px solid {color};
                 border-radius: 6px;
                 margin: 6px 10px;
                 padding: 10px 12px;
             }}
         """)
-        c_layout = QVBoxLayout(card)
-        c_layout.setContentsMargins(10, 8, 10, 8)
-        c_layout.setSpacing(2)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(10, 8, 10, 8)
+        card_layout.setSpacing(2)
 
-        num = QLabel(title)
-        num.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {T.TEXT_MUTED};")
-        c_layout.addWidget(num)
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {T.TEXT_MUTED};")
+        card_layout.addWidget(title_lbl)
 
-        val = QLabel(value)
-        val.setStyleSheet(f"font-size: 20px; font-weight: 700; font-family: Menlo; color: {color};")
-        c_layout.addWidget(val)
+        val_lbl = QLabel(value)
+        val_lbl.setStyleSheet(f"font-size: 20px; font-weight: 700; font-family: Menlo; color: {color};")
+        card_layout.addWidget(val_lbl)
 
-        det = QLabel(detail)
-        det.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
-        c_layout.addWidget(det)
+        detail_lbl = QLabel(detail)
+        detail_lbl.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
+        card_layout.addWidget(detail_lbl)
 
         self.meas_layout.addWidget(card)
 
@@ -213,10 +174,8 @@ class CaliperPanel(QWidget):
         self.setStyleSheet(f"background: {T.WHITE}; border-left: 1px solid {T.BORDER};")
 
 
-# ── Annotation Panel ───────────────────────────
+# Annotation Panel
 class AnnotationPanel(QWidget):
-    """Right panel for annotations."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(270)
@@ -247,10 +206,10 @@ class AnnotationPanel(QWidget):
         f_header.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {T.ACCENT};")
         f_layout.addWidget(f_header)
 
-        region = QLabel("II: 2.30 s \u2014 2.85 s")
+        region = QLabel("II: 2.30 s — 2.85 s")
         region.setStyleSheet(f"""
             font-size: 12px; font-family: Menlo; color: {T.TEXT_SECONDARY};
-            background: #eff6ff; padding: 6px 8px; border-radius: 4px;
+            background: {T.BLUE_BG}; padding: 6px 8px; border-radius: 4px;
         """)
         f_layout.addWidget(region)
 
@@ -276,14 +235,9 @@ class AnnotationPanel(QWidget):
         f_layout.addWidget(self.note_edit)
 
         btn_row = QHBoxLayout()
-        btn_save = QPushButton("Zapisz")
-        btn_save.setObjectName("primary")
+        btn_save = make_action_btn("Zapisz", primary=True)
         btn_row.addWidget(btn_save)
-        btn_png = QPushButton("Eksportuj PNG")
-        btn_png.setStyleSheet(f"""
-            padding: 7px; border-radius: 6px; border: 1px solid {T.BORDER};
-            background: {T.WHITE}; color: {T.TEXT_SECONDARY}; font-size: 12px;
-        """)
+        btn_png = make_action_btn("Eksportuj PNG")
         btn_row.addWidget(btn_png)
         f_layout.addLayout(btn_row)
         layout.addWidget(form)
@@ -304,23 +258,22 @@ class AnnotationPanel(QWidget):
         """)
         saved_layout.addWidget(saved_header)
 
-        # Demo annotations
         for meta, badge, badge_cls, text, border_color in [
-            ("II: 0.40 \u2014 1.20 s", "Norma", "gn",
-             "Prawid\u0142owy kompleks PQRST, rytm zatokowy", T.GREEN),
-            ("V1: 3.10 \u2014 3.60 s", "Do weryfikacji", "yl",
-             "Szerokie S w V1, mo\u017cliwe RBBB", T.YELLOW),
+            ("II: 0.40 — 1.20 s", "Norma", "gn",
+             "Prawidłowy kompleks PQRST, rytm zatokowy", T.GREEN),
+            ("V1: 3.10 — 3.60 s", "Do weryfikacji", "yl",
+             "Szerokie S w V1, możliwe RBBB", T.YELLOW),
         ]:
             card = QFrame()
             card.setStyleSheet(f"""
                 QFrame {{
-                    background: #f9fafb; border-left: 3px solid {border_color};
+                    background: {T.BG_SECONDARY}; border-left: 3px solid {border_color};
                     border-radius: 6px; padding: 8px 10px; margin-bottom: 6px;
                 }}
             """)
-            c_layout = QVBoxLayout(card)
-            c_layout.setContentsMargins(10, 8, 10, 8)
-            c_layout.setSpacing(4)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(10, 8, 10, 8)
+            card_layout.setSpacing(4)
 
             meta_row = QHBoxLayout()
             meta_lbl = QLabel(meta)
@@ -336,17 +289,17 @@ class AnnotationPanel(QWidget):
             """)
             meta_row.addWidget(badge_lbl)
             meta_row.addStretch()
-            c_layout.addLayout(meta_row)
+            card_layout.addLayout(meta_row)
 
             text_lbl = QLabel(text)
-            text_lbl.setStyleSheet("font-size: 12px; color: {T.TEXT_SECONDARY};")
+            text_lbl.setStyleSheet(f"font-size: 12px; color: {T.TEXT_SECONDARY};")
             text_lbl.setWordWrap(True)
-            c_layout.addWidget(text_lbl)
+            card_layout.addWidget(text_lbl)
 
-            goto = QLabel(f'<a style="color:{T.ACCENT}; font-weight:500;">Przejd\u017a \u2192</a>')
+            goto = QLabel(f'<a style="color:{T.ACCENT}; font-weight:500;">Przejdź →</a>')
             goto.setTextFormat(Qt.RichText)
             goto.setStyleSheet("font-size: 11px;")
-            c_layout.addWidget(goto)
+            card_layout.addWidget(goto)
 
             saved_layout.addWidget(card)
 
@@ -359,11 +312,7 @@ class AnnotationPanel(QWidget):
         footer.setStyleSheet(f"border-top: 1px solid {T.BORDER};")
         ft_layout = QVBoxLayout(footer)
         ft_layout.setContentsMargins(10, 10, 10, 10)
-        btn_export = QPushButton("Eksportuj wszystkie adnotacje")
-        btn_export.setStyleSheet(f"""
-            padding: 8px; border-radius: 6px; border: 1px solid {T.BORDER};
-            background: {T.WHITE}; color: {T.TEXT_SECONDARY}; font-size: 12px; font-weight: 500;
-        """)
+        btn_export = make_action_btn("Eksportuj wszystkie adnotacje")
         ft_layout.addWidget(btn_export)
         layout.addWidget(footer)
 
@@ -371,10 +320,8 @@ class AnnotationPanel(QWidget):
         self.setStyleSheet(f"background: {T.WHITE}; border-left: 1px solid {T.BORDER};")
 
 
-# ── Results Panel (AI) ─────────────────────────
+# Results Panel (AI)
 class ResultsPanel(QWidget):
-    """Right panel showing AI analysis results."""
-
     rerun = Signal()
 
     def __init__(self, parent=None):
@@ -404,9 +351,9 @@ class ResultsPanel(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("border: none;")
         content = QWidget()
-        c_layout = QVBoxLayout(content)
-        c_layout.setContentsMargins(0, 0, 0, 0)
-        c_layout.setAlignment(Qt.AlignTop)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setAlignment(Qt.AlignTop)
 
         # Top prediction card
         pred_card = QFrame()
@@ -419,26 +366,25 @@ class ResultsPanel(QWidget):
         pc_layout = QVBoxLayout(pred_card)
         pc_layout.setContentsMargins(12, 12, 12, 12)
         pc_layout.setSpacing(4)
-        pred_name = QLabel("Zawa\u0142 mi\u0119\u015bnia sercowego (MI)")
+        pred_name = QLabel("Zawał mięśnia sercowego (MI)")
         pred_name.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {T.AMBER_TEXT};")
         pred_name.setWordWrap(True)
         pc_layout.addWidget(pred_name)
-        pred_conf_lbl = QLabel("Pewno\u015b\u0107 modelu")
+        pred_conf_lbl = QLabel("Pewność modelu")
         pred_conf_lbl.setStyleSheet(f"font-size: 11px; color: {T.AMBER_SUB};")
         pc_layout.addWidget(pred_conf_lbl)
         pred_pct = QLabel("87.2%")
         pred_pct.setStyleSheet(f"font-size: 30px; font-weight: 700; font-family: Menlo; color: {T.AMBER_TEXT};")
         pc_layout.addWidget(pred_pct)
-        # Progress bar
         bar_bg = QFrame()
         bar_bg.setFixedHeight(8)
         bar_bg.setStyleSheet(f"background: {T.BORDER}; border-radius: 4px;")
         bar_fill = QFrame(bar_bg)
         bar_fill.setFixedHeight(8)
         bar_fill.setFixedWidth(int(200 * 0.87))
-        bar_fill.setStyleSheet("background: #f59e0b; border-radius: 4px;")
+        bar_fill.setStyleSheet(f"background: {T.AMBER}; border-radius: 4px;")
         pc_layout.addWidget(bar_bg)
-        c_layout.addWidget(pred_card)
+        content_layout.addWidget(pred_card)
 
         # All classes section
         cls_header = QLabel("WSZYSTKIE KLASY")
@@ -446,10 +392,10 @@ class ResultsPanel(QWidget):
             font-size: 11px; font-weight: 700; color: {T.TEXT_DIM};
             text-transform: uppercase; margin: 8px 12px;
         """)
-        c_layout.addWidget(cls_header)
+        content_layout.addWidget(cls_header)
 
         classes = [
-            ("Zawa\u0142 (MI)", 87.2, True),
+            ("Zawał (MI)", 87.2, True),
             ("Zdrowy (NORM)", 5.8, False),
             ("Niedokrwienne (ISC_)", 3.1, False),
             ("Niespecyficzne (NST_)", 1.9, False),
@@ -469,18 +415,18 @@ class ResultsPanel(QWidget):
             name_lbl.setFixedWidth(150)
             name_lbl.setStyleSheet(
                 f"font-size: 12px; font-weight: {'600' if is_top else '400'}; "
-                f"color: {T.TEXT if is_top else '{T.TEXT_SECONDARY}'};"
+                f"color: {T.TEXT if is_top else T.TEXT_SECONDARY};"
             )
             r_layout.addWidget(name_lbl)
 
             bar = QFrame()
             bar.setFixedHeight(6)
-            bar.setStyleSheet("background: #f3f4f6; border-radius: 3px;")
+            bar.setStyleSheet(f"background: {T.BORDER_LIGHT}; border-radius: 3px;")
             bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             fill = QFrame(bar)
             fill.setFixedHeight(6)
             fill.setFixedWidth(max(1, int(pct)))
-            fill.setStyleSheet(f"background: {'#f59e0b' if is_top else '#d1d5db'}; border-radius: 3px;")
+            fill.setStyleSheet(f"background: {T.AMBER if is_top else T.BAR_BG}; border-radius: 3px;")
             r_layout.addWidget(bar)
 
             pct_lbl = QLabel(f"{pct}%")
@@ -492,9 +438,9 @@ class ResultsPanel(QWidget):
                 f"font-weight: {'600' if is_top else '400'};"
             )
             r_layout.addWidget(pct_lbl)
-            c_layout.addWidget(row)
+            content_layout.addWidget(row)
 
-        c_layout.addStretch()
+        content_layout.addStretch()
         scroll.setWidget(content)
         layout.addWidget(scroll, stretch=1)
 
@@ -504,14 +450,10 @@ class ResultsPanel(QWidget):
         ft_layout = QVBoxLayout(footer)
         ft_layout.setContentsMargins(10, 10, 10, 10)
         ft_layout.setSpacing(6)
-        btn_rerun = QPushButton("Pon\u00f3w analiz\u0119")
-        btn_rerun.setStyleSheet(f"""
-            padding: 8px; border-radius: 6px; border: 1px solid {T.BORDER};
-            background: {T.WHITE}; color: {T.TEXT_SECONDARY}; font-size: 12px; font-weight: 500;
-        """)
+        btn_rerun = make_action_btn("Ponów analizę")
         btn_rerun.clicked.connect(self.rerun.emit)
         ft_layout.addWidget(btn_rerun)
-        disc = QLabel("Wynik ma charakter pomocniczy.\nOstateczna decyzja diagnostyczna nale\u017cy do lekarza.")
+        disc = QLabel("Wynik ma charakter pomocniczy.\nOstateczna decyzja diagnostyczna należy do lekarza.")
         disc.setStyleSheet(f"font-size: 11px; color: {T.TEXT_DIM}; text-align: center;")
         disc.setAlignment(Qt.AlignCenter)
         disc.setWordWrap(True)
@@ -522,13 +464,11 @@ class ResultsPanel(QWidget):
         self.setStyleSheet(f"background: {T.WHITE}; border-left: 1px solid {T.BORDER};")
 
 
-# ── Monitor Sidebar ────────────────────────────
+# Monitor Sidebar
 class MonitorSidebar(QWidget):
-    """Left sidebar for monitor mode controls."""
-
     speed_changed = Signal(float)
     leads_changed = Signal(list)
-    pause_toggled = Signal(bool)  # True = paused
+    pause_toggled = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -540,20 +480,18 @@ class MonitorSidebar(QWidget):
         layout.setSpacing(14)
 
         # Pause button
+        self._paused = False
         self.pause_btn = QPushButton("⏸  Pauza")
         self.pause_btn.setCursor(Qt.PointingHandCursor)
         self.pause_btn.setFocusPolicy(Qt.NoFocus)
-        self.pause_btn.setStyleSheet(f"""
-            font-size: 12px; padding: 8px 14px; border: 1px solid {T.BORDER};
-            border-radius: 6px; background: {T.WHITE}; color: {T.TEXT};
-            font-weight: 600;
-        """)
+        self.pause_btn.setStyleSheet(self._pause_btn_style(False))
         self.pause_btn.clicked.connect(self._on_pause)
-        self._paused = False
         layout.addWidget(self.pause_btn)
 
         # Playback speed
-        self._add_pills_section(layout, "Pr\u0119dko\u015b\u0107 odtwarzania",
+        self._pill_groups = {}
+        self._pill_active_idx = {}
+        self._add_pills_section(layout, "Prędkość odtwarzania",
                                 ["0.5x", "1x", "2x"], 1, "speed")
 
         # Lead selection
@@ -584,7 +522,20 @@ class MonitorSidebar(QWidget):
 
         layout.addStretch()
 
-    def _lead_btn_style(self, active: bool) -> str:
+    def _pause_btn_style(self, paused):
+        if paused:
+            return f"""
+                font-size: 12px; padding: 8px 14px; border: 1px solid {T.ACCENT};
+                border-radius: 6px; background: {T.ACCENT}; color: {T.ACCENT_TEXT};
+                font-weight: 600;
+            """
+        return f"""
+            font-size: 12px; padding: 8px 14px; border: 1px solid {T.BORDER};
+            border-radius: 6px; background: {T.WHITE}; color: {T.TEXT};
+            font-weight: 600;
+        """
+
+    def _lead_btn_style(self, active):
         if active:
             return f"""
                 font-size: 11px; padding: 4px 8px; border: 1px solid {T.ACCENT};
@@ -601,28 +552,19 @@ class MonitorSidebar(QWidget):
         is_active = not btn.property("active")
         btn.setProperty("active", is_active)
         btn.setStyleSheet(self._lead_btn_style(is_active))
-        active_leads = [l for l, b in self.lead_btns.items() if b.property("active")]
+        active_leads = [ld for ld, b in self.lead_btns.items() if b.property("active")]
         self.leads_changed.emit(active_leads)
 
     def _on_pause(self):
         self._paused = not self._paused
         if self._paused:
             self.pause_btn.setText("▶  Wznów")
-            self.pause_btn.setStyleSheet(f"""
-                font-size: 12px; padding: 8px 14px; border: 1px solid {T.ACCENT};
-                border-radius: 6px; background: {T.ACCENT}; color: {T.ACCENT_TEXT};
-                font-weight: 600;
-            """)
         else:
             self.pause_btn.setText("⏸  Pauza")
-            self.pause_btn.setStyleSheet(f"""
-                font-size: 12px; padding: 8px 14px; border: 1px solid {T.BORDER};
-                border-radius: 6px; background: {T.WHITE}; color: {T.TEXT};
-                font-weight: 600;
-            """)
+        self.pause_btn.setStyleSheet(self._pause_btn_style(self._paused))
         self.pause_toggled.emit(self._paused)
 
-    def _pill_style(self, active: bool) -> str:
+    def _pill_style(self, active):
         return f"""
             font-size: 11px; padding: 4px 10px; border: 1px solid {T.BORDER};
             border-radius: 4px;
@@ -645,46 +587,28 @@ class MonitorSidebar(QWidget):
             btn.setCursor(Qt.PointingHandCursor)
             btn.setFocusPolicy(Qt.NoFocus)
             btn.setStyleSheet(self._pill_style(i == active_idx))
-            btn.clicked.connect(lambda checked, idx=i, g=group_name, bl=None: self._on_pill(g, idx))
+            btn.clicked.connect(lambda checked, idx=i, g=group_name: self._on_pill(g, idx))
             btns.append(btn)
             pills.addWidget(btn)
-        # Store button list for updating styles
-        if not hasattr(self, '_pill_groups'):
-            self._pill_groups = {}
         self._pill_groups[group_name] = btns
+        self._pill_active_idx[group_name] = active_idx
         layout.addLayout(pills)
 
     def _on_pill(self, group_name, idx):
         btns = self._pill_groups.get(group_name, [])
         for i, btn in enumerate(btns):
             btn.setStyleSheet(self._pill_style(i == idx))
+        self._pill_active_idx[group_name] = idx
         if group_name == "speed":
             speeds = [0.5, 1.0, 2.0]
             self.speed_changed.emit(speeds[idx])
-        elif group_name == "sweep":
-            pass  # sweep speed visual only for now
 
     def apply_theme(self):
         self.setStyleSheet(f"background: {T.WHITE}; border-right: 1px solid {T.BORDER};")
-        # Pause button
-        if self._paused:
-            self.pause_btn.setStyleSheet(f"""
-                font-size: 12px; padding: 8px 14px; border: 1px solid {T.ACCENT};
-                border-radius: 6px; background: {T.ACCENT}; color: {T.ACCENT_TEXT};
-                font-weight: 600;
-            """)
-        else:
-            self.pause_btn.setStyleSheet(f"""
-                font-size: 12px; padding: 8px 14px; border: 1px solid {T.BORDER};
-                border-radius: 6px; background: {T.WHITE}; color: {T.TEXT};
-                font-weight: 600;
-            """)
-        # Lead buttons
+        self.pause_btn.setStyleSheet(self._pause_btn_style(self._paused))
         for lead, btn in self.lead_btns.items():
-            is_active = btn.property("active")
-            btn.setStyleSheet(self._lead_btn_style(is_active))
-        # Pill buttons
+            btn.setStyleSheet(self._lead_btn_style(btn.property("active")))
         for group_name, btns in self._pill_groups.items():
+            active_idx = self._pill_active_idx.get(group_name, 0)
             for i, btn in enumerate(btns):
-                # Re-apply current active state
-                btn.setStyleSheet(self._pill_style(btn.styleSheet().find(T.ACCENT) >= 0 if hasattr(btn, 'styleSheet') else False))
+                btn.setStyleSheet(self._pill_style(i == active_idx))

@@ -19,7 +19,6 @@ except ImportError:
     HAS_WFDB = False
 
 
-# Map common WFDB lead name variants to our standard names
 _LEAD_ALIASES = {
     "i": "I", "ii": "II", "iii": "III",
     "avr": "aVR", "avl": "aVL", "avf": "aVF",
@@ -42,15 +41,12 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1200, 800)
         self.resize(1440, 900)
 
-        # Apply theme
         self.setStyleSheet(T.STYLESHEET)
 
-        # Central stacked widget
         self.stack = QStackedWidget()
         self.stack.setObjectName("centralWidget")
         self.setCentralWidget(self.stack)
 
-        # Pages
         self.upload_page = UploadPage()
         self.viewer_page = ViewerPage()
         self.report_page = ReportPage()
@@ -59,31 +55,27 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.viewer_page)   # 1
         self.stack.addWidget(self.report_page)   # 2
 
-        # Connect signals
         self.upload_page.file_selected.connect(self._load_file)
         self.viewer_page.open_file.connect(self._go_upload)
         self.viewer_page.show_report.connect(self._go_report)
         self.viewer_page.toggle_dark.connect(self._toggle_dark_mode)
         self.report_page.go_back.connect(self._go_viewer)
 
-        # Show upload page
         self.stack.setCurrentIndex(0)
 
-        # Current data
         self._signal = None
         self._leads = STANDARD_LEADS
         self._fs = 500
         self._filename = ""
 
-        # ── Keyboard shortcuts (work regardless of focus) ──
         self._setup_shortcuts()
 
     def _setup_shortcuts(self):
         def _sc(key, handler):
-            s = QShortcut(QKeySequence(key), self)
-            s.setContext(Qt.ApplicationShortcut)
-            s.activated.connect(handler)
-            return s
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.ApplicationShortcut)
+            shortcut.activated.connect(handler)
+            return shortcut
 
         def _on_viewer(fn):
             """Wrap handler to only run when on viewer page."""
@@ -130,24 +122,21 @@ class MainWindow(QMainWindow):
                 self._fs = record.fs
                 self._filename = os.path.basename(base_path) + ".dat"
 
-                info = f"{self._fs} Hz \u00b7 {len(self._leads)} odprowadze\u0144 \u00b7 {self._signal.shape[0] / self._fs:.1f} s"
+                info = f"{self._fs} Hz · {len(self._leads)} odprowadzeń · {self._signal.shape[0] / self._fs:.1f} s"
                 add_recent(base_path, info)
             except Exception as e:
-                QMessageBox.warning(self, "B\u0142\u0105d", f"Nie uda\u0142o si\u0119 wczyta\u0107 pliku:\n{e}")
+                QMessageBox.warning(self, "Błąd", f"Nie udało się wczytać pliku:\n{e}")
                 return
         else:
-            # Generate demo signal
             self._signal = generate_demo_signal(STANDARD_LEADS, fs=500, duration=10.0)
             self._leads = STANDARD_LEADS
             self._fs = 500
             self._filename = os.path.basename(base_path) + ".dat" if base_path else "demo.dat"
-            add_recent(base_path or "demo", f"{self._fs} Hz \u00b7 12 odprowadze\u0144 \u00b7 10.0 s")
+            add_recent(base_path or "demo", f"{self._fs} Hz · 12 odprowadzeń · 10.0 s")
 
-        # Update pages
         self.viewer_page.set_signal(self._signal, self._leads, self._fs, self._filename)
         self.report_page.set_signal(self._signal, self._leads, self._fs, self._filename)
 
-        # Navigate to viewer
         self.stack.setCurrentIndex(1)
 
     def _go_upload(self):
@@ -163,11 +152,7 @@ class MainWindow(QMainWindow):
     def _toggle_dark_mode(self):
         from ui.theme import is_dark_mode, set_dark_mode
         set_dark_mode(not is_dark_mode())
-        # Re-apply global stylesheet
         self.setStyleSheet(T.STYLESHEET)
-        # Re-apply all component styles
         self.viewer_page.apply_theme()
-        # Refresh views to pick up new colors
         if self._signal is not None:
             self.viewer_page._refresh_views()
-

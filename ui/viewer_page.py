@@ -8,13 +8,14 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 
 import ui.theme as T
 from ui.theme import STANDARD_LEADS
+from ui.widgets import make_logo, make_separator
 from ui.ekg_canvas import (EkgCellCanvas, TwelveLeadGrid, SingleLeadCanvas,
                             generate_demo_signal, synth_ekg, LEAD_SEEDS, LEAD_AMPS)
 from ui.panels import (InfoPanel, CaliperPanel, AnnotationPanel, ResultsPanel,
                         MonitorSidebar)
 
 
-# ── Segmented Control ──────────────────────────
+# Segmented Control
 class SegmentedControl(QWidget):
     """Toggle button group like the HTML seg-btn design."""
 
@@ -60,7 +61,7 @@ class SegmentedControl(QWidget):
         return self._active
 
 
-# ── Toolbar Button ─────────────────────────────
+# Toolbar Button
 class ToolbarBtn(QPushButton):
     def __init__(self, text: str, active: bool = False, parent=None):
         super().__init__(text, parent)
@@ -79,7 +80,7 @@ class ToolbarBtn(QPushButton):
         return self._active
 
 
-# ── Lead Sidebar (for 1-lead mode) ─────────────
+# Lead Sidebar (for 1-lead mode)
 class LeadSidebar(QWidget):
     """Sidebar with lead selection buttons."""
 
@@ -140,21 +141,12 @@ class LeadSidebar(QWidget):
         return self._active
 
 
-# ── Separator ──────────────────────────────────
-def _sep():
-    sep = QFrame()
-    sep.setFixedSize(1, 24)
-    sep.setStyleSheet(f"background: {T.SEPARATOR};")
-    return sep
-
-
-# ── Viewer Page ────────────────────────────────
 class ViewerPage(QWidget):
     """Main EKG viewer with toolbar, view modes, panels, navigation."""
 
-    open_file = Signal()         # request to open a new file
-    show_report = Signal()       # request to show report page
-    toggle_dark = Signal()       # request to toggle dark mode
+    open_file = Signal()
+    show_report = Signal()
+    toggle_dark = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -180,16 +172,29 @@ class ViewerPage(QWidget):
         self._monitor_speed = 1.0
         self._monitor_window = 3.0
         self._monitor_page_start = 0.0
-
         self._build_ui()
 
-    # ── Build UI ──
+    def _scrubber_style(self):
+        return f"""
+            QSlider::groove:horizontal {{
+                height: 6px; background: {T.BORDER}; border-radius: 3px;
+            }}
+            QSlider::handle:horizontal {{
+                width: 14px; height: 14px; margin: -4px 0;
+                background: {T.ACCENT}; border: 2px solid {T.WHITE};
+                border-radius: 7px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {T.ACCENT}; border-radius: 3px;
+            }}
+        """
+
     def _build_ui(self):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ── Top toolbar ──
+        # Top toolbar
         self.toolbar = QWidget()
         self.toolbar.setFixedHeight(48)
         self.toolbar.setStyleSheet(f"background: {T.TOPBAR};")
@@ -197,23 +202,16 @@ class ViewerPage(QWidget):
         tb.setContentsMargins(14, 0, 14, 0)
         tb.setSpacing(8)
 
-        # Logo
-        logo = QLabel()
-        logo.setText('<span style="color:#4a9eff;font-weight:600;">EKG</span>'
-                     ' <span style="color:white;font-weight:600;">Assistant</span>')
-        logo.setFont(QFont(".AppleSystemUIFont", 14))
-        logo.setTextFormat(Qt.RichText)
+        logo = make_logo(14)
         tb.addWidget(logo)
-        tb.addWidget(_sep())
+        tb.addWidget(make_separator())
 
-        # File info
         self.file_label = QLabel("00888_lr.dat | 500 Hz | 12 odpr. | 10.0 s")
         self.file_label.setStyleSheet(f"font-size:12px; color:{T.BTN_TEXT}; font-family:Menlo;")
         tb.addWidget(self.file_label)
         tb.addStretch()
 
-        # Analysis badge (shown after AI analysis)
-        self.analysis_badge = QLabel("Analiza zako\u0144czona")
+        self.analysis_badge = QLabel("Analiza zakończona")
         self.analysis_badge.setStyleSheet(f"""
             font-size: 12px; background: {T.BADGE_NORM_BG}; color: {T.BADGE_NORM_TEXT};
             padding: 5px 12px; border-radius: 5px; font-weight: 600;
@@ -221,73 +219,59 @@ class ViewerPage(QWidget):
         self.analysis_badge.hide()
         tb.addWidget(self.analysis_badge)
 
-        # View mode segmented control
         self.view_seg = SegmentedControl(["12-Lead", "1-Lead", "Monitor"])
         self.view_seg.changed.connect(self._on_view_mode)
         tb.addWidget(self.view_seg)
-        tb.addWidget(_sep())
+        tb.addWidget(make_separator())
 
-        # Tools
+        # Tool buttons
         self.tool_btns: list[ToolbarBtn] = []
         for i, (label, active) in enumerate([("Wybierz", True), ("Suwmiarka", False), ("Adnotacja", False)]):
             btn = ToolbarBtn(label, active)
             btn.clicked.connect(lambda checked, idx=i: self._on_tool_mode(idx))
             self.tool_btns.append(btn)
             tb.addWidget(btn)
-        tb.addWidget(_sep())
+        tb.addWidget(make_separator())
 
         # Settings
         for label in ["10 mm/mV", "25 mm/s", "0.05-150 Hz"]:
             btn = ToolbarBtn(label, False)
             tb.addWidget(btn)
-        tb.addWidget(_sep())
+        tb.addWidget(make_separator())
 
-        # Actions
+        # Action buttons
         self.btn_analyze = QPushButton("Analizuj")
-        self.btn_analyze.setStyleSheet(f"""
-            background:{T.ACCENT};color:{T.ACCENT_TEXT};font-size:12px;padding:6px 14px;
-            border-radius:5px;border:none;font-weight:600;
-        """)
+        self.btn_analyze.setObjectName("primary")
         self.btn_analyze.setCursor(Qt.PointingHandCursor)
         self.btn_analyze.clicked.connect(self._on_analyze)
         tb.addWidget(self.btn_analyze)
 
         self.btn_report = QPushButton("Raport")
-        self.btn_report.setStyleSheet(f"""
-            background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;
-            border-radius:5px;border:none;
-        """)
+        self.btn_report.setObjectName("secondary")
         self.btn_report.setCursor(Qt.PointingHandCursor)
         self.btn_report.clicked.connect(self.show_report.emit)
         tb.addWidget(self.btn_report)
 
         btn_load = QPushButton("Wczytaj plik")
-        btn_load.setStyleSheet(f"""
-            background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;
-            border-radius:5px;border:none;
-        """)
+        btn_load.setObjectName("secondary")
         btn_load.setCursor(Qt.PointingHandCursor)
         btn_load.clicked.connect(self.open_file.emit)
         tb.addWidget(btn_load)
 
-        tb.addWidget(_sep())
+        tb.addWidget(make_separator())
         self.btn_dark = QPushButton("Tryb ciemny")
-        self.btn_dark.setStyleSheet(f"""
-            background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;
-            border-radius:5px;border:none;
-        """)
+        self.btn_dark.setObjectName("secondary")
         self.btn_dark.setCursor(Qt.PointingHandCursor)
         self.btn_dark.clicked.connect(self.toggle_dark.emit)
         tb.addWidget(self.btn_dark)
 
         outer.addWidget(self.toolbar)
 
-        # ── Content area ──
+        # Content area
         self.content = QHBoxLayout()
         self.content.setContentsMargins(0, 0, 0, 0)
         self.content.setSpacing(0)
 
-        # Left panels
         self.info_panel = InfoPanel()
         self.content.addWidget(self.info_panel)
 
@@ -303,22 +287,22 @@ class ViewerPage(QWidget):
         self.lead_sidebar.hide()
         self.content.addWidget(self.lead_sidebar)
 
-        # Center: stacked views
+        # Stacked views
         self.view_stack = QStackedWidget()
         self.view_stack.setStyleSheet(f"background: {T.BG_SECONDARY};")
 
         self.grid_12 = TwelveLeadGrid()
-        self.view_stack.addWidget(self.grid_12)  # idx 0
+        self.view_stack.addWidget(self.grid_12)
 
         self.single_lead = SingleLeadCanvas()
         self.single_lead.draw_border = True
-        self.view_stack.addWidget(self.single_lead)  # idx 1
+        self.view_stack.addWidget(self.single_lead)
 
         self.monitor_area = QWidget()
         self.monitor_area.setStyleSheet(f"background: {T.BG_SECONDARY};")
         self._monitor_strips: list[EkgCellCanvas] = []
         self._build_monitor_area()
-        self.view_stack.addWidget(self.monitor_area)  # idx 2
+        self.view_stack.addWidget(self.monitor_area)
 
         self.content.addWidget(self.view_stack, stretch=1)
 
@@ -339,7 +323,7 @@ class ViewerPage(QWidget):
         content_widget.setLayout(self.content)
         outer.addWidget(content_widget, stretch=1)
 
-        # ── Navigation bar ──
+        # Navigation bar
         self.navbar = QWidget()
         self.navbar.setFixedHeight(48)
         self.navbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
@@ -362,23 +346,10 @@ class ViewerPage(QWidget):
             btn.clicked.connect(handler)
             nav.addWidget(btn)
 
-        # Scrubber
         self.scrubber = QSlider(Qt.Horizontal)
         self.scrubber.setRange(0, 1000)
         self.scrubber.setValue(350)
-        self.scrubber.setStyleSheet(f"""
-            QSlider::groove:horizontal {{
-                height: 6px; background: {T.BORDER}; border-radius: 3px;
-            }}
-            QSlider::handle:horizontal {{
-                width: 14px; height: 14px; margin: -4px 0;
-                background: {T.ACCENT}; border: 2px solid {T.WHITE};
-                border-radius: 7px;
-            }}
-            QSlider::sub-page:horizontal {{
-                background: {T.ACCENT}; border-radius: 3px;
-            }}
-        """)
+        self.scrubber.setStyleSheet(self._scrubber_style())
         self.scrubber.valueChanged.connect(self._on_scrubber)
         nav.addWidget(self.scrubber, stretch=1)
 
@@ -392,7 +363,7 @@ class ViewerPage(QWidget):
 
         outer.addWidget(self.navbar)
 
-        # ── Status bar ──
+        # Status bar
         self.statusbar = QWidget()
         self.statusbar.setFixedHeight(28)
         self.statusbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
@@ -414,74 +385,43 @@ class ViewerPage(QWidget):
         sb.addWidget(self.st_right)
 
         outer.addWidget(self.statusbar)
-
         self._update_time_display()
         self._update_statusbar()
 
     def apply_theme(self):
         """Re-apply all styles after theme change."""
-        # Toolbar
         self.toolbar.setStyleSheet(f"background: {T.TOPBAR};")
         self.file_label.setStyleSheet(f"font-size:12px; color:{T.BTN_TEXT}; font-family:Menlo;")
         self.analysis_badge.setStyleSheet(f"""
             font-size: 12px; background: {T.BADGE_NORM_BG}; color: {T.BADGE_NORM_TEXT};
             padding: 5px 12px; border-radius: 5px; font-weight: 600;
         """)
-        # Segmented control & tool buttons
         self.view_seg._apply_styles()
         for btn in self.tool_btns:
             btn.set_active(btn._active)
-        # Action buttons
-        self.btn_analyze.setStyleSheet(f"""
-            background:{T.ACCENT};color:{T.ACCENT_TEXT};font-size:12px;padding:6px 14px;
-            border-radius:5px;border:none;font-weight:600;
-        """)
-        self.btn_report.setStyleSheet(f"""
-            background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;
-            border-radius:5px;border:none;
-        """)
-        self.btn_dark.setStyleSheet(f"""
-            background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;
-            border-radius:5px;border:none;
-        """)
+
         from ui.theme import is_dark_mode
         self.btn_dark.setText("Tryb jasny" if is_dark_mode() else "Tryb ciemny")
-        # Lead sidebar
+
         self.lead_sidebar._update_styles()
-        # View stack
         self.view_stack.setStyleSheet(f"background: {T.BG_SECONDARY};")
         self.monitor_area.setStyleSheet(f"background: {T.BG_SECONDARY};")
-        # Info panel
+
         self.info_panel.apply_theme()
-        # Monitor sidebar
         self.monitor_sidebar.apply_theme()
-        # Right panels
         self.caliper_panel.apply_theme()
         self.annot_panel.apply_theme()
         self.results_panel.apply_theme()
-        # Navigation bar
+
         self.navbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
-        self.scrubber.setStyleSheet(f"""
-            QSlider::groove:horizontal {{
-                height: 6px; background: {T.BORDER}; border-radius: 3px;
-            }}
-            QSlider::handle:horizontal {{
-                width: 14px; height: 14px; margin: -4px 0;
-                background: {T.ACCENT}; border: 2px solid {T.WHITE};
-                border-radius: 7px;
-            }}
-            QSlider::sub-page:horizontal {{
-                background: {T.ACCENT}; border-radius: 3px;
-            }}
-        """)
+        self.scrubber.setStyleSheet(self._scrubber_style())
         self.time_label.setStyleSheet(f"font-size:12px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
         self.speed_label.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM};")
-        # Status bar
+
         self.statusbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
         self.st_left.setStyleSheet(f"font-size:11px; color:{T.TEXT_MUTED}; font-family:Menlo;")
         self.st_center.setStyleSheet(f"font-size:10px; color:{T.TEXT_DIM};")
         self.st_right.setStyleSheet(f"font-size:11px; color:{T.TEXT_MUTED}; font-family:Menlo;")
-        # 12-lead grid separators
         self.grid_12.apply_theme()
 
     def _build_monitor_area(self):
@@ -496,9 +436,8 @@ class ViewerPage(QWidget):
             self._monitor_strips.append((lead_name, strip))
             layout.addWidget(strip, stretch=1)
 
-    # ── Public: set signal data ──
     def set_signal(self, signal: np.ndarray, leads: list[str], fs: int, filename: str = ""):
-        # ── Clear previous state ──
+        """Load new signal data into the viewer."""
         self.grid_12.clear()
         self.single_lead.clear()
         for _, strip in self._monitor_strips:
@@ -515,15 +454,13 @@ class ViewerPage(QWidget):
         self._monitor_playing = False
         self._monitor_timer.stop()
 
-        # ── Analyze signal ranges once ──
         self._global_min = float(signal.min())
         self._global_max = float(signal.max())
         v_range = self._global_max - self._global_min
-        pad = max(v_range * 0.15, 0.2)  # at least 0.2 mV padding
+        pad = max(v_range * 0.15, 0.2)
         self._v_min = self._global_min - pad
         self._v_max = self._global_max + pad
 
-        # Adaptive time windows based on signal duration
         if self.duration <= 3.0:
             self._window_12 = self.duration
             self._window_1 = self.duration
@@ -540,7 +477,6 @@ class ViewerPage(QWidget):
         self.analysis_badge.hide()
         self.results_panel.hide()
 
-        # Scrubber range: max position is duration minus the view window
         max_window = max(self._window_12, self._window_1)
         self._scrubber_max = max(0.0, self.duration - max_window)
         self.scrubber.setRange(0, int(self._scrubber_max * 100))
@@ -553,14 +489,9 @@ class ViewerPage(QWidget):
     def _refresh_views(self):
         if self.signal is None:
             return
-        # 12-lead grid
         self.grid_12.set_signal(self.signal, self.leads, self.fs, self.time_pos,
                                 self._window_12, self._v_min, self._v_max)
-
-        # Single lead
         self._refresh_single_lead()
-
-        # Monitor
         self._refresh_monitor()
 
     def _refresh_single_lead(self):
@@ -577,7 +508,6 @@ class ViewerPage(QWidget):
             self.single_lead.v_min = self._v_min
             self.single_lead.v_max = self._v_max
             self.single_lead.set_data(lead, self.signal[:, idx], self.fs, t_start, t_end)
-            # Add demo calipers when in caliper mode
             if self._tool_mode == 1:
                 self.single_lead.calipers = [
                     (1.220, 1.384, T.ACCENT, "PR = 164 ms"),
@@ -586,7 +516,6 @@ class ViewerPage(QWidget):
                 ]
             else:
                 self.single_lead.calipers = []
-            # Add demo annotation when in annotation mode
             if self._tool_mode == 2:
                 self.single_lead.annotations = [(2.30, 2.85)]
             else:
@@ -609,20 +538,16 @@ class ViewerPage(QWidget):
                                self._monitor_page_start + self._monitor_window)
                 strip.set_sweep(sweep_frac)
 
-    # ── View mode switching ──
     def _on_view_mode(self, idx: int):
         self._view_mode = idx
-        # Stop monitor if leaving monitor mode
         if idx != 2:
             self._monitor_timer.stop()
             self._monitor_playing = False
 
-        # Show/hide panels based on mode
         self.info_panel.setVisible(idx == 0 or (idx == 0 and self._show_results))
         self.lead_sidebar.setVisible(idx == 1)
         self.monitor_sidebar.setVisible(idx == 2)
 
-        # Hide tool panels in 12-lead and monitor modes
         if idx == 0:
             self.caliper_panel.hide()
             self.annot_panel.hide()
@@ -630,10 +555,12 @@ class ViewerPage(QWidget):
             if self._show_results:
                 self.results_panel.show()
             self.navbar.show()
+            self._restore_scrubber_range()
         elif idx == 1:
             self.info_panel.hide()
             self._on_tool_mode(self._tool_mode)
             self.navbar.show()
+            self._restore_scrubber_range()
         elif idx == 2:
             self.info_panel.hide()
             self.caliper_panel.hide()
@@ -643,30 +570,22 @@ class ViewerPage(QWidget):
             self._start_monitor()
 
         self.view_stack.setCurrentIndex(idx)
-
-        # Hide tool buttons in non-1-lead modes
         for btn in self.tool_btns:
             btn.setVisible(idx == 1)
-
         self._update_statusbar()
 
-    # ── Tool mode switching ──
     def _on_tool_mode(self, idx: int):
         self._tool_mode = idx
         for i, btn in enumerate(self.tool_btns):
             btn.set_active(i == idx)
-
         self.caliper_panel.setVisible(idx == 1 and self._view_mode == 1)
         self.annot_panel.setVisible(idx == 2 and self._view_mode == 1)
-
         self._refresh_single_lead()
         self._update_statusbar()
 
-    # ── Lead selection ──
     def _on_lead_selected(self, lead: str):
         self._refresh_single_lead()
 
-    # ── Analyze (mock) ──
     def _on_analyze(self):
         self._show_results = True
         self.analysis_badge.show()
@@ -674,20 +593,33 @@ class ViewerPage(QWidget):
         if self._view_mode == 0:
             self.info_panel.show()
 
-    # ── Navigation ──
     def _nav_start(self):
-        self.time_pos = 0
-        self.scrubber.setValue(0)
+        if self._view_mode == 2:
+            self._monitor_seek(0.0)
+        else:
+            self.time_pos = 0
+            self.scrubber.setValue(0)
 
     def _nav_end(self):
-        self.time_pos = self._scrubber_max
-        self.scrubber.setValue(self.scrubber.maximum())
+        if self._view_mode == 2:
+            self._monitor_seek(self.duration - 0.05)
+        else:
+            self.time_pos = self._scrubber_max
+            self.scrubber.setValue(self.scrubber.maximum())
 
     def _nav_step(self, dt: float):
-        self.time_pos = max(0, min(self._scrubber_max, self.time_pos + dt))
-        self.scrubber.setValue(int(self.time_pos * 100))
+        if self._view_mode == 2:
+            new_t = max(0.0, min(self.duration - 0.05, self._monitor_t + dt))
+            self._monitor_seek(new_t)
+        else:
+            self.time_pos = max(0, min(self._scrubber_max, self.time_pos + dt))
+            self.scrubber.setValue(int(self.time_pos * 100))
 
     def _on_scrubber(self, value: int):
+        if self._view_mode == 2:
+            new_t = value / 100.0
+            self._monitor_seek(new_t)
+            return
         self.time_pos = value / 100.0
         self._update_time_display()
         if self._view_mode == 0:
@@ -696,33 +628,90 @@ class ViewerPage(QWidget):
         elif self._view_mode == 1:
             self._refresh_single_lead()
 
+    def _restore_scrubber_range(self):
+        """Restore scrubber range for 12-lead/1-lead modes."""
+        max_window = max(self._window_12, self._window_1)
+        self._scrubber_max = max(0.0, self.duration - max_window)
+        self.scrubber.blockSignals(True)
+        self.scrubber.setRange(0, int(self._scrubber_max * 100))
+        self.scrubber.setValue(int(self.time_pos * 100))
+        self.scrubber.blockSignals(False)
+
+    def _monitor_seek(self, t: float):
+        """Jump monitor playback to a specific time."""
+        t = max(0.0, min(self.duration - 0.05, t))
+        self._monitor_t = t
+        self._monitor_page_start = max(0.0, (t // self._monitor_window) * self._monitor_window)
+        # Clamp last page
+        if self._monitor_page_start + self._monitor_window > self.duration:
+            self._monitor_page_start = max(0.0, self.duration - self._monitor_window)
+        for _, strip in self._monitor_strips:
+            strip._old_signal = None
+        self._refresh_monitor()
+        self._update_monitor_time_display()
+        # Sync scrubber without re-triggering _on_scrubber
+        self.scrubber.blockSignals(True)
+        self.scrubber.setValue(int(t * 100))
+        self.scrubber.blockSignals(False)
+
     def _update_time_display(self):
         window = self._window_1 if self._view_mode == 1 else self._window_12
         t_end = min(self.duration, self.time_pos + window)
         self.time_label.setText(f"{self.time_pos:.2f} – {t_end:.2f} s / {self.duration:.2f} s")
 
-    # ── Monitor ──
+    def _update_monitor_time_display(self):
+        page_end = min(self._monitor_page_start + self._monitor_window, self.duration)
+        self.time_label.setText(
+            f"{self._monitor_page_start:.2f} – {page_end:.2f} s | "
+            f"t = {self._monitor_t:.2f} s / {self.duration:.2f} s"
+        )
+        # Sync scrubber position
+        self.scrubber.blockSignals(True)
+        self.scrubber.setValue(int(self._monitor_t * 100))
+        self.scrubber.blockSignals(False)
+
     def _start_monitor(self):
         self._monitor_t = 0.0
-        self._monitor_window = 3.0
+        self._monitor_window = min(3.0, self.duration)
         self._monitor_page_start = 0.0
         self._monitor_playing = True
-        # Clear old signal data
+        self._monitor_speed = 1.0
+        self._monitor_timer.setInterval(50)
+        # Set scrubber range to full signal duration
+        self.scrubber.blockSignals(True)
+        self.scrubber.setRange(0, int(self.duration * 100))
+        self.scrubber.setValue(0)
+        self.scrubber.blockSignals(False)
+        # Reset sidebar state to match
+        self.monitor_sidebar._paused = False
+        self.monitor_sidebar.pause_btn.setText("⏸  Pauza")
+        self.monitor_sidebar.pause_btn.setStyleSheet(
+            self.monitor_sidebar._pause_btn_style(False))
         for _, strip in self._monitor_strips:
             strip._old_signal = None
             strip._sweep_pos = None
         self._monitor_timer.start()
         self._refresh_monitor()
+        self._update_monitor_time_display()
 
     def _monitor_tick(self):
         if not self._monitor_playing:
             return
         self._monitor_t += 0.05
-        page_end = self._monitor_page_start + self._monitor_window
 
-        # If sweep reached end of current page, advance to next page
+        # Loop back when we reach the end of the signal
+        if self._monitor_t >= self.duration:
+            self._monitor_t = 0.0
+            self._monitor_page_start = 0.0
+            for _, strip in self._monitor_strips:
+                strip._old_signal = None
+                strip._sweep_pos = None
+            self._refresh_monitor()
+            self._update_monitor_time_display()
+            return
+
+        page_end = self._monitor_page_start + self._monitor_window
         if self._monitor_t >= page_end:
-            # Save current page signal as "old" for each strip
             for lead_name, strip in self._monitor_strips:
                 if lead_name in self.leads:
                     idx = self.leads.index(lead_name)
@@ -730,14 +719,12 @@ class ViewerPage(QWidget):
                     strip._old_t_start = self._monitor_page_start
                     strip._old_t_end = page_end
             self._monitor_page_start = page_end
-            # If past end of signal, loop back
-            if self._monitor_page_start >= self.duration:
-                self._monitor_page_start = 0.0
-                self._monitor_t = 0.0
+            # Clamp last page so it doesn't extend past signal duration
+            if self._monitor_page_start + self._monitor_window > self.duration:
+                self._monitor_page_start = max(0.0, self.duration - self._monitor_window)
 
         self._refresh_monitor()
-        self.time_pos = self._monitor_t
-        self._update_time_display()
+        self._update_monitor_time_display()
 
     def _on_monitor_pause(self, paused: bool):
         self._monitor_playing = not paused
@@ -747,8 +734,9 @@ class ViewerPage(QWidget):
             self._monitor_timer.stop()
 
     def _on_monitor_speed(self, speed: float):
-        # Base interval is 50ms at 1x speed
+        self._monitor_speed = speed
         self._monitor_timer.setInterval(int(50 / speed))
+        self._update_statusbar()
 
     def _on_monitor_leads(self, active_leads: list):
         """Rebuild monitor strips with selected leads."""
@@ -757,7 +745,6 @@ class ViewerPage(QWidget):
             item = layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-
         self._monitor_strips = []
         for lead_name in active_leads:
             strip = EkgCellCanvas()
@@ -765,14 +752,10 @@ class ViewerPage(QWidget):
             strip.show_cal = False
             self._monitor_strips.append((lead_name, strip))
             layout.addWidget(strip, stretch=1)
+        # Restart monitor playback with new leads
+        self._start_monitor()
 
-        self._refresh_monitor()
-
-    # ── Status bar ──
     def _update_statusbar(self):
-        mode_names = ["12-Lead", "1-Lead", "Monitor"]
-        tool_names = ["Wybierz", "Suwmiarka", "Adnotacja"]
-
         if self._view_mode == 0:
             self.st_left.setText("<b>10 mm/mV</b> | <b>25 mm/s</b> | 0.05-150 Hz")
             self.st_center.setText("V: Wybierz | C: Suwmiarka | A: Adnotacja | G: Wzmocnienie | 1/2/3: Widok")
@@ -780,17 +763,18 @@ class ViewerPage(QWidget):
         elif self._view_mode == 1:
             if self._tool_mode == 1:
                 self.st_left.setText("<b>Suwmiarka</b> | <b>10 mm/mV</b> | <b>25 mm/s</b>")
-                self.st_center.setText("Kliknij 2 punkty | Delete: Usu\u0144 | Esc: Wyjd\u017a")
+                self.st_center.setText("Kliknij 2 punkty | Delete: Usuń | Esc: Wyjdź")
                 self.st_right.setText(f"t = <b>{self.time_pos:.2f} s</b>")
             elif self._tool_mode == 2:
                 self.st_left.setText("<b>Adnotacja</b> | <b>10 mm/mV</b>")
-                self.st_center.setText("Przeci\u0105gnij, aby zaznaczy\u0107 | Enter: Zapisz | Esc: Anuluj")
-                self.st_right.setText("Zaznaczenie: <b>2.30 \u2014 2.85 s</b>")
+                self.st_center.setText("Przeciągnij, aby zaznaczyć | Enter: Zapisz | Esc: Anuluj")
+                self.st_right.setText("Zaznaczenie: <b>2.30 — 2.85 s</b>")
             else:
                 self.st_left.setText("<b>10 mm/mV</b> | <b>25 mm/s</b>")
-                self.st_center.setText("Tab: Nast\u0119pne | Shift+Tab: Poprzednie | \u2190/\u2192: Przewi\u0144")
+                self.st_center.setText("Tab: Następne | Shift+Tab: Poprzednie | ←/→: Przewiń")
                 self.st_right.setText(f"t = <b>{self.time_pos:.2f} s</b> | V = <b>0.92 mV</b>")
         elif self._view_mode == 2:
-            self.st_left.setText("<b>Monitor</b> | <b>25 mm/s</b> | 1x")
-            self.st_center.setText("Space: Pauza | Esc: Wyjd\u017a z monitora | \u2191\u2193: Pr\u0119dko\u015b\u0107")
-            self.st_right.setText(f"t = <b>{self._monitor_t:.2f} s</b>")
+            speed_label = f"{self._monitor_speed:g}x"
+            self.st_left.setText(f"<b>Monitor</b> | <b>25 mm/s</b> | {speed_label}")
+            self.st_center.setText("Space: Pauza | Esc: Wyjdź z monitora | ↑↓: Prędkość")
+            self.st_right.setText(f"t = <b>{self._monitor_t:.2f} s</b> / {self.duration:.2f} s")
