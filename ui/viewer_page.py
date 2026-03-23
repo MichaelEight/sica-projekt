@@ -771,6 +771,31 @@ class ViewerPage(QWidget):
         self.single_lead.analysis_clickable_end = None
         self.single_lead.update()
 
+    def _resolve_ground_truth(self, t_start: float, t_end: float) -> dict | None:
+        """Pick the correct ground truth for a given analysis window.
+
+        Handles both:
+        - dict: whole-file GT (PTB-XL) — returned as-is
+        - list: windowed GT from .annotations.json — picks the best-overlapping window
+        """
+        gt = self._ground_truth
+        if gt is None:
+            return None
+        if isinstance(gt, dict):
+            return gt
+        if isinstance(gt, list):
+            # Find the window with the most overlap
+            best = None
+            best_overlap = 0.0
+            for w in gt:
+                ws, we = w["start"], w["end"]
+                overlap = max(0.0, min(t_end, we) - max(t_start, ws))
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best = w.get("ground_truth")
+            return best
+        return None
+
     def _get_analysis_window(self):
         """Extract a 10-second signal window for analysis.
 
@@ -847,10 +872,14 @@ class ViewerPage(QWidget):
         }
 
         window_label = f"{t_start:.1f} – {t_end:.1f} s"
+
+        # Resolve ground truth for this specific window
+        gt = self._resolve_ground_truth(t_start, t_end)
+
         self._show_results = True
         self.analysis_badge.show()
         self.results_panel.set_results(probabilities, model_name, elapsed, window_label,
-                                       ground_truth=self._ground_truth)
+                                       ground_truth=gt)
         if self._view_mode == 0:
             self.info_panel.show()
 

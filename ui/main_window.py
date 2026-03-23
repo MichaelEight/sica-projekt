@@ -184,8 +184,28 @@ class MainWindow(QMainWindow):
             self._gt_lookup = {}
         self._gt_ready.set()
 
-    def _lookup_ground_truth(self, base_path: str) -> dict | None:
-        """Fast dict lookup for ground truth. Waits for cache if still loading."""
+    def _lookup_ground_truth(self, base_path: str) -> dict | list | None:
+        """Look up ground truth for a record.
+
+        Returns:
+            - dict: single ground truth for the whole file (PTB-XL records)
+            - list: windowed ground truth from .annotations.json sidecar
+              Each item: {"start": float, "end": float, "ground_truth": dict}
+            - None: no ground truth available
+        """
+        import json
+
+        # Check for .annotations.json sidecar first
+        json_path = base_path + ".annotations.json"
+        if os.path.exists(json_path):
+            try:
+                with open(json_path) as f:
+                    data = json.load(f)
+                return data.get("windows", None)
+            except Exception:
+                pass
+
+        # Fall back to PTB-XL CSV cache
         if not self._gt_ready.wait(timeout=10.0):
             return None
         if not self._gt_lookup:
