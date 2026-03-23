@@ -1,7 +1,5 @@
-data/ptb-xl/**.*
-!data/ptb-xl/.gitkeep
-!data/ptb-xl/ptbxl_database.csv
-!data/ptb-xl/scp_statements.csv
+data/ptb-xl/
+data/ptb-xl.zip
 data/filtered/**
 data/training/*/*
 models/*.pt
