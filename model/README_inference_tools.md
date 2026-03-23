@@ -41,3 +41,13 @@ print(out["predictions"][0])
 print(out["positive_labels"][0])
 ```
 
+API akceptuje tez WFDB:
+- pojedyncza sciezka do rekordu (`.hea`, `.dat` lub base path),
+- lista sciezek WFDB o roznych dlugosciach.
+
+Wymagania i zachowanie:
+- kazdy rekord musi miec co najmniej 10 sekund (`5000` probek przy `500 Hz`),
+- rekordy dluzsze niz 10 s sa automatycznie dzielone na okna 10 s,
+- wynik `probabilities`/`predictions` jest agregowany per rekord (srednia po oknach),
+- szczegoly okien sa w `segments`, `segment_probabilities`, `segment_predictions`.
+
