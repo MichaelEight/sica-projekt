@@ -5,6 +5,7 @@ data/training/*/*
 models/*.pt
 models/*.pth
 models/*.npy
+.cache/
 __pycache__/
 *.pyc
 .DS_Store
