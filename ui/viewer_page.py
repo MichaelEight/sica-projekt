@@ -897,6 +897,17 @@ class ViewerPage(QWidget):
             self.time_pos = self._scrubber_max
             self.scrubber.setValue(self.scrubber.maximum())
 
+    def wheelEvent(self, event):
+        """Handle trackpad two-finger swipe (horizontal scroll) to navigate the signal."""
+        dx = event.pixelDelta().x() if not event.pixelDelta().isNull() else event.angleDelta().x()
+        if dx != 0 and self.signal is not None:
+            # Convert pixel delta to time: ~200px swipe = 1 second
+            dt = -dx / 200.0
+            self._nav_step(dt)
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
     def _nav_step(self, dt: float):
         if self._view_mode == 2:
             new_t = max(0.0, min(self.duration - 0.05, self._monitor_t + dt))
