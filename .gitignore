@@ -1,5 +1,6 @@
 data/ptb-xl/
 data/ptb-xl.zip
+data/demo/
 data/filtered/**
 data/training/*/*
 models/*.pt
