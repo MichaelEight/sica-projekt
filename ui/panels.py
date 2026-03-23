@@ -649,27 +649,39 @@ class MonitorSidebar(QWidget):
     def _pause_btn_style(self, paused):
         if paused:
             return f"""
-                font-size: 12px; padding: 8px 14px; border: 1px solid {T.ACCENT};
-                border-radius: 6px; background: {T.ACCENT}; color: {T.ACCENT_TEXT};
-                font-weight: 600;
+                QPushButton {{
+                    font-size: 12px; padding: 8px 14px; border: 1px solid {T.ACCENT};
+                    border-radius: 6px; background: {T.ACCENT}; color: {T.ACCENT_TEXT};
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{ background: {T.GREEN}; }}
             """
         return f"""
-            font-size: 12px; padding: 8px 14px; border: 1px solid {T.BORDER};
-            border-radius: 6px; background: {T.WHITE}; color: {T.TEXT};
-            font-weight: 600;
+            QPushButton {{
+                font-size: 12px; padding: 8px 14px; border: 1px solid {T.BORDER};
+                border-radius: 6px; background: {T.WHITE}; color: {T.TEXT};
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {T.BG_SECONDARY}; }}
         """
 
     def _lead_btn_style(self, active):
         if active:
             return f"""
-                font-size: 11px; padding: 4px 8px; border: 1px solid {T.ACCENT};
-                border-radius: 4px; background: {T.ICON_BG}; color: {T.ACCENT};
-                font-family: Menlo; font-weight: 600;
+                QPushButton {{
+                    font-size: 11px; padding: 4px 8px; border: 1px solid {T.ACCENT};
+                    border-radius: 4px; background: {T.ICON_BG}; color: {T.ACCENT};
+                    font-family: Menlo; font-weight: 600;
+                }}
+                QPushButton:hover {{ background: {T.ACCENT}; color: {T.ACCENT_TEXT}; }}
             """
         return f"""
-            font-size: 11px; padding: 4px 8px; border: 1px solid {T.BORDER};
-            border-radius: 4px; background: {T.WHITE}; color: {T.TEXT_DIM};
-            font-family: Menlo; font-weight: 600;
+            QPushButton {{
+                font-size: 11px; padding: 4px 8px; border: 1px solid {T.BORDER};
+                border-radius: 4px; background: {T.WHITE}; color: {T.TEXT_DIM};
+                font-family: Menlo; font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {T.BG_SECONDARY}; color: {T.TEXT}; }}
         """
 
     def _toggle_lead(self, btn, lead):
@@ -689,11 +701,20 @@ class MonitorSidebar(QWidget):
         self.pause_toggled.emit(self._paused)
 
     def _pill_style(self, active):
+        if active:
+            return f"""
+                QPushButton {{
+                    font-size: 11px; padding: 4px 10px; border: 1px solid {T.BORDER};
+                    border-radius: 4px; background: {T.ACCENT}; color: {T.ACCENT_TEXT};
+                }}
+                QPushButton:hover {{ background: {T.GREEN}; }}
+            """
         return f"""
-            font-size: 11px; padding: 4px 10px; border: 1px solid {T.BORDER};
-            border-radius: 4px;
-            background: {T.ACCENT if active else T.WHITE};
-            color: {T.ACCENT_TEXT if active else T.TEXT_MUTED};
+            QPushButton {{
+                font-size: 11px; padding: 4px 10px; border: 1px solid {T.BORDER};
+                border-radius: 4px; background: {T.WHITE}; color: {T.TEXT_MUTED};
+            }}
+            QPushButton:hover {{ background: {T.BG_SECONDARY}; color: {T.TEXT}; }}
         """
 
     def _add_pills_section(self, layout, title, options, active_idx, group_name=""):

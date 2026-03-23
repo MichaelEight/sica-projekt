@@ -65,13 +65,19 @@ class SegmentedControl(QWidget):
         for i, btn in enumerate(self.buttons):
             if i == self._active:
                 btn.setStyleSheet(f"""
-                    background: {T.ACCENT}; color: {T.ACCENT_TEXT}; border: none;
-                    padding: 6px 12px; font-size: 12px; font-weight: 500;
+                    QPushButton {{
+                        background: {T.ACCENT}; color: {T.ACCENT_TEXT}; border: none;
+                        padding: 6px 12px; font-size: 12px; font-weight: 500;
+                    }}
+                    QPushButton:hover {{ background: {T.ACCENT}; opacity: 0.85; }}
                 """)
             else:
                 btn.setStyleSheet(f"""
-                    background: {T.BTN_DARK}; color: {T.TEXT_MUTED}; border: none;
-                    padding: 6px 12px; font-size: 12px; font-weight: 500;
+                    QPushButton {{
+                        background: {T.BTN_DARK}; color: {T.TEXT_MUTED}; border: none;
+                        padding: 6px 12px; font-size: 12px; font-weight: 500;
+                    }}
+                    QPushButton:hover {{ background: {T.SEPARATOR}; color: {T.BTN_TEXT}; }}
                 """)
 
     def active(self) -> int:
@@ -89,9 +95,15 @@ class ToolbarBtn(QPushButton):
     def set_active(self, active: bool):
         self._active = active
         if active:
-            self.setStyleSheet(f"background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;padding:6px 10px;border-radius:5px;")
+            self.setStyleSheet(f"""
+                QPushButton {{ background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;padding:6px 10px;border-radius:5px; }}
+                QPushButton:hover {{ background:{T.ACCENT}; opacity:0.85; }}
+            """)
         else:
-            self.setStyleSheet(f"background:{T.BTN_DARK};color:{T.BTN_TEXT};border:none;padding:6px 10px;border-radius:5px;")
+            self.setStyleSheet(f"""
+                QPushButton {{ background:{T.BTN_DARK};color:{T.BTN_TEXT};border:none;padding:6px 10px;border-radius:5px; }}
+                QPushButton:hover {{ background:{T.SEPARATOR};color:{T.ACCENT_TEXT}; }}
+            """)
 
     def is_active(self) -> bool:
         return self._active
@@ -145,13 +157,19 @@ class LeadSidebar(QWidget):
         for lead, btn in self.buttons.items():
             if lead == self._active:
                 btn.setStyleSheet(f"""
-                    background: {T.ACCENT}; color: {T.ACCENT_TEXT}; border: 1px solid {T.ACCENT};
-                    border-radius: 4px; font-family: Menlo;
+                    QPushButton {{
+                        background: {T.ACCENT}; color: {T.ACCENT_TEXT}; border: 1px solid {T.ACCENT};
+                        border-radius: 4px; font-family: Menlo;
+                    }}
+                    QPushButton:hover {{ background: {T.ACCENT}; opacity: 0.85; }}
                 """)
             else:
                 btn.setStyleSheet(f"""
-                    background: {T.WHITE}; color: {T.TEXT_MUTED}; border: 1px solid {T.BORDER};
-                    border-radius: 4px; font-family: Menlo;
+                    QPushButton {{
+                        background: {T.WHITE}; color: {T.TEXT_MUTED}; border: 1px solid {T.BORDER};
+                        border-radius: 4px; font-family: Menlo;
+                    }}
+                    QPushButton:hover {{ background: {T.BG_SECONDARY}; color: {T.TEXT}; }}
                 """)
 
     def active_lead(self) -> str:
@@ -321,10 +339,13 @@ class ViewerPage(QWidget):
         self.btn_analyze = QPushButton("Analizuj")
         self.btn_analyze.setObjectName("primary")
         self.btn_analyze.setCursor(Qt.PointingHandCursor)
-        self.btn_analyze.setStyleSheet(
-            f"background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;"
-            f"padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px;"
-        )
+        from ui.theme import is_dark_mode as _idm
+        _ah = '#00c864' if _idm() else '#3a8eef'
+        self.btn_analyze.setStyleSheet(f"""
+            QPushButton {{ background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;
+                padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px; }}
+            QPushButton:hover {{ background:{_ah}; }}
+        """)
         self.btn_analyze.clicked.connect(self._on_analyze)
         tb2.addWidget(self.btn_analyze)
 
@@ -477,10 +498,13 @@ class ViewerPage(QWidget):
         for btn in self.tool_btns:
             btn.set_active(btn._active)
 
-        self.btn_analyze.setStyleSheet(
-            f"background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;"
-            f"padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px;"
-        )
+        from ui.theme import is_dark_mode as _idm
+        _ah = '#00c864' if _idm() else '#3a8eef'
+        self.btn_analyze.setStyleSheet(f"""
+            QPushButton {{ background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;
+                padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px; }}
+            QPushButton:hover {{ background:{_ah}; }}
+        """)
         self.btn_mark_analysis.set_active(self._analysis_mode)
         self.model_combo.setStyleSheet(f"""
             QComboBox {{

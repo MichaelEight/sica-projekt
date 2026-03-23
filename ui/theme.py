@@ -148,7 +148,8 @@ QPushButton#secondary {{
     color: {BTN_TEXT};
 }}
 QPushButton#secondary:hover {{
-    background: {'#2a2a2a' if dark else '#3a3a50'};
+    background: {'#333333' if dark else '#4a4a60'};
+    color: {'#ffffff' if dark else '#ffffff'};
 }}
 QPushButton#toolbar {{
     background: {BTN_DARK};
@@ -173,7 +174,9 @@ QPushButton#nav {{
     font-weight: 500;
 }}
 QPushButton#nav:hover {{
-    background: {BG_SECONDARY};
+    background: {BORDER_LIGHT};
+    border: 1px solid {TEXT_DIM};
+    color: {TEXT};
 }}
 QScrollArea {{
     border: none;
