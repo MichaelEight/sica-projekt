@@ -443,6 +443,22 @@ class AnnotationPanel(QWidget):
                 font-weight: 600; background: {bg_c}; color: {text_c};
             """)
             meta_row.addWidget(badge_lbl)
+
+            # Source badge: ANN (doctor) vs ANN.INF (AI model)
+            source = ann.get("source", "user")
+            if source == "model":
+                src_lbl = QLabel("AI")
+                src_lbl.setStyleSheet(f"""
+                    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+                    font-weight: 700; background: {T.PURPLE_BG}; color: {T.PURPLE};
+                """)
+            else:
+                src_lbl = QLabel("Lekarz")
+                src_lbl.setStyleSheet(f"""
+                    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+                    font-weight: 700; background: {T.BLUE_BG}; color: {T.BADGE_BLUE_TEXT};
+                """)
+            meta_row.addWidget(src_lbl)
             meta_row.addStretch()
 
             del_btn = QPushButton("✕")

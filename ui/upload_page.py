@@ -223,6 +223,14 @@ class UploadPage(QWidget):
             "Pliki WFDB (*.dat *.hea);;Wszystkie pliki (*)"
         )
         if path:
+            ext = os.path.splitext(path)[1].lower()
+            if ext not in ('.dat', '.hea'):
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self, "Nieobsługiwany format",
+                    f"Plik \"{os.path.basename(path)}\" nie jest w formacie WFDB.\n"
+                    "Obsługiwane formaty: .dat, .hea")
+                return
             base, _ = os.path.splitext(path)
             self.file_selected.emit(base)
 
@@ -237,6 +245,12 @@ class UploadPage(QWidget):
                 base, _ = os.path.splitext(path)
                 self.file_selected.emit(base)
                 return
+        # No valid file found — show warning
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.warning(
+            self, "Nieobsługiwany format",
+            "Przeciągnięty plik nie jest w formacie WFDB.\n"
+            "Obsługiwane formaty: .dat, .hea")
 
     def refresh(self):
         self._refresh_recent()

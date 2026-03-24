@@ -433,19 +433,36 @@ class ViewerPage(QWidget):
         nav.setContentsMargins(16, 0, 16, 0)
         nav.setSpacing(8)
 
+        # Pause button (shown only in Monitor mode)
+        self.pause_btn = QPushButton("⏸")
+        self.pause_btn.setObjectName("nav")
+        self.pause_btn.setCursor(Qt.PointingHandCursor)
+        self.pause_btn.setToolTip("Pauza / Wznów odtwarzanie")
+        self.pause_btn.clicked.connect(self._on_navbar_pause)
+        self.pause_btn.hide()
+        nav.addWidget(self.pause_btn)
+
         nav_buttons = [
-            ("|◀ Start", self._nav_start),
-            ("◀◀ -1s", lambda: self._nav_step(-1.0)),
-            ("◀ -0.2s", lambda: self._nav_step(-0.2)),
-            ("+0.2s ▶", lambda: self._nav_step(0.2)),
-            ("+1s ▶▶", lambda: self._nav_step(1.0)),
-            ("Koniec ▶|", self._nav_end),
+            ("⏮", self._nav_start, "Przejdź na start"),
+            ("⏪", lambda: self._nav_step(-1.0), "Cofnij o 1 s"),
+            ("◀", lambda: self._nav_step(-0.2), "Cofnij o 0.2 s"),
+            ("▶", lambda: self._nav_step(0.2), "Do przodu o 0.2 s"),
+            ("⏩", lambda: self._nav_step(1.0), "Do przodu o 1 s"),
+            ("⏭", self._nav_end, "Przejdź na koniec"),
         ]
-        for label, handler in nav_buttons:
+        self._nav_btns = []
+        self._hold_timer = QTimer(self)
+        self._hold_timer.setInterval(80)
+        self._hold_handler = None
+        self._hold_timer.timeout.connect(self._on_hold_tick)
+        for label, handler, tooltip in nav_buttons:
             btn = QPushButton(label)
             btn.setObjectName("nav")
             btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(handler)
+            btn.setToolTip(tooltip)
+            btn.pressed.connect(lambda h=handler: self._start_hold(h))
+            btn.released.connect(self._stop_hold)
+            self._nav_btns.append(btn)
             nav.addWidget(btn)
 
         self.scrubber = QSlider(Qt.Horizontal)
@@ -727,6 +744,9 @@ class ViewerPage(QWidget):
             self._monitor_timer.stop()
             self._monitor_playing = False
 
+        # Show pause button only in monitor mode
+        self.pause_btn.setVisible(idx == 2)
+
         self.info_panel.setVisible(idx == 0 or (idx == 0 and self._show_results))
         self.lead_sidebar.setVisible(idx == 1)
         self.monitor_sidebar.setVisible(idx == 2)
@@ -990,6 +1010,7 @@ class ViewerPage(QWidget):
             annotation = {
                 "t1": round(t1, 3), "t2": round(t2, 3),
                 "lead": lead, "category": category, "note": note,
+                "source": "user",
             }
             self._user_annotations.append(annotation)
             self.annot_panel.set_annotations(self._user_annotations)
@@ -1106,6 +1127,9 @@ class ViewerPage(QWidget):
             return
         from ui.theme import CLASS_NAMES_PL
 
+        # Build ground truth annotation lines
+        gt_lines = self._build_gt_lines(CLASS_NAMES_PL)
+
         regions = []
         for r in self._autoscan_results:
             code = r["color"]
@@ -1118,17 +1142,80 @@ class ViewerPage(QWidget):
                     if len(name) > 22:
                         name = name[:20] + "."
                     lines.append(f"{name} {prob * 100:.0f}%")
+                # Mismatch detection: add ⚠ if GT says healthy or no GT
+                if lines and self._is_gt_mismatch(r["t_start"], r["t_end"]):
+                    lines[0] = "\u26a0 " + lines[0]
                 label_lines = lines
             regions.append((r["t_start"], r["t_end"], code, label_lines))
 
         self.grid_12.set_autoscan_regions(regions)
+        self.grid_12.set_gt_annotations(gt_lines)
         self.single_lead.autoscan_regions = regions
         self.single_lead.show_autoscan_labels = True
+        self.single_lead.gt_annotations = gt_lines
         self.single_lead.update()
+
+    def _build_gt_lines(self, class_names_pl: dict) -> list:
+        """Build ground truth annotation bracket data from _ground_truth."""
+        gt = self._ground_truth
+        if gt is None:
+            return []
+        gt_lines = []
+        if isinstance(gt, list):
+            # Windowed GT from .annotations.json
+            for win in gt:
+                truth = win.get("ground_truth", {})
+                # Find top non-healthy class with value 1.0
+                top_cls = None
+                for cls, val in truth.items():
+                    if cls != "class_healthy" and val >= 1.0:
+                        top_cls = cls
+                        break
+                if top_cls:
+                    label = class_names_pl.get(top_cls, top_cls)
+                    gt_lines.append((win["start"], win["end"], label))
+        elif isinstance(gt, dict):
+            # Whole-file GT (PTB-XL)
+            top_cls = None
+            for cls, val in gt.items():
+                if cls != "class_healthy" and val >= 1.0:
+                    top_cls = cls
+                    break
+            if top_cls:
+                label = class_names_pl.get(top_cls, top_cls)
+                gt_lines.append((0.0, self.duration, label))
+        return gt_lines
+
+    def _is_gt_mismatch(self, t_start: float, t_end: float) -> bool:
+        """Check if ground truth disagrees with a non-healthy model prediction.
+
+        Returns True if GT says healthy or no GT exists for this time range.
+        """
+        gt = self._ground_truth
+        if gt is None:
+            return True  # No GT at all → mismatch
+        if isinstance(gt, dict):
+            # Whole-file: check if healthy
+            return gt.get("class_healthy", 0.0) >= 1.0
+        if isinstance(gt, list):
+            # Find best-overlapping window
+            best_overlap = 0.0
+            best_gt = None
+            for win in gt:
+                ws, we = win["start"], win["end"]
+                overlap = max(0.0, min(t_end, we) - max(t_start, ws))
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_gt = win.get("ground_truth", {})
+            if best_gt is None:
+                return True  # No overlapping GT window
+            return best_gt.get("class_healthy", 0.0) >= 1.0
+        return True
 
     def _clear_autoscan_overlay(self):
         self.grid_12.clear_autoscan_regions()
         self.single_lead.autoscan_regions = []
+        self.single_lead.gt_annotations = []
         self.single_lead.update()
 
     def _resolve_ground_truth(self, t_start: float, t_end: float) -> dict | None:
@@ -1243,6 +1330,36 @@ class ViewerPage(QWidget):
         if self._view_mode == 0:
             self.info_panel.show()
 
+    # ── Hold-to-scroll ─────────────────────────────────────
+    def _start_hold(self, handler):
+        self._hold_handler = handler
+        handler()
+        self._hold_timer.start()
+
+    def _stop_hold(self):
+        self._hold_timer.stop()
+        self._hold_handler = None
+
+    def _on_hold_tick(self):
+        if self._hold_handler:
+            self._hold_handler()
+
+    # ── Navbar pause button ──────────────────────────────
+    def _on_navbar_pause(self):
+        self._monitor_playing = not self._monitor_playing
+        if self._monitor_playing:
+            self._monitor_timer.start()
+            self.pause_btn.setText("⏸")
+            self.monitor_sidebar._paused = False
+        else:
+            self._monitor_timer.stop()
+            self.pause_btn.setText("▶")
+            self.monitor_sidebar._paused = True
+        self.monitor_sidebar.pause_btn.setText(
+            "▶  Wznów" if not self._monitor_playing else "⏸  Pauza")
+        self.monitor_sidebar.pause_btn.setStyleSheet(
+            self.monitor_sidebar._pause_btn_style(not self._monitor_playing))
+
     def _nav_start(self):
         if self._view_mode == 2:
             self._monitor_seek(0.0)
@@ -1343,11 +1460,12 @@ class ViewerPage(QWidget):
         self.scrubber.setRange(0, int(self.duration * 100))
         self.scrubber.setValue(0)
         self.scrubber.blockSignals(False)
-        # Reset sidebar state to match
+        # Reset pause state
         self.monitor_sidebar._paused = False
         self.monitor_sidebar.pause_btn.setText("⏸  Pauza")
         self.monitor_sidebar.pause_btn.setStyleSheet(
             self.monitor_sidebar._pause_btn_style(False))
+        self.pause_btn.setText("⏸")
         for _, strip in self._monitor_strips:
             strip._old_signal = None
             strip._sweep_pos = None
@@ -1391,8 +1509,10 @@ class ViewerPage(QWidget):
         self._monitor_playing = not paused
         if self._monitor_playing:
             self._monitor_timer.start()
+            self.pause_btn.setText("⏸")
         else:
             self._monitor_timer.stop()
+            self.pause_btn.setText("▶")
 
     def _on_monitor_speed(self, speed: float):
         self._monitor_speed = speed

@@ -110,7 +110,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("EKG Assistant")
         self.setMinimumSize(1200, 800)
-        self.resize(1440, 900)
+        self.showMaximized()
 
         self.setStyleSheet(T.STYLESHEET)
 
@@ -171,10 +171,11 @@ class MainWindow(QMainWindow):
         _sc(Qt.Key_Right, _on_viewer(lambda: self.viewer_page._nav_step(0.2)))
         _sc(Qt.Key_Home, _on_viewer(self.viewer_page._nav_start))
         _sc(Qt.Key_End, _on_viewer(self.viewer_page._nav_end))
-        _sc(Qt.Key_Space, _on_viewer(lambda: self.viewer_page.monitor_sidebar._on_pause()
+        _sc(Qt.Key_Space, _on_viewer(lambda: self.viewer_page._on_navbar_pause()
                                      if self.viewer_page._view_mode == 2 else None))
         _sc(QKeySequence("Ctrl+E"), _on_viewer(self._go_report))
         _sc(QKeySequence("Ctrl+Return"), _on_viewer(self.viewer_page._on_analyze))
+        _sc(QKeySequence("Ctrl+F"), lambda: self.showNormal() if self.isFullScreen() else self.showFullScreen())
 
         def _on_escape():
             if self.stack.currentIndex() == 1:
@@ -238,6 +239,15 @@ class MainWindow(QMainWindow):
 
     def _load_file(self, base_path: str):
         """Load a WFDB record or generate demo data."""
+        # Validate file format
+        ext = os.path.splitext(base_path)[1].lower()
+        if ext and ext not in ('.dat', '.hea', ''):
+            QMessageBox.warning(
+                self, "Nieobsługiwany format",
+                f"Plik \"{os.path.basename(base_path)}\" nie jest w formacie WFDB.\n"
+                "Obsługiwane formaty: .dat, .hea")
+            return
+
         # Show loading indicator
         self.statusBar().showMessage("Wczytywanie pliku...")
         QApplication.processEvents()

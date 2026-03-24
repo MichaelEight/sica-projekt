@@ -61,7 +61,10 @@ class EkgCellCanvas(QWidget):
         self.analysis_clickable_end = None  # max clickable time or None
         self.autoscan_regions = []        # list of (t_start, t_end, color_code, label_lines)
         self.show_autoscan_labels = False
+        self.gt_annotations = []          # list of (t_start, t_end, label_text)
         self.setMinimumSize(80, 40)
+        self.setMouseTracking(True)
+        self._hover_x = None
 
     def clear(self):
         """Reset all data so the cell draws empty."""
@@ -352,6 +355,41 @@ class EkgCellCanvas(QWidget):
                                 ty = by + (li + 1) * line_h
                                 painter.drawText(QPointF(tx, ty), line)
 
+        # Ground truth annotation brackets
+        if self.gt_annotations and self.show_autoscan_labels:
+            cal_w_g = w * 0.06 if self.show_cal else 0
+            sig_s_g = (5 + cal_w_g + 4) if self.show_cal else 0
+            sig_w_g = w - sig_s_g
+            if sig_w_g > 0 and duration > 0:
+                gt_color = QColor(T.GREEN)
+                painter.setFont(QFont("Menlo", 10, QFont.Bold))
+                fm_gt = painter.fontMetrics()
+                tick_h = 8
+                bracket_y = 28  # below lead label
+                for gt_s, gt_e, gt_label in self.gt_annotations:
+                    gx1 = sig_s_g + ((gt_s - self.t_start) / duration) * sig_w_g
+                    gx2 = sig_s_g + ((gt_e - self.t_start) / duration) * sig_w_g
+                    gx1 = max(sig_s_g, gx1)
+                    gx2 = min(float(w), gx2)
+                    if gx2 <= gx1:
+                        continue
+                    # Bracket: vertical ticks + horizontal line
+                    painter.setPen(QPen(gt_color, 1.5))
+                    painter.drawLine(QPointF(gx1, bracket_y), QPointF(gx1, bracket_y + tick_h))
+                    painter.drawLine(QPointF(gx2, bracket_y), QPointF(gx2, bracket_y + tick_h))
+                    line_y = bracket_y + tick_h / 2
+                    painter.drawLine(QPointF(gx1, line_y), QPointF(gx2, line_y))
+                    # Label centered above the line
+                    tw = fm_gt.horizontalAdvance(gt_label)
+                    tx = (gx1 + gx2) / 2 - tw / 2
+                    ty = bracket_y - 3
+                    # Background pill for readability
+                    pill_bg = QColor(T.WHITE)
+                    pill_bg.setAlpha(220)
+                    painter.fillRect(QRectF(tx - 4, ty - fm_gt.ascent(), tw + 8, fm_gt.height() + 2), pill_bg)
+                    painter.setPen(gt_color)
+                    painter.drawText(QPointF(tx, ty), gt_label)
+
         # Analysis overlay
         if self.analysis_clickable_end is not None or self.analysis_region is not None:
             cal_w = w * 0.06 if self.show_cal else 0
@@ -400,6 +438,18 @@ class EkgCellCanvas(QWidget):
             painter.fillRect(QRectF(4, 2, painter.fontMetrics().horizontalAdvance(self.lead_name) + 8, 18), bg)
             painter.drawText(QPointF(8, 16), self.lead_name)
 
+        # Hover vertical cursor line
+        if self._hover_x is not None:
+            hx = self._hover_x - ins  # adjust for inset translation
+            if 0 <= hx <= w:
+                if T.is_dark_mode():
+                    hover_color = QColor(255, 255, 255, 128)
+                else:
+                    hover_color = QColor(0, 0, 0, 77)
+                hover_pen = QPen(hover_color, 1.0, Qt.DashLine)
+                painter.setPen(hover_pen)
+                painter.drawLine(QPointF(hx, 0), QPointF(hx, h))
+
         painter.end()
 
     def mousePressEvent(self, event):
@@ -416,6 +466,16 @@ class EkgCellCanvas(QWidget):
                 v = self.signal[idx]
                 self.clicked.emit(t, v)
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        self._hover_x = event.position().x()
+        self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self._hover_x = None
+        self.update()
+        super().leaveEvent(event)
 
 
 # 12-Lead Grid
@@ -503,8 +563,14 @@ class TwelveLeadGrid(QWidget):
         self.rhythm.show_autoscan_labels = True
         self.rhythm.update()
 
+    def set_gt_annotations(self, gt_lines: list):
+        """Set ground truth annotation brackets on rhythm strip only."""
+        self.rhythm.gt_annotations = gt_lines
+        self.rhythm.update()
+
     def clear_autoscan_regions(self):
         self.set_autoscan_regions([])
+        self.rhythm.gt_annotations = []
 
     def clear(self):
         """Clear all cells."""
