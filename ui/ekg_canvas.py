@@ -59,7 +59,8 @@ class EkgCellCanvas(QWidget):
         self.show_zero_line = False
         self.analysis_region = None       # (t_start, t_end) or None
         self.analysis_clickable_end = None  # max clickable time or None
-        self.autoscan_regions = []        # list of (t_start, t_end, color_code)
+        self.autoscan_regions = []        # list of (t_start, t_end, color_code, label_lines)
+        self.show_autoscan_labels = False
         self.setMinimumSize(80, 40)
 
     def clear(self):
@@ -80,6 +81,7 @@ class EkgCellCanvas(QWidget):
         self.analysis_region = None
         self.analysis_clickable_end = None
         self.autoscan_regions = []
+        self.show_autoscan_labels = False
         self.update()
 
     def set_data(self, lead_name: str, signal: np.ndarray, fs: int,
@@ -297,7 +299,9 @@ class EkgCellCanvas(QWidget):
                     1: QColor(250, 204, 21, 45),   # yellow (borderline)
                     2: QColor(239, 68, 68, 40),     # red (illness)
                 }
-                for ar_s, ar_e, code in self.autoscan_regions:
+                for region in self.autoscan_regions:
+                    ar_s, ar_e, code = region[0], region[1], region[2]
+                    label_lines = region[3] if len(region) > 3 else None
                     if code == 0:
                         continue  # healthy = no overlay
                     ax1 = sig_s_a + ((ar_s - self.t_start) / duration) * sig_w_a
@@ -307,6 +311,46 @@ class EkgCellCanvas(QWidget):
                     if ax2 > ax1:
                         painter.fillRect(QRectF(ax1, 0, ax2 - ax1, h),
                                          _AUTOSCAN_COLORS[min(code, 2)])
+
+                # Draw autoscan labels — second pass after all regions
+                if self.show_autoscan_labels:
+                    painter.setFont(QFont("Menlo", 14, QFont.Bold))
+                    fm = painter.fontMetrics()
+                    line_h = fm.height()
+                    label_idx = 0
+                    for region in self.autoscan_regions:
+                        ar_s, ar_e, code = region[0], region[1], region[2]
+                        label_lines = region[3] if len(region) > 3 else None
+                        if code == 0 or not label_lines:
+                            label_idx += 1
+                            continue
+
+                        total_h = line_h * len(label_lines) + 6
+                        max_tw = max(fm.horizontalAdvance(ln) for ln in label_lines)
+                        pill_w = max_tw + 16
+
+                        # Anchor in the non-overlapping first half of the region
+                        # (step is half the window, so first half is unique to this region)
+                        t_anchor = ar_s + (ar_e - ar_s) * 0.25
+                        cx = sig_s_a + ((t_anchor - self.t_start) / duration) * sig_w_a
+                        pill_x = cx - pill_w / 2
+
+                        # Always at bottom
+                        by = h - total_h - 6
+
+                        label_idx += 1
+
+                        if pill_x + pill_w > sig_s_a and pill_x < w:
+                            bg = QColor(T.WHITE)
+                            bg.setAlpha(220)
+                            painter.fillRect(
+                                QRectF(pill_x, by - 3, pill_w, total_h + 6), bg)
+                            painter.setPen(QColor(T.TEXT))
+                            for li, line in enumerate(label_lines):
+                                tw = fm.horizontalAdvance(line)
+                                tx = pill_x + (pill_w - tw) / 2
+                                ty = by + (li + 1) * line_h
+                                painter.drawText(QPointF(tx, ty), line)
 
         # Analysis overlay
         if self.analysis_clickable_end is not None or self.analysis_region is not None:
@@ -450,11 +494,13 @@ class TwelveLeadGrid(QWidget):
         self.set_analysis_overlay(None, None)
 
     def set_autoscan_regions(self, regions: list):
-        """Set colored autoscan regions on all cells."""
+        """Set colored autoscan regions on all cells. Labels only on rhythm strip."""
         for cell in self.cells.values():
             cell.autoscan_regions = regions
+            cell.show_autoscan_labels = False
             cell.update()
         self.rhythm.autoscan_regions = regions
+        self.rhythm.show_autoscan_labels = True
         self.rhythm.update()
 
     def clear_autoscan_regions(self):

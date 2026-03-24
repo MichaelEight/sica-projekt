@@ -1104,9 +1104,26 @@ class ViewerPage(QWidget):
     def _apply_autoscan_overlay(self):
         if not self._autoscan_results:
             return
-        regions = [(r["t_start"], r["t_end"], r["color"]) for r in self._autoscan_results]
+        from ui.theme import CLASS_NAMES_PL
+
+        regions = []
+        for r in self._autoscan_results:
+            code = r["color"]
+            label_lines = None
+            if code != 0 and r.get("probs"):
+                sorted_probs = sorted(r["probs"].items(), key=lambda x: x[1], reverse=True)
+                lines = []
+                for cls, prob in sorted_probs[:2]:
+                    name = CLASS_NAMES_PL.get(cls, cls)
+                    if len(name) > 22:
+                        name = name[:20] + "."
+                    lines.append(f"{name} {prob * 100:.0f}%")
+                label_lines = lines
+            regions.append((r["t_start"], r["t_end"], code, label_lines))
+
         self.grid_12.set_autoscan_regions(regions)
         self.single_lead.autoscan_regions = regions
+        self.single_lead.show_autoscan_labels = True
         self.single_lead.update()
 
     def _clear_autoscan_overlay(self):
