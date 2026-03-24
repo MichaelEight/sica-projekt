@@ -821,18 +821,7 @@ class MonitorSidebar(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(14)
 
-        # Pause button
-        self.pause_btn = QPushButton("⏸  Pauza")
-        self.pause_btn.setCursor(Qt.PointingHandCursor)
-        self.pause_btn.setFocusPolicy(Qt.NoFocus)
-        self.pause_btn.setStyleSheet(f"""
-            font-size: 12px; padding: 8px 14px; border: 1px solid {T.BORDER};
-            border-radius: 6px; background: {T.WHITE}; color: {T.TEXT};
-            font-weight: 600;
-        """)
-        self.pause_btn.clicked.connect(self._on_pause)
         self._paused = False
-        layout.addWidget(self.pause_btn)
 
         # Playback speed
         self._add_pills_section(layout, "Pr\u0119dko\u015b\u0107 odtwarzania",
@@ -866,25 +855,6 @@ class MonitorSidebar(QWidget):
 
         layout.addStretch()
 
-    def _pause_btn_style(self, paused):
-        if paused:
-            return f"""
-                QPushButton {{
-                    font-size: 12px; padding: 8px 14px; border: 1px solid {T.ACCENT};
-                    border-radius: 6px; background: {T.ACCENT}; color: {T.ACCENT_TEXT};
-                    font-weight: 600;
-                }}
-                QPushButton:hover {{ background: {T.GREEN}; }}
-            """
-        return f"""
-            QPushButton {{
-                font-size: 12px; padding: 8px 14px; border: 1px solid {T.BORDER};
-                border-radius: 6px; background: {T.WHITE}; color: {T.TEXT};
-                font-weight: 600;
-            }}
-            QPushButton:hover {{ background: {T.BG_SECONDARY}; }}
-        """
-
     def _lead_btn_style(self, active):
         if active:
             return f"""
@@ -910,24 +880,6 @@ class MonitorSidebar(QWidget):
         btn.setStyleSheet(self._lead_btn_style(is_active))
         active_leads = [l for l, b in self.lead_btns.items() if b.property("active")]
         self.leads_changed.emit(active_leads)
-
-    def _on_pause(self):
-        self._paused = not self._paused
-        if self._paused:
-            self.pause_btn.setText("▶  Wznów")
-            self.pause_btn.setStyleSheet(f"""
-                font-size: 12px; padding: 8px 14px; border: 1px solid {T.ACCENT};
-                border-radius: 6px; background: {T.ACCENT}; color: {T.ACCENT_TEXT};
-                font-weight: 600;
-            """)
-        else:
-            self.pause_btn.setText("⏸  Pauza")
-            self.pause_btn.setStyleSheet(f"""
-                font-size: 12px; padding: 8px 14px; border: 1px solid {T.BORDER};
-                border-radius: 6px; background: {T.WHITE}; color: {T.TEXT};
-                font-weight: 600;
-            """)
-        self.pause_toggled.emit(self._paused)
 
     def _pill_style(self, active):
         if active:
