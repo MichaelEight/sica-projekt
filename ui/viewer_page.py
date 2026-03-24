@@ -365,6 +365,7 @@ class ViewerPage(QWidget):
         self.content.setSpacing(0)
 
         self.info_panel = InfoPanel()
+        self.info_panel.patient_changed.connect(self._save_apwr)
         self.content.addWidget(self.info_panel)
 
         self.monitor_sidebar = MonitorSidebar()
@@ -406,10 +407,14 @@ class ViewerPage(QWidget):
         # Right panels
         self.caliper_panel = CaliperPanel()
         self.caliper_panel.hide()
+        self.caliper_panel.caliper_deleted.connect(self._on_caliper_deleted)
+        self.caliper_panel.clear_all.connect(self._on_clear_all_calipers)
         self.content.addWidget(self.caliper_panel)
 
         self.annot_panel = AnnotationPanel()
         self.annot_panel.hide()
+        self.annot_panel.annotation_saved.connect(self._on_annotation_saved)
+        self.annot_panel.annotation_deleted.connect(self._on_annotation_deleted)
         self.content.addWidget(self.annot_panel)
 
         self.results_panel = ResultsPanel()
@@ -557,9 +562,15 @@ class ViewerPage(QWidget):
             layout.addWidget(strip, stretch=1)
 
     def set_signal(self, signal: np.ndarray, leads: list[str], fs: int, filename: str = "",
-                   ground_truth: dict | None = None):
+                   ground_truth: dict | None = None, patient_info: dict | None = None,
+                   base_path: str = ""):
         """Load new signal data into the viewer."""
         self._ground_truth = ground_truth
+        self._base_path = base_path
+        self._user_calipers = []
+        self._user_annotations = []
+        self._caliper_click_t1 = None
+        self._annot_click_t1 = None
         self.grid_12.clear()
         self.single_lead.clear()
         for _, strip in self._monitor_strips:
@@ -639,6 +650,20 @@ class ViewerPage(QWidget):
         self.scrubber.setRange(0, int(self._scrubber_max * 100))
         self.scrubber.setValue(0)
 
+        # Load patient info
+        if patient_info:
+            self.info_panel.set_patient(
+                patient_id=patient_info.get("id", ""),
+                age=patient_info.get("age", ""),
+                sex=patient_info.get("sex", ""),
+                date=patient_info.get("date", ""),
+            )
+        else:
+            self.info_panel.set_patient()
+
+        # Load APWR file (overrides patient info, loads calipers/annotations)
+        self._load_apwr()
+
         self._refresh_views()
         self._update_time_display()
         self._update_statusbar()
@@ -665,18 +690,19 @@ class ViewerPage(QWidget):
             self.single_lead.v_min = self._v_min
             self.single_lead.v_max = self._v_max
             self.single_lead.set_data(lead, self.signal[:, idx], self.fs, t_start, t_end)
-            if self._tool_mode == 1:
-                self.single_lead.calipers = [
-                    (1.220, 1.384, T.ACCENT, "PR = 164 ms"),
-                    (1.384, 1.472, T.PURPLE, "QRS = 88 ms"),
-                    (1.432, 2.264, T.GREEN, "R-R = 832 ms"),
-                ]
-            else:
-                self.single_lead.calipers = []
-            if self._tool_mode == 2:
-                self.single_lead.annotations = [(2.30, 2.85)]
-            else:
-                self.single_lead.annotations = []
+
+            # Real calipers for this lead
+            self.single_lead.calipers = [
+                (c["t1"], c["t2"], c["color"], c["label"])
+                for c in self._user_calipers if c.get("lead") == lead
+            ]
+
+            # Real annotations for this lead
+            self.single_lead.annotations = [
+                (a["t1"], a["t2"])
+                for a in self._user_annotations if a.get("lead") == lead
+            ]
+
             self.single_lead.update()
 
     def _refresh_monitor(self):
@@ -787,16 +813,24 @@ class ViewerPage(QWidget):
             self._update_statusbar()
 
     def _on_canvas_click(self, t: float, v: float):
-        """Handle click on EKG canvas — place analysis window if in analysis mode."""
-        if not self._analysis_mode or self.signal is None:
+        """Handle click on EKG canvas."""
+        if self.signal is None:
             return
-        max_start = self.duration - 10.0
-        if max_start <= 0:
+
+        # Analysis mode takes priority
+        if self._analysis_mode:
+            max_start = self.duration - 10.0
+            if max_start <= 0:
+                return
+            t = max(0.0, min(t, max_start))
+            self._analysis_start = t
+            self._apply_analysis_overlay()
+            self._update_statusbar()
             return
-        t = max(0.0, min(t, max_start))
-        self._analysis_start = t
-        self._apply_analysis_overlay()
-        self._update_statusbar()
+
+        # Caliper/annotation mode (single-lead view only)
+        if self._view_mode == 1 and self._tool_mode in (1, 2):
+            self._on_caliper_or_annot_click(t, v)
 
     def _apply_analysis_overlay(self):
         """Set the analysis overlay on all visible canvases."""
@@ -841,6 +875,146 @@ class ViewerPage(QWidget):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             json.dump({"windows": results}, f)
+
+    # ── APWR save/load ──────────────────────────────────────
+
+    def _apwr_path(self) -> str:
+        if self._base_path:
+            return self._base_path + ".apwr"
+        return ""
+
+    def _load_apwr(self):
+        """Load calipers, annotations, patient overrides from .apwr file."""
+        path = self._apwr_path()
+        if not path or not os.path.exists(path):
+            self.caliper_panel.set_calipers([])
+            self.annot_panel.set_annotations([])
+            return
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except Exception:
+            return
+
+        # Patient overrides
+        if "patient" in data:
+            p = data["patient"]
+            self.info_panel.set_patient(
+                patient_id=p.get("id", ""),
+                age=p.get("age", ""),
+                sex=p.get("sex", ""),
+                date=p.get("date", ""),
+                name=p.get("name", ""),
+            )
+
+        # Calipers
+        self._user_calipers = data.get("calipers", [])
+        self.caliper_panel.set_calipers(self._user_calipers)
+
+        # Annotations
+        self._user_annotations = data.get("annotations", [])
+        self.annot_panel.set_annotations(self._user_annotations)
+
+    def _save_apwr(self):
+        """Save current state to .apwr file."""
+        path = self._apwr_path()
+        if not path:
+            return
+        pf = self.info_panel._patient_fields
+        data = {
+            "version": 1,
+            "patient": {
+                "id": pf["id"].text() if "id" in pf else "",
+                "age": pf["age"].text() if "age" in pf else "",
+                "sex": pf["sex"].text() if "sex" in pf else "",
+                "date": pf["date"].text() if "date" in pf else "",
+                "name": pf["name"].text() if "name" in pf else "",
+            },
+            "calipers": self._user_calipers,
+            "annotations": self._user_annotations,
+        }
+        try:
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    # ── Caliper/Annotation click handling ─────────────────
+
+    def _on_caliper_or_annot_click(self, t: float, v: float):
+        """Handle clicks in caliper or annotation mode (single-lead view)."""
+        if self._view_mode != 1 or self.signal is None:
+            return
+
+        lead = self.lead_sidebar.active_lead()
+
+        if self._tool_mode == 1:  # Caliper mode
+            if self._caliper_click_t1 is None:
+                self._caliper_click_t1 = t
+                self._update_statusbar()
+            else:
+                t1, t2 = min(self._caliper_click_t1, t), max(self._caliper_click_t1, t)
+                dt_ms = abs(t2 - t1) * 1000
+                colors = [T.ACCENT, T.PURPLE, T.GREEN]
+                color = colors[len(self._user_calipers) % len(colors)]
+                caliper = {
+                    "t1": round(t1, 3), "t2": round(t2, 3),
+                    "lead": lead, "label": f"{dt_ms:.0f} ms", "color": color,
+                }
+                self._user_calipers.append(caliper)
+                self._caliper_click_t1 = None
+                self.caliper_panel.set_calipers(self._user_calipers)
+                self._refresh_single_lead()
+                self._save_apwr()
+
+        elif self._tool_mode == 2:  # Annotation mode
+            if self._annot_click_t1 is None:
+                self._annot_click_t1 = t
+                self._update_statusbar()
+            else:
+                t1, t2 = min(self._annot_click_t1, t), max(self._annot_click_t1, t)
+                self._annot_click_t1 = None
+                self.annot_panel.set_form_region(lead, t1, t2)
+                # Temporarily add annotation region to canvas for preview
+                self.single_lead.annotations = [(t1, t2)]
+                self.single_lead.update()
+                self._update_statusbar()
+
+    def _on_annotation_saved(self, category: str, note: str):
+        """Handle annotation save from AnnotationPanel form."""
+        # Get region from the panel's form
+        lead = self.lead_sidebar.active_lead()
+        # Find the current annotation region on canvas
+        if self.single_lead.annotations:
+            t1, t2 = self.single_lead.annotations[0]
+            annotation = {
+                "t1": round(t1, 3), "t2": round(t2, 3),
+                "lead": lead, "category": category, "note": note,
+            }
+            self._user_annotations.append(annotation)
+            self.annot_panel.set_annotations(self._user_annotations)
+            self._refresh_single_lead()
+            self._save_apwr()
+
+    def _on_caliper_deleted(self, idx: int):
+        if 0 <= idx < len(self._user_calipers):
+            self._user_calipers.pop(idx)
+            self.caliper_panel.set_calipers(self._user_calipers)
+            self._refresh_single_lead()
+            self._save_apwr()
+
+    def _on_annotation_deleted(self, idx: int):
+        if 0 <= idx < len(self._user_annotations):
+            self._user_annotations.pop(idx)
+            self.annot_panel.set_annotations(self._user_annotations)
+            self._refresh_single_lead()
+            self._save_apwr()
+
+    def _on_clear_all_calipers(self):
+        self._user_calipers.clear()
+        self.caliper_panel.set_calipers([])
+        self._refresh_single_lead()
+        self._save_apwr()
 
     def _toggle_autoscan(self):
         if self.signal is None:

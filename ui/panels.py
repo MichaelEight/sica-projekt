@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QPushButton, QFrame, QComboBox, QTextEdit,
-                                QScrollArea, QSizePolicy)
+                                QScrollArea, QSizePolicy, QLineEdit)
 
 import ui.theme as T
 from ui.widgets import section_header, info_row, make_action_btn
@@ -11,6 +11,8 @@ from ui.widgets import section_header, info_row, make_action_btn
 
 # Info Panel (Patient + Measurements)
 class InfoPanel(QWidget):
+    patient_changed = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(160)
@@ -21,40 +23,75 @@ class InfoPanel(QWidget):
         layout.setSpacing(4)
 
         layout.addWidget(section_header("Pacjent"))
-        self.patient_rows = {}
-        for key, label, val, unit in [
-            ("id", "ID", "00888", ""),
-            ("age", "Wiek", "62", "lat"),
-            ("sex", "Płeć", "M", ""),
-            ("date", "Data", "15.03.26", ""),
+        self._patient_fields = {}
+        for key, label in [
+            ("name", "Imię"),
+            ("id", "ID"),
+            ("age", "Wiek"),
+            ("sex", "Płeć"),
+            ("date", "Data"),
         ]:
-            row = info_row(label, val, unit)
-            self.patient_rows[key] = row
+            row = self._editable_info_row(key, label)
             layout.addWidget(row)
 
         layout.addSpacing(10)
 
         layout.addWidget(section_header("Pomiary"))
-        self.meas_rows = {}
+        self._meas_labels = {}
         for key, label, val, unit in [
-            ("hr", "HR", "72", "bpm"),
-            ("pr", "PR", "164", "ms"),
-            ("qrs", "QRS", "88", "ms"),
-            ("qt", "QT", "392", "ms"),
-            ("qtc", "QTc", "429", "ms"),
-            ("axis", "Oś", "+55°", ""),
+            ("hr", "HR", "", "bpm"),
+            ("pr", "PR", "", "ms"),
+            ("qrs", "QRS", "", "ms"),
+            ("qt", "QT", "", "ms"),
+            ("qtc", "QTc", "", "ms"),
+            ("axis", "Oś", "", ""),
         ]:
             row = info_row(label, val, unit)
-            self.meas_rows[key] = row
+            self._meas_labels[key] = row
             layout.addWidget(row)
 
         layout.addStretch()
 
-    def set_patient(self, patient_id="", age="", sex="", date=""):
-        pass
+    def _editable_info_row(self, key, label):
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lbl = QLabel(label)
+        lbl.setStyleSheet(f"color: {T.TEXT_MUTED}; font-size: 12px;")
+        edit = QLineEdit()
+        edit.setStyleSheet(
+            f"font-weight: 600; font-family: Menlo; font-size: 13px; "
+            f"border: 1px solid {T.BORDER}; border-radius: 3px; padding: 1px 4px;"
+        )
+        edit.setAlignment(Qt.AlignRight)
+        edit.setFixedWidth(70)
+        edit.textChanged.connect(self.patient_changed.emit)
+        lay.addWidget(lbl)
+        lay.addStretch()
+        lay.addWidget(edit)
+        self._patient_fields[key] = edit
+        return row
+
+    def set_patient(self, patient_id="", age="", sex="", date="", name=""):
+        self._patient_fields["id"].setText(str(patient_id))
+        self._patient_fields["age"].setText(str(age))
+        self._patient_fields["sex"].setText(str(sex))
+        self._patient_fields["date"].setText(str(date))
+        self._patient_fields["name"].setText(str(name))
 
     def set_measurements(self, hr="", pr="", qrs="", qt_val="", qtc="", axis=""):
-        pass
+        mapping = {"hr": hr, "pr": pr, "qrs": qrs, "qt": qt_val, "qtc": qtc, "axis": axis}
+        units = {"hr": "bpm", "pr": "ms", "qrs": "ms", "qt": "ms", "qtc": "ms", "axis": ""}
+        labels = {"hr": "HR", "pr": "PR", "qrs": "QRS", "qt": "QT", "qtc": "QTc", "axis": "Oś"}
+        for key, val in mapping.items():
+            old_row = self._meas_labels[key]
+            parent_layout = old_row.parentWidget().layout() if old_row.parentWidget() else self.layout()
+            idx = self.layout().indexOf(old_row)
+            old_row.setParent(None)
+            old_row.deleteLater()
+            new_row = info_row(labels[key], str(val), units[key])
+            self._meas_labels[key] = new_row
+            self.layout().insertWidget(idx, new_row)
 
     def apply_theme(self):
         self.setStyleSheet(f"background: {T.WHITE}; border-right: 1px solid {T.BORDER};")
@@ -64,11 +101,20 @@ class InfoPanel(QWidget):
 class CaliperPanel(QWidget):
     add_caliper = Signal()
     clear_all = Signal()
+    calipers_changed = Signal()
+    caliper_deleted = Signal(int)
+
+    _COLORS = [
+        (T.ACCENT, T.BLUE_BG, "blue"),
+        (T.PURPLE, T.PURPLE_BG, "purple"),
+        (T.GREEN, T.GREEN_BG, "green"),
+    ]
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(240)
         self.setStyleSheet(f"background: {T.WHITE}; border-left: 1px solid {T.BORDER};")
+        self._calipers: list[dict] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -99,32 +145,25 @@ class CaliperPanel(QWidget):
         scroll.setWidget(self.meas_container)
         layout.addWidget(scroll, stretch=1)
 
-        # Demo measurements
-        self._add_measurement("Pomiar 1 — PR interval", "164 ms",
-                              "Odpr: II | 1.220 s → 1.384 s", T.ACCENT, "blue")
-        self._add_measurement("Pomiar 2 — QRS", "88 ms",
-                              "Odpr: II | 1.384 s → 1.472 s", T.PURPLE, "purple")
-        self._add_measurement("Pomiar 3 — R-R", "832 ms",
-                              "Odpr: II | 1.432 s → 2.264 s", T.GREEN, "green")
-
-        # HR box
-        hr_box = QFrame()
-        hr_box.setStyleSheet(f"""
+        # HR box (hidden by default)
+        self._hr_box = QFrame()
+        self._hr_box.setStyleSheet(f"""
             QFrame {{ background: {T.GREEN_BG}; border: 1px solid {T.GREEN_BORDER}; border-radius: 6px;
                       margin: 6px 10px; padding: 10px 12px; }}
         """)
-        hr_layout = QVBoxLayout(hr_box)
+        hr_layout = QVBoxLayout(self._hr_box)
         hr_layout.setContentsMargins(10, 10, 10, 10)
-        hr_label = QLabel("HR Z R-R")
-        hr_label.setStyleSheet(f"font-size: 11px; color: {T.GREEN}; font-weight: 600;")
-        hr_layout.addWidget(hr_label)
-        hr_value = QLabel("72 bpm")
-        hr_value.setStyleSheet(f"font-size: 24px; font-weight: 700; font-family: Menlo; color: {T.GREEN};")
-        hr_layout.addWidget(hr_value)
-        hr_detail = QLabel("Pomiar 3 (R-R = 832 ms)")
-        hr_detail.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
-        hr_layout.addWidget(hr_detail)
-        self.meas_layout.addWidget(hr_box)
+        self._hr_label = QLabel("HR Z R-R")
+        self._hr_label.setStyleSheet(f"font-size: 11px; color: {T.GREEN}; font-weight: 600;")
+        hr_layout.addWidget(self._hr_label)
+        self._hr_value = QLabel("")
+        self._hr_value.setStyleSheet(f"font-size: 24px; font-weight: 700; font-family: Menlo; color: {T.GREEN};")
+        hr_layout.addWidget(self._hr_value)
+        self._hr_detail = QLabel("")
+        self._hr_detail.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
+        hr_layout.addWidget(self._hr_detail)
+        self._hr_box.hide()
+        self.meas_layout.addWidget(self._hr_box)
 
         # Actions
         actions = QWidget()
@@ -140,7 +179,47 @@ class CaliperPanel(QWidget):
         a_layout.addWidget(btn_clear)
         layout.addWidget(actions)
 
-    def _add_measurement(self, title, value, detail, color, color_class):
+    def set_calipers(self, calipers_list: list[dict]):
+        self._calipers = list(calipers_list)
+        self._rebuild_cards()
+
+    def _rebuild_cards(self):
+        # Remove all cards except the HR box
+        while self.meas_layout.count():
+            item = self.meas_layout.takeAt(0)
+            w = item.widget()
+            if w and w is not self._hr_box:
+                w.deleteLater()
+
+        # Re-add caliper cards
+        for idx, cal in enumerate(self._calipers):
+            color, bg, color_class = self._COLORS[idx % len(self._COLORS)]
+            dt_ms = abs(cal["t2"] - cal["t1"]) * 1000
+            label = cal.get("label", f"{dt_ms:.0f} ms")
+            detail = f"Odpr: {cal['lead']} | {cal['t1']:.3f} s → {cal['t2']:.3f} s"
+            card = self._add_measurement(label, f"{dt_ms:.0f} ms", detail, color, color_class, idx)
+            self.meas_layout.addWidget(card)
+
+        # HR box: auto-calculate from last R-R caliper
+        rr_cal = None
+        for cal in reversed(self._calipers):
+            if "r-r" in cal.get("label", "").lower() or "rr" in cal.get("label", "").lower():
+                rr_cal = cal
+                break
+        if rr_cal:
+            rr_ms = abs(rr_cal["t2"] - rr_cal["t1"]) * 1000
+            if rr_ms > 0:
+                hr = 60000.0 / rr_ms
+                self._hr_value.setText(f"{hr:.0f} bpm")
+                self._hr_detail.setText(f"R-R = {rr_ms:.0f} ms")
+                self._hr_box.show()
+            else:
+                self._hr_box.hide()
+        else:
+            self._hr_box.hide()
+        self.meas_layout.addWidget(self._hr_box)
+
+    def _add_measurement(self, title, value, detail, color, color_class, index=-1):
         bg_colors = {"blue": T.BLUE_BG, "purple": T.PURPLE_BG, "green": T.GREEN_BG}
         card = QFrame()
         card.setStyleSheet(f"""
@@ -156,9 +235,25 @@ class CaliperPanel(QWidget):
         card_layout.setContentsMargins(10, 8, 10, 8)
         card_layout.setSpacing(2)
 
+        # Title row with delete button
+        title_row = QHBoxLayout()
         title_lbl = QLabel(title)
         title_lbl.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {T.TEXT_MUTED};")
-        card_layout.addWidget(title_lbl)
+        title_row.addWidget(title_lbl)
+        title_row.addStretch()
+        del_btn = QPushButton("✕")
+        del_btn.setFixedSize(20, 20)
+        del_btn.setCursor(Qt.PointingHandCursor)
+        del_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 12px; border: none; background: transparent;
+                color: {T.TEXT_DIM}; font-weight: 600;
+            }}
+            QPushButton:hover {{ color: {T.RED}; }}
+        """)
+        del_btn.clicked.connect(lambda checked, i=index: self._on_delete(i))
+        title_row.addWidget(del_btn)
+        card_layout.addLayout(title_row)
 
         val_lbl = QLabel(value)
         val_lbl.setStyleSheet(f"font-size: 20px; font-weight: 700; font-family: Menlo; color: {color};")
@@ -168,7 +263,14 @@ class CaliperPanel(QWidget):
         detail_lbl.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
         card_layout.addWidget(detail_lbl)
 
-        self.meas_layout.addWidget(card)
+        return card
+
+    def _on_delete(self, index):
+        if 0 <= index < len(self._calipers):
+            self._calipers.pop(index)
+            self._rebuild_cards()
+            self.caliper_deleted.emit(index)
+            self.calipers_changed.emit()
 
     def apply_theme(self):
         self.setStyleSheet(f"background: {T.WHITE}; border-left: 1px solid {T.BORDER};")
@@ -176,10 +278,22 @@ class CaliperPanel(QWidget):
 
 # Annotation Panel
 class AnnotationPanel(QWidget):
+    annotation_saved = Signal(str, str)
+    annotations_changed = Signal()
+    annotation_deleted = Signal(int)
+
+    _BADGE_STYLES = {
+        "Norma": (T.GREEN, T.BADGE_NORM_BG, T.BADGE_NORM_TEXT),
+        "Patologia": (T.RED, T.AMBER_BG, T.AMBER_TEXT),
+        "Do weryfikacji": (T.YELLOW, T.BADGE_WARN_BG, T.BADGE_WARN_TEXT),
+        "Artefakt": (T.TEXT_DIM, T.TAG_BG, T.TEXT_DIM),
+    }
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(270)
         self.setStyleSheet(f"background: {T.WHITE}; border-left: 1px solid {T.BORDER};")
+        self._annotations: list[dict] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -206,12 +320,12 @@ class AnnotationPanel(QWidget):
         f_header.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {T.ACCENT};")
         f_layout.addWidget(f_header)
 
-        region = QLabel("II: 2.30 s — 2.85 s")
-        region.setStyleSheet(f"""
+        self._region_label = QLabel("—")
+        self._region_label.setStyleSheet(f"""
             font-size: 12px; font-family: Menlo; color: {T.TEXT_SECONDARY};
             background: {T.BLUE_BG}; padding: 6px 8px; border-radius: 4px;
         """)
-        f_layout.addWidget(region)
+        f_layout.addWidget(self._region_label)
 
         cat_label = QLabel("Kategoria")
         cat_label.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED};")
@@ -236,34 +350,77 @@ class AnnotationPanel(QWidget):
 
         btn_row = QHBoxLayout()
         btn_save = make_action_btn("Zapisz", primary=True)
+        btn_save.clicked.connect(self._on_save)
         btn_row.addWidget(btn_save)
         btn_png = make_action_btn("Eksportuj PNG")
         btn_row.addWidget(btn_png)
         f_layout.addLayout(btn_row)
         layout.addWidget(form)
 
-        # Saved annotations
+        # Saved annotations scroll area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("border: none;")
-        saved_w = QWidget()
-        saved_layout = QVBoxLayout(saved_w)
-        saved_layout.setContentsMargins(12, 0, 12, 0)
-        saved_layout.setAlignment(Qt.AlignTop)
+        self._saved_widget = QWidget()
+        self._saved_layout = QVBoxLayout(self._saved_widget)
+        self._saved_layout.setContentsMargins(12, 0, 12, 0)
+        self._saved_layout.setAlignment(Qt.AlignTop)
 
-        saved_header = QLabel("ZAPISANE (2)")
-        saved_header.setStyleSheet(f"""
+        self._saved_header = QLabel("ZAPISANE (0)")
+        self._saved_header.setStyleSheet(f"""
             font-size: 12px; font-weight: 600; color: {T.TEXT_DIM};
             text-transform: uppercase; margin-top: 12px; margin-bottom: 8px;
         """)
-        saved_layout.addWidget(saved_header)
+        self._saved_layout.addWidget(self._saved_header)
 
-        for meta, badge, badge_cls, text, border_color in [
-            ("II: 0.40 — 1.20 s", "Norma", "gn",
-             "Prawidłowy kompleks PQRST, rytm zatokowy", T.GREEN),
-            ("V1: 3.10 — 3.60 s", "Do weryfikacji", "yl",
-             "Szerokie S w V1, możliwe RBBB", T.YELLOW),
-        ]:
+        self._saved_layout.addStretch()
+        scroll.setWidget(self._saved_widget)
+        layout.addWidget(scroll, stretch=1)
+
+        # Export all
+        footer = QWidget()
+        footer.setStyleSheet(f"border-top: 1px solid {T.BORDER};")
+        ft_layout = QVBoxLayout(footer)
+        ft_layout.setContentsMargins(10, 10, 10, 10)
+        btn_export = make_action_btn("Eksportuj wszystkie adnotacje")
+        ft_layout.addWidget(btn_export)
+        layout.addWidget(footer)
+
+    def set_form_region(self, lead: str, t1: float, t2: float):
+        self._region_label.setText(f"{lead}: {t1:.2f} s — {t2:.2f} s")
+
+    def set_annotations(self, annotations_list: list[dict]):
+        self._annotations = list(annotations_list)
+        self._rebuild_saved_cards()
+
+    def _on_save(self):
+        cat = self.category.currentText()
+        note = self.note_edit.toPlainText()
+        self.annotation_saved.emit(cat, note)
+
+    def _rebuild_saved_cards(self):
+        # Remove all widgets except the header and final stretch
+        while self._saved_layout.count() > 0:
+            item = self._saved_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        # Re-add header
+        self._saved_header = QLabel(f"ZAPISANE ({len(self._annotations)})")
+        self._saved_header.setStyleSheet(f"""
+            font-size: 12px; font-weight: 600; color: {T.TEXT_DIM};
+            text-transform: uppercase; margin-top: 12px; margin-bottom: 8px;
+        """)
+        self._saved_layout.addWidget(self._saved_header)
+
+        for idx, ann in enumerate(self._annotations):
+            cat = ann.get("category", "")
+            border_color, bg_c, text_c = self._BADGE_STYLES.get(
+                cat, (T.TEXT_DIM, T.TAG_BG, T.TEXT_DIM)
+            )
+            meta_text = f"{ann['lead']}: {ann['t1']:.2f} — {ann['t2']:.2f} s"
+
             card = QFrame()
             card.setStyleSheet(f"""
                 QFrame {{
@@ -275,46 +432,50 @@ class AnnotationPanel(QWidget):
             card_layout.setContentsMargins(10, 8, 10, 8)
             card_layout.setSpacing(4)
 
+            # Meta row: lead + time, badge, delete button
             meta_row = QHBoxLayout()
-            meta_lbl = QLabel(meta)
+            meta_lbl = QLabel(meta_text)
             meta_lbl.setStyleSheet(f"font-size: 11px; font-family: Menlo; color: {T.TEXT_MUTED};")
             meta_row.addWidget(meta_lbl)
-            badge_colors = {"gn": (T.GREEN, T.BADGE_NORM_BG, T.BADGE_NORM_TEXT),
-                            "yl": (T.YELLOW, T.BADGE_WARN_BG, T.BADGE_WARN_TEXT)}
-            bg_c, text_c = badge_colors[badge_cls][1], badge_colors[badge_cls][2]
-            badge_lbl = QLabel(badge)
+            badge_lbl = QLabel(cat)
             badge_lbl.setStyleSheet(f"""
                 font-size: 10px; padding: 1px 6px; border-radius: 3px;
                 font-weight: 600; background: {bg_c}; color: {text_c};
             """)
             meta_row.addWidget(badge_lbl)
             meta_row.addStretch()
+
+            del_btn = QPushButton("✕")
+            del_btn.setFixedSize(20, 20)
+            del_btn.setCursor(Qt.PointingHandCursor)
+            del_btn.setStyleSheet(f"""
+                QPushButton {{
+                    font-size: 12px; border: none; background: transparent;
+                    color: {T.TEXT_DIM}; font-weight: 600;
+                }}
+                QPushButton:hover {{ color: {T.RED}; }}
+            """)
+            del_btn.clicked.connect(lambda checked, i=idx: self._on_delete(i))
+            meta_row.addWidget(del_btn)
             card_layout.addLayout(meta_row)
 
-            text_lbl = QLabel(text)
-            text_lbl.setStyleSheet(f"font-size: 12px; color: {T.TEXT_SECONDARY};")
-            text_lbl.setWordWrap(True)
-            card_layout.addWidget(text_lbl)
+            note_text = ann.get("note", "")
+            if note_text:
+                text_lbl = QLabel(note_text)
+                text_lbl.setStyleSheet(f"font-size: 12px; color: {T.TEXT_SECONDARY};")
+                text_lbl.setWordWrap(True)
+                card_layout.addWidget(text_lbl)
 
-            goto = QLabel(f'<a style="color:{T.ACCENT}; font-weight:500;">Przejdź →</a>')
-            goto.setTextFormat(Qt.RichText)
-            goto.setStyleSheet("font-size: 11px;")
-            card_layout.addWidget(goto)
+            self._saved_layout.addWidget(card)
 
-            saved_layout.addWidget(card)
+        self._saved_layout.addStretch()
 
-        saved_layout.addStretch()
-        scroll.setWidget(saved_w)
-        layout.addWidget(scroll, stretch=1)
-
-        # Export all
-        footer = QWidget()
-        footer.setStyleSheet(f"border-top: 1px solid {T.BORDER};")
-        ft_layout = QVBoxLayout(footer)
-        ft_layout.setContentsMargins(10, 10, 10, 10)
-        btn_export = make_action_btn("Eksportuj wszystkie adnotacje")
-        ft_layout.addWidget(btn_export)
-        layout.addWidget(footer)
+    def _on_delete(self, index):
+        if 0 <= index < len(self._annotations):
+            self._annotations.pop(index)
+            self._rebuild_saved_cards()
+            self.annotation_deleted.emit(index)
+            self.annotations_changed.emit()
 
     def apply_theme(self):
         self.setStyleSheet(f"background: {T.WHITE}; border-left: 1px solid {T.BORDER};")

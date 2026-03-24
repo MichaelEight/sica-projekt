@@ -38,17 +38,29 @@ def _build_gt_lookup() -> dict:
 
     db = pd.read_csv(_CSV_PATH, index_col="ecg_id")
     lookup = {}
-    for _, row in db.iterrows():
+    for ecg_id, row in db.iterrows():
         scp = parse_scp_codes(row["scp_codes"])
         scores = aggregate_classes(scp)
         gt = {}
         for cls in TARGET_CLASSES:
             key = cls.replace("class_", "")
             gt[cls] = scores.get(key, 0.0) / 100.0
+
+        # Patient info
+        sex_val = row.get("sex", "")
+        sex_str = "M" if sex_val == 0 else ("K" if sex_val == 1 else "")
+        patient = {
+            "id": str(int(ecg_id)) if ecg_id else "",
+            "age": str(int(row["age"])) if not pd.isna(row.get("age", float("nan"))) else "",
+            "sex": sex_str,
+            "date": str(row.get("recording_date", ""))[:10],
+        }
+
+        entry = {"ground_truth": gt, "patient": patient}
         for col in ["filename_hr", "filename_lr"]:
             fn = row[col].strip() if isinstance(row[col], str) else ""
             if fn:
-                lookup[fn] = gt
+                lookup[fn] = entry
     return lookup
 
 
@@ -184,15 +196,21 @@ class MainWindow(QMainWindow):
             self._gt_lookup = {}
         self._gt_ready.set()
 
-    def _lookup_ground_truth(self, base_path: str) -> dict | list | None:
-        """Look up ground truth for a record.
+    def _lookup_csv_entry(self, base_path: str) -> dict | None:
+        """Look up PTB-XL cache entry (contains ground_truth + patient)."""
+        if not self._gt_ready.wait(timeout=10.0):
+            return None
+        if not self._gt_lookup:
+            return None
+        path = base_path.replace("\\", "/")
+        for suffix in ["records500/", "records100/"]:
+            idx = path.find(suffix)
+            if idx >= 0:
+                return self._gt_lookup.get(path[idx:])
+        return None
 
-        Returns:
-            - dict: single ground truth for the whole file (PTB-XL records)
-            - list: windowed ground truth from .annotations.json sidecar
-              Each item: {"start": float, "end": float, "ground_truth": dict}
-            - None: no ground truth available
-        """
+    def _lookup_ground_truth(self, base_path: str) -> dict | list | None:
+        """Look up ground truth for a record."""
         import json
 
         # Check for .annotations.json sidecar first
@@ -206,16 +224,16 @@ class MainWindow(QMainWindow):
                 pass
 
         # Fall back to PTB-XL CSV cache
-        if not self._gt_ready.wait(timeout=10.0):
-            return None
-        if not self._gt_lookup:
-            return None
+        entry = self._lookup_csv_entry(base_path)
+        if entry:
+            return entry.get("ground_truth")
+        return None
 
-        path = base_path.replace("\\", "/")
-        for suffix in ["records500/", "records100/"]:
-            idx = path.find(suffix)
-            if idx >= 0:
-                return self._gt_lookup.get(path[idx:])
+    def _lookup_patient_info(self, base_path: str) -> dict | None:
+        """Look up patient info from PTB-XL CSV cache."""
+        entry = self._lookup_csv_entry(base_path)
+        if entry:
+            return entry.get("patient")
         return None
 
     def _load_file(self, base_path: str):
@@ -248,13 +266,15 @@ class MainWindow(QMainWindow):
             self._filename = os.path.basename(base_path) + ".dat" if base_path else "demo.dat"
             add_recent(base_path or "demo", f"{self._fs} Hz · 12 odprowadzeń · 10.0 s")
 
-        # Look up ground truth (fast dict lookup, cache built in background)
+        # Look up ground truth and patient info
         self.statusBar().showMessage("Wczytywanie adnotacji...")
         QApplication.processEvents()
         ground_truth = self._lookup_ground_truth(base_path)
+        patient_info = self._lookup_patient_info(base_path)
 
         self.viewer_page.set_signal(self._signal, self._leads, self._fs, self._filename,
-                                    ground_truth=ground_truth)
+                                    ground_truth=ground_truth, patient_info=patient_info,
+                                    base_path=base_path)
         self.report_page.set_signal(self._signal, self._leads, self._fs, self._filename)
 
         self.statusBar().clearMessage()
