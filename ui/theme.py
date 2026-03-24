@@ -166,17 +166,31 @@ QPushButton#toolbarActive {{
 }}
 QPushButton#nav {{
     height: 32px;
-    padding: 0 10px;
+    padding: 0 12px;
     border: 1px solid {BORDER};
     border-radius: 6px;
     background: {WHITE};
-    color: {TEXT_MUTED};
-    font-weight: 500;
+    color: {TEXT};
+    font-size: 16px;
+    font-weight: 600;
 }}
 QPushButton#nav:hover {{
     background: {BORDER_LIGHT};
     border: 1px solid {TEXT_DIM};
     color: {TEXT};
+}}
+QPushButton#navPause {{
+    height: 32px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 16px;
+    background: {ACCENT};
+    color: {ACCENT_TEXT};
+    font-size: 14px;
+    font-weight: 700;
+}}
+QPushButton#navPause:hover {{
+    background: {'#00c864' if dark else '#3a8eef'};
 }}
 QScrollArea {{
     border: none;

@@ -780,14 +780,7 @@ class MonitorSidebar(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(14)
 
-        # Pause button
         self._paused = False
-        self.pause_btn = QPushButton("⏸  Pauza")
-        self.pause_btn.setCursor(Qt.PointingHandCursor)
-        self.pause_btn.setFocusPolicy(Qt.NoFocus)
-        self.pause_btn.setStyleSheet(self._pause_btn_style(False))
-        self.pause_btn.clicked.connect(self._on_pause)
-        layout.addWidget(self.pause_btn)
 
         # Playback speed
         self._pill_groups = {}
@@ -823,25 +816,6 @@ class MonitorSidebar(QWidget):
 
         layout.addStretch()
 
-    def _pause_btn_style(self, paused):
-        if paused:
-            return f"""
-                QPushButton {{
-                    font-size: 12px; padding: 8px 14px; border: 1px solid {T.ACCENT};
-                    border-radius: 6px; background: {T.ACCENT}; color: {T.ACCENT_TEXT};
-                    font-weight: 600;
-                }}
-                QPushButton:hover {{ background: {T.GREEN}; }}
-            """
-        return f"""
-            QPushButton {{
-                font-size: 12px; padding: 8px 14px; border: 1px solid {T.BORDER};
-                border-radius: 6px; background: {T.WHITE}; color: {T.TEXT};
-                font-weight: 600;
-            }}
-            QPushButton:hover {{ background: {T.BG_SECONDARY}; }}
-        """
-
     def _lead_btn_style(self, active):
         if active:
             return f"""
@@ -867,15 +841,6 @@ class MonitorSidebar(QWidget):
         btn.setStyleSheet(self._lead_btn_style(is_active))
         active_leads = [ld for ld, b in self.lead_btns.items() if b.property("active")]
         self.leads_changed.emit(active_leads)
-
-    def _on_pause(self):
-        self._paused = not self._paused
-        if self._paused:
-            self.pause_btn.setText("▶  Wznów")
-        else:
-            self.pause_btn.setText("⏸  Pauza")
-        self.pause_btn.setStyleSheet(self._pause_btn_style(self._paused))
-        self.pause_toggled.emit(self._paused)
 
     def _pill_style(self, active):
         if active:

@@ -433,37 +433,51 @@ class ViewerPage(QWidget):
         nav.setContentsMargins(16, 0, 16, 0)
         nav.setSpacing(8)
 
-        # Pause button (shown only in Monitor mode)
-        self.pause_btn = QPushButton("⏸")
-        self.pause_btn.setObjectName("nav")
-        self.pause_btn.setCursor(Qt.PointingHandCursor)
-        self.pause_btn.setToolTip("Pauza / Wznów odtwarzanie")
-        self.pause_btn.clicked.connect(self._on_navbar_pause)
-        self.pause_btn.hide()
-        nav.addWidget(self.pause_btn)
-
-        nav_buttons = [
-            ("⏮", self._nav_start, "Przejdź na start"),
-            ("⏪", lambda: self._nav_step(-1.0), "Cofnij o 1 s"),
-            ("◀", lambda: self._nav_step(-0.2), "Cofnij o 0.2 s"),
-            ("▶", lambda: self._nav_step(0.2), "Do przodu o 0.2 s"),
-            ("⏩", lambda: self._nav_step(1.0), "Do przodu o 1 s"),
-            ("⏭", self._nav_end, "Przejdź na koniec"),
+        # Navigation buttons — standard playback icons
+        # ▮◀  ◀◀  ◀  [❚❚/▶]  ▶  ▶▶  ▶▮
+        # Using U+25AE (▮ thick bar) for skip endpoints for visual balance
+        _TRI_L = "\u25c0"  # ◀ BLACK LEFT-POINTING TRIANGLE
+        _TRI_R = "\u25b6"  # ▶ BLACK RIGHT-POINTING TRIANGLE
+        _BAR = "\u25ae"    # ▮ BLACK VERTICAL RECTANGLE (thick, matches triangle weight)
+        back_buttons = [
+            (_BAR + _TRI_L, self._nav_start),
+            (_TRI_L + _TRI_L, lambda: self._nav_step(-1.0)),
+            (_TRI_L, lambda: self._nav_step(-0.2)),
         ]
+        fwd_buttons = [
+            (_TRI_R, lambda: self._nav_step(0.2)),
+            (_TRI_R + _TRI_R, lambda: self._nav_step(1.0)),
+            (_TRI_R + _BAR, self._nav_end),
+        ]
+
         self._nav_btns = []
         self._hold_timer = QTimer(self)
         self._hold_timer.setInterval(80)
         self._hold_handler = None
         self._hold_timer.timeout.connect(self._on_hold_tick)
-        for label, handler, tooltip in nav_buttons:
+
+        def _make_nav(label, handler):
             btn = QPushButton(label)
             btn.setObjectName("nav")
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setToolTip(tooltip)
             btn.pressed.connect(lambda h=handler: self._start_hold(h))
             btn.released.connect(self._stop_hold)
             self._nav_btns.append(btn)
             nav.addWidget(btn)
+
+        for label, handler in back_buttons:
+            _make_nav(label, handler)
+
+        # Pause/resume button — accent-colored to distinguish from nav step buttons
+        self.pause_btn = QPushButton("\u275a\u275a")  # ❚❚ pause
+        self.pause_btn.setCursor(Qt.PointingHandCursor)
+        self._apply_pause_btn_style()
+        self.pause_btn.clicked.connect(self._on_navbar_pause)
+        self.pause_btn.hide()
+        nav.addWidget(self.pause_btn)
+
+        for label, handler in fwd_buttons:
+            _make_nav(label, handler)
 
         self.scrubber = QSlider(Qt.Horizontal)
         self.scrubber.setRange(0, 1000)
@@ -1330,6 +1344,18 @@ class ViewerPage(QWidget):
         if self._view_mode == 0:
             self.info_panel.show()
 
+    def _apply_pause_btn_style(self):
+        from ui.theme import is_dark_mode
+        hover = '#00c864' if is_dark_mode() else '#3a8eef'
+        self.pause_btn.setStyleSheet(f"""
+            QPushButton {{
+                height: 32px; padding: 0 14px; border: none;
+                border-radius: 16px; background: {T.ACCENT};
+                color: {T.ACCENT_TEXT}; font-size: 14px; font-weight: 700;
+            }}
+            QPushButton:hover {{ background: {hover}; }}
+        """)
+
     # ── Hold-to-scroll ─────────────────────────────────────
     def _start_hold(self, handler):
         self._hold_handler = handler
@@ -1349,16 +1375,10 @@ class ViewerPage(QWidget):
         self._monitor_playing = not self._monitor_playing
         if self._monitor_playing:
             self._monitor_timer.start()
-            self.pause_btn.setText("⏸")
-            self.monitor_sidebar._paused = False
+            self.pause_btn.setText("\u275a\u275a")  # ❚❚ pause
         else:
             self._monitor_timer.stop()
-            self.pause_btn.setText("▶")
-            self.monitor_sidebar._paused = True
-        self.monitor_sidebar.pause_btn.setText(
-            "▶  Wznów" if not self._monitor_playing else "⏸  Pauza")
-        self.monitor_sidebar.pause_btn.setStyleSheet(
-            self.monitor_sidebar._pause_btn_style(not self._monitor_playing))
+            self.pause_btn.setText("\u25b6")  # ▶ play
 
     def _nav_start(self):
         if self._view_mode == 2:
@@ -1461,11 +1481,7 @@ class ViewerPage(QWidget):
         self.scrubber.setValue(0)
         self.scrubber.blockSignals(False)
         # Reset pause state
-        self.monitor_sidebar._paused = False
-        self.monitor_sidebar.pause_btn.setText("⏸  Pauza")
-        self.monitor_sidebar.pause_btn.setStyleSheet(
-            self.monitor_sidebar._pause_btn_style(False))
-        self.pause_btn.setText("⏸")
+        self.pause_btn.setText("\u275a\u275a")  # ❚❚ pause
         for _, strip in self._monitor_strips:
             strip._old_signal = None
             strip._sweep_pos = None
@@ -1509,10 +1525,10 @@ class ViewerPage(QWidget):
         self._monitor_playing = not paused
         if self._monitor_playing:
             self._monitor_timer.start()
-            self.pause_btn.setText("⏸")
+            self.pause_btn.setText("\u275a\u275a")  # ❚❚ pause
         else:
             self._monitor_timer.stop()
-            self.pause_btn.setText("▶")
+            self.pause_btn.setText("\u25b6")  # ▶ play
 
     def _on_monitor_speed(self, speed: float):
         self._monitor_speed = speed
