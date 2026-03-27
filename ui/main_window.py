@@ -301,6 +301,27 @@ class MainWindow(QMainWindow):
         if self.viewer_page._last_results:
             r = self.viewer_page._last_results
             self.report_page.set_results(r["probabilities"], r["model_name"], r["elapsed"])
+
+        # Pass patient info to report
+        pf = self.viewer_page.info_panel._patient_fields
+        duration = f"{self.viewer_page.duration:.1f}" if hasattr(self.viewer_page, "duration") else ""
+        self.report_page.set_patient_info(
+            patient_id=pf["id"].text() if "id" in pf else "",
+            age=pf["age"].text() if "age" in pf else "",
+            sex=pf["sex"].text() if "sex" in pf else "",
+            date=pf["date"].text() if "date" in pf else "",
+            duration=duration,
+            fs=str(self.viewer_page.fs) if hasattr(self.viewer_page, "fs") else "",
+        )
+
+        # Pass measurements if available
+        if hasattr(self.viewer_page, '_measurements') and self.viewer_page._measurements:
+            self.report_page.set_measurements(self.viewer_page._measurements)
+
+        # Pass annotations
+        annotations = getattr(self.viewer_page, '_user_annotations', [])
+        self.report_page.set_annotations(annotations)
+
         self.stack.setCurrentIndex(2)
 
     def _toggle_dark_mode(self):

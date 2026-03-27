@@ -19,6 +19,7 @@ from ui.ekg_canvas import (EkgCellCanvas, TwelveLeadGrid, SingleLeadCanvas,
                             generate_demo_signal, synth_ekg, LEAD_SEEDS, LEAD_AMPS)
 from ui.panels import (InfoPanel, CaliperPanel, AnnotationPanel, ResultsPanel,
                         MonitorSidebar)
+from ecg_measurements import compute_measurements
 
 
 def discover_models():
@@ -691,6 +692,23 @@ class ViewerPage(QWidget):
             )
         else:
             self.info_panel.set_patient()
+
+        # Compute ECG measurements
+        self._measurements = {}
+        try:
+            pat_sex = patient_info.get("sex") if patient_info else None
+            meas = compute_measurements(self.signal, self.fs, sex=pat_sex)
+            self._measurements = meas
+            self.info_panel.set_measurements(
+                hr=meas["hr"],
+                pr=meas["pr"],
+                qrs=meas["qrs"],
+                qt_val=meas["qt"],
+                qtc=meas["qtc"],
+                axis=meas["axis"],
+            )
+        except Exception:
+            pass
 
         # Load APWR file (overrides patient info, loads calipers/annotations)
         self._load_apwr()

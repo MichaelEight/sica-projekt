@@ -1,5 +1,6 @@
 """Report preview page matching v2 08-report design."""
 import numpy as np
+from datetime import datetime
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QPainter, QPen, QColor, QPainterPath
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -206,10 +207,10 @@ class ReportPage(QWidget):
         title.setAlignment(Qt.AlignCenter)
         r_layout.addWidget(title)
 
-        date = QLabel("Wygenerowano: 15.03.2026, 22:15 | Plik: 00888_lr.dat")
-        date.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED};")
-        date.setAlignment(Qt.AlignCenter)
-        r_layout.addWidget(date)
+        self._date_label = QLabel("Wygenerowano: — | Plik: —")
+        self._date_label.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED};")
+        self._date_label.setAlignment(Qt.AlignCenter)
+        r_layout.addWidget(self._date_label)
 
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
@@ -221,19 +222,21 @@ class ReportPage(QWidget):
         from PySide6.QtWidgets import QGridLayout
         pg = QGridLayout(pgrid)
         pg.setSpacing(8)
-        patient_data = [
-            ("ID pacjenta", "00888", "Data badania", "15.03.2026"),
-            ("Wiek", "62 lat", "Czas trwania", "10.0 s"),
-            ("Płeć", "Mężczyzna", "Częstotliwość", "500 Hz"),
+        self._patient_value_labels = {}
+        patient_fields = [
+            ("ID pacjenta", "patient_id", "Data badania", "date"),
+            ("Wiek", "age", "Czas trwania", "duration"),
+            ("Płeć", "sex", "Częstotliwość", "fs"),
         ]
-        for row_i, (l1, v1, l2, v2) in enumerate(patient_data):
-            for col_i, (label, value) in enumerate([(l1, v1), (l2, v2)]):
+        for row_i, (l1, k1, l2, k2) in enumerate(patient_fields):
+            for col_i, (label, key) in enumerate([(l1, k1), (l2, k2)]):
                 lbl = QLabel(label)
                 lbl.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED}; min-width: 110px;")
-                val = QLabel(value)
+                val = QLabel("—")
                 val.setStyleSheet("font-size: 13px; font-weight: 600; font-family: Menlo;")
                 pg.addWidget(lbl, row_i, col_i * 2)
                 pg.addWidget(val, row_i, col_i * 2 + 1)
+                self._patient_value_labels[key] = val
         r_layout.addWidget(pgrid)
 
         sep_line = QFrame()
@@ -274,32 +277,18 @@ class ReportPage(QWidget):
         header_row.setStyleSheet(f"border-bottom: 1px solid {T.BORDER};")
         t_layout.addWidget(header_row)
 
-        measurements = [
-            ("HR", "72 bpm", "60-100 bpm", "Norma"),
-            ("PR interval", "164 ms", "120-200 ms", "Norma"),
-            ("QRS", "88 ms", "<120 ms", "Norma"),
-            ("QT", "392 ms", "350-440 ms", "Norma"),
-            ("QTc", "429 ms", "350-440 ms", "Norma"),
-            ("Oś", "+55°", "-30° do +90°", "Norma"),
+        self._meas_rows = {}
+        self._meas_table_layout = t_layout
+        default_measurements = [
+            ("HR", "—", "60-100 bpm", "—"),
+            ("PR interval", "—", "120-200 ms", "—"),
+            ("QRS", "—", "<120 ms", "—"),
+            ("QT", "—", "zależny od HR", "—"),
+            ("QTc (Bazett)", "—", "<450 ms", "—"),
+            ("Oś", "—", "-30° do +90°", "—"),
         ]
-        for param, val, norm, status in measurements:
-            row = QWidget()
-            rl = QHBoxLayout(row)
-            rl.setContentsMargins(10, 5, 10, 5)
-            for text, w_pct, is_mono, is_green in [
-                (param, 150, True, False), (val, 100, True, False),
-                (norm, 130, True, False), (status, 80, False, True)
-            ]:
-                lbl = QLabel(text)
-                lbl.setFixedWidth(w_pct)
-                style = "font-size: 13px;"
-                if is_mono:
-                    style += " font-family: Menlo;"
-                if is_green:
-                    style += f" color: {T.GREEN}; font-weight: 600;"
-                lbl.setStyleSheet(style)
-                rl.addWidget(lbl)
-            row.setStyleSheet(f"border-bottom: 1px solid {T.BORDER_LIGHT};")
+        for param, val, norm, status in default_measurements:
+            row = self._create_meas_row(param, val, norm, status)
             t_layout.addWidget(row)
         r_layout.addWidget(table)
 
@@ -330,25 +319,18 @@ class ReportPage(QWidget):
         r_layout.addWidget(ai_box)
 
         # Annotations
-        sec_ann = QLabel("ADNOTACJE (2)")
-        sec_ann.setStyleSheet("font-size: 13px; font-weight: 700; letter-spacing: 0.5px; margin-top: 10px;")
-        r_layout.addWidget(sec_ann)
+        self._ann_header = QLabel("ADNOTACJE (0)")
+        self._ann_header.setStyleSheet("font-size: 13px; font-weight: 700; letter-spacing: 0.5px; margin-top: 10px;")
+        r_layout.addWidget(self._ann_header)
 
-        for meta, text in [
-            ("II: 0.40 — 1.20 s | Norma", "Prawidłowy kompleks PQRST, rytm zatokowy"),
-            ("V1: 3.10 — 3.60 s | Do weryfikacji", "Szerokie S, możliwe RBBB"),
-        ]:
-            item = QWidget()
-            item.setStyleSheet(f"border-bottom: 1px solid {T.BORDER_LIGHT};")
-            il = QVBoxLayout(item)
-            il.setContentsMargins(0, 5, 0, 5)
-            meta_lbl = QLabel(meta)
-            meta_lbl.setStyleSheet(f"font-family: Menlo; color: {T.TEXT_MUTED}; font-size: 12px;")
-            il.addWidget(meta_lbl)
-            text_lbl = QLabel(text)
-            text_lbl.setStyleSheet(f"color: {T.TEXT_SECONDARY}; font-size: 12px;")
-            il.addWidget(text_lbl)
-            r_layout.addWidget(item)
+        self._ann_container = QWidget()
+        self._ann_layout = QVBoxLayout(self._ann_container)
+        self._ann_layout.setContentsMargins(0, 0, 0, 0)
+        self._ann_layout.setSpacing(0)
+        no_ann = QLabel("Brak adnotacji")
+        no_ann.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED}; padding: 6px 0;")
+        self._ann_layout.addWidget(no_ann)
+        r_layout.addWidget(self._ann_container)
 
         # Disclaimer
         disc = QLabel(
@@ -421,6 +403,173 @@ class ReportPage(QWidget):
         self.ecg_preview.leads = leads
         self.ecg_preview.fs = fs
         self.ecg_preview.update()
+
+        # Update date label with current datetime and filename
+        now = datetime.now().strftime("%d.%m.%Y, %H:%M")
+        self._date_label.setText(f"Wygenerowano: {now} | Plik: {filename or '—'}")
+
+    def set_patient_info(self, patient_id="", age="", sex="", date="", duration="", fs=""):
+        """Update patient info grid with dynamic values."""
+        sex_display = {"M": "Mężczyzna", "K": "Kobieta"}.get(str(sex), str(sex) if sex else "—")
+        values = {
+            "patient_id": str(patient_id) if patient_id else "—",
+            "age": f"{age} lat" if age else "—",
+            "sex": sex_display,
+            "date": str(date) if date else "—",
+            "duration": f"{duration} s" if duration else "—",
+            "fs": f"{fs} Hz" if fs else "—",
+        }
+        for key, val in values.items():
+            if key in self._patient_value_labels:
+                self._patient_value_labels[key].setText(val)
+        # Store sex for QTc range display
+        self._patient_sex = str(sex) if sex else ""
+
+    def _create_meas_row(self, param, val, norm, status):
+        """Create a single measurement row widget."""
+        row = QWidget()
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(10, 5, 10, 5)
+
+        status_color = T.GREEN
+        if status in ("Wydłużony", "Skrócony", "Odchylona"):
+            status_color = T.RED
+        elif status == "—":
+            status_color = T.TEXT_MUTED
+
+        for text, w_pct, is_mono, is_status in [
+            (param, 150, True, False), (val, 100, True, False),
+            (norm, 130, True, False), (status, 80, False, True)
+        ]:
+            lbl = QLabel(text)
+            lbl.setFixedWidth(w_pct)
+            style = "font-size: 13px;"
+            if is_mono:
+                style += " font-family: Menlo;"
+            if is_status:
+                style += f" color: {status_color}; font-weight: 600;"
+            lbl.setStyleSheet(style)
+            rl.addWidget(lbl)
+        row.setStyleSheet(f"border-bottom: 1px solid {T.BORDER_LIGHT};")
+        return row
+
+    def set_measurements(self, measurements_dict):
+        """Update measurements table with dynamic values.
+
+        measurements_dict keys: hr, pr, qrs, qt, qtc, axis
+        Each value should be numeric or 'N/A'.
+        """
+        sex = getattr(self, "_patient_sex", "")
+
+        # Determine QTc threshold based on sex
+        if sex == "K":
+            qtc_threshold = 460
+            qtc_range = "<460 ms"
+        else:
+            qtc_threshold = 450
+            qtc_range = "<450 ms"
+
+        def _fmt_val(val, unit):
+            if val == "N/A" or val is None or val == "":
+                return "—"
+            try:
+                v = float(val)
+                if v == int(v):
+                    return f"{int(v)} {unit}"
+                return f"{v:.0f} {unit}"
+            except (ValueError, TypeError):
+                return f"{val} {unit}"
+
+        def _status(val, lo, hi):
+            """Return status string given value and normal range bounds."""
+            if val == "N/A" or val is None or val == "":
+                return "—"
+            try:
+                v = float(val)
+            except (ValueError, TypeError):
+                return "—"
+            if lo is not None and v < lo:
+                return "Skrócony"
+            if hi is not None and v > hi:
+                return "Wydłużony"
+            return "Norma"
+
+        def _axis_status(val):
+            if val == "N/A" or val is None or val == "":
+                return "—"
+            try:
+                v = float(val)
+            except (ValueError, TypeError):
+                return "—"
+            if -30 <= v <= 90:
+                return "Norma"
+            return "Odchylona"
+
+        hr = measurements_dict.get("hr")
+        pr = measurements_dict.get("pr")
+        qrs = measurements_dict.get("qrs")
+        qt = measurements_dict.get("qt")
+        qtc = measurements_dict.get("qtc")
+        axis = measurements_dict.get("axis")
+
+        rows_data = [
+            ("HR", _fmt_val(hr, "bpm"), "60-100 bpm", _status(hr, 60, 100)),
+            ("PR interval", _fmt_val(pr, "ms"), "120-200 ms", _status(pr, 120, 200)),
+            ("QRS", _fmt_val(qrs, "ms"), "<120 ms", _status(qrs, None, 120)),
+            ("QT", _fmt_val(qt, "ms"), "zależny od HR", "—" if qt == "N/A" or qt is None or qt == "" else "Norma"),
+            ("QTc (Bazett)", _fmt_val(qtc, "ms"), qtc_range, _status(qtc, None, qtc_threshold)),
+            ("Oś", _fmt_val(axis, "°"), "-30° do +90°", _axis_status(axis)),
+        ]
+
+        # Remove old measurement rows (everything after the header row)
+        while self._meas_table_layout.count() > 1:
+            item = self._meas_table_layout.takeAt(1)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for param, val, norm, status in rows_data:
+            row = self._create_meas_row(param, val, norm, status)
+            self._meas_table_layout.addWidget(row)
+
+    def set_annotations(self, annotations):
+        """Update the annotations section with dynamic data.
+
+        annotations: list of dicts with keys like 'lead', 't1', 't2', 'category', 'note'
+        """
+        # Clear existing
+        while self._ann_layout.count():
+            item = self._ann_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not annotations:
+            self._ann_header.setText("ADNOTACJE (0)")
+            no_ann = QLabel("Brak adnotacji")
+            no_ann.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED}; padding: 6px 0;")
+            self._ann_layout.addWidget(no_ann)
+            return
+
+        self._ann_header.setText(f"ADNOTACJE ({len(annotations)})")
+        for ann in annotations:
+            lead = ann.get("lead", "?")
+            t1 = ann.get("t1", 0)
+            t2 = ann.get("t2", 0)
+            category = ann.get("category", "")
+            note = ann.get("note", "")
+
+            meta = f"{lead}: {t1:.2f} — {t2:.2f} s | {category}"
+            item = QWidget()
+            item.setStyleSheet(f"border-bottom: 1px solid {T.BORDER_LIGHT};")
+            il = QVBoxLayout(item)
+            il.setContentsMargins(0, 5, 0, 5)
+            meta_lbl = QLabel(meta)
+            meta_lbl.setStyleSheet(f"font-family: Menlo; color: {T.TEXT_MUTED}; font-size: 12px;")
+            il.addWidget(meta_lbl)
+            if note:
+                text_lbl = QLabel(note)
+                text_lbl.setStyleSheet(f"color: {T.TEXT_SECONDARY}; font-size: 12px;")
+                il.addWidget(text_lbl)
+            self._ann_layout.addWidget(item)
 
     def set_results(self, probabilities: dict, model_name: str = "", elapsed: float = 0.0):
         """Update AI analysis section with real results."""
