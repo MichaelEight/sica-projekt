@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QPushButton, QFileDialog, QFrame)
 
@@ -38,13 +38,12 @@ def add_recent(filepath: str, info: str = ""):
 
 
 class UploadPage(QWidget):
-    """Welcome screen with drag-and-drop zone and recent files."""
+    """Welcome screen with file picker and recent files."""
 
     file_selected = Signal(str)  # emits the base path (without extension)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAcceptDrops(True)
         self.setStyleSheet(f"background: {T.BG};")
         self._build_ui()
 
@@ -81,18 +80,18 @@ class UploadPage(QWidget):
         title.setAlignment(Qt.AlignCenter)
         main.addWidget(title)
 
-        subtitle = QLabel("Przeci\u0105gnij plik WFDB lub wybierz z dysku, aby rozpocz\u0105\u0107 analiz\u0119")
+        subtitle = QLabel("Aplikacja analizuje sygnały EKG zapisane w formacie WFDB")
         subtitle.setStyleSheet(f"color: {T.TEXT_MUTED}; font-size: 14px;")
         subtitle.setAlignment(Qt.AlignCenter)
         main.addWidget(subtitle)
 
-        # ── Drop zone ──
+        # File picker zone
         self.dropzone = QFrame()
-        self.dropzone.setFixedSize(520, 200)
+        self.dropzone.setFixedSize(520, 240)
         self.dropzone.setStyleSheet(f"""
             QFrame {{
                 background: {T.WHITE};
-                border: 2px dashed #c5cad3;
+                border: 1px solid {T.BORDER};
                 border-radius: 12px;
             }}
         """)
@@ -100,36 +99,31 @@ class UploadPage(QWidget):
         dz_layout.setAlignment(Qt.AlignCenter)
         dz_layout.setSpacing(12)
 
-        icon = QLabel("\u2b06")
-        icon.setFont(QFont(".AppleSystemUIFont", 36))
-        icon.setStyleSheet(f"color: {T.ACCENT}; border: none;")
-        icon.setAlignment(Qt.AlignCenter)
-        dz_layout.addWidget(icon)
+        step_label = QLabel("Wskaż plik .dat lub .hea z nagrania EKG")
+        step_label.setStyleSheet("font-size: 14px; font-weight: 500; border: none;")
+        step_label.setAlignment(Qt.AlignCenter)
+        dz_layout.addWidget(step_label)
 
-        drop_text = QLabel()
-        drop_text.setTextFormat(Qt.RichText)
-        drop_text.setText(f'Przeci\u0105gnij plik tutaj lub <a style="color:{T.ACCENT};" href="#">wybierz z dysku</a>')
-        drop_text.setStyleSheet("font-size: 14px; font-weight: 500; border: none;")
-        drop_text.setAlignment(Qt.AlignCenter)
-        drop_text.linkActivated.connect(self._browse)
-        dz_layout.addWidget(drop_text)
+        browse_btn = QPushButton("Wybierz plik")
+        browse_btn.setCursor(Qt.PointingHandCursor)
+        browse_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {T.ACCENT}; color: white;
+                font-size: 14px; font-weight: 600;
+                padding: 10px 32px; border-radius: 8px; border: none;
+            }}
+            QPushButton:hover {{
+                opacity: 0.9;
+            }}
+        """)
+        browse_btn.clicked.connect(self._browse)
+        dz_layout.addWidget(browse_btn, alignment=Qt.AlignCenter)
 
-        hint = QLabel("Obs\u0142ugiwane formaty WFDB")
+        hint = QLabel("Oba pliki (.dat i .hea) muszą znajdować się w tym samym folderze")
         hint.setStyleSheet(f"color: {T.TEXT_DIM}; font-size: 12px; border: none;")
         hint.setAlignment(Qt.AlignCenter)
         dz_layout.addWidget(hint)
 
-        tags_layout = QHBoxLayout()
-        tags_layout.setAlignment(Qt.AlignCenter)
-        for ext in [".dat", ".hea"]:
-            tag = QLabel(ext)
-            tag.setStyleSheet(f"""
-                background: #f0f1f3; color: {T.TEXT_MUTED};
-                font-family: Menlo; font-size: 12px;
-                padding: 4px 12px; border-radius: 4px; border: none;
-            """)
-            tags_layout.addWidget(tag)
-        dz_layout.addLayout(tags_layout)
         main.addWidget(self.dropzone, alignment=Qt.AlignCenter)
 
         # ── Recent files ──
@@ -236,28 +230,25 @@ class UploadPage(QWidget):
                 QMessageBox.warning(
                     self, "Nieobsługiwany format",
                     f"Plik \"{os.path.basename(path)}\" nie jest w formacie WFDB.\n"
-                    "Obsługiwane formaty: .dat, .hea")
+                    "Wybierz plik z rozszerzeniem .dat lub .hea.")
                 return
             base, _ = os.path.splitext(path)
-            self.file_selected.emit(base)
-
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event: QDropEvent):
-        for url in event.mimeData().urls():
-            path = url.toLocalFile()
-            if path.endswith((".dat", ".hea")):
-                base, _ = os.path.splitext(path)
-                self.file_selected.emit(base)
+            dat_path = base + ".dat"
+            hea_path = base + ".hea"
+            missing = []
+            if not os.path.isfile(dat_path):
+                missing.append(".dat")
+            if not os.path.isfile(hea_path):
+                missing.append(".hea")
+            if missing:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self, "Brak pliku",
+                    f"Nie znaleziono pliku {', '.join(missing)} w tym samym folderze.\n\n"
+                    "Format WFDB wymaga obu plików (.dat i .hea)\n"
+                    "o tej samej nazwie, w tym samym folderze.")
                 return
-        # No valid file found — show warning
-        from PySide6.QtWidgets import QMessageBox
-        QMessageBox.warning(
-            self, "Nieobsługiwany format",
-            "Przeciągnięty plik nie jest w formacie WFDB.\n"
-            "Obsługiwane formaty: .dat, .hea")
+            self.file_selected.emit(base)
 
     def refresh(self):
         self._refresh_recent()
