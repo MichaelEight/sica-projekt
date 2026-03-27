@@ -115,7 +115,7 @@ class UploadPage(QWidget):
         browse_btn.clicked.connect(self._browse)
         dz_layout.addWidget(browse_btn, alignment=Qt.AlignCenter)
 
-        hint = QLabel("Oba pliki (.dat i .hea) muszą znajdować się w tym samym folderze")
+        hint = QLabel("Oba pliki (.dat i .hea) muszą mieć tę samą nazwę i znajdować się w tym samym folderze")
         hint.setStyleSheet(f"color: {T.TEXT_DIM}; font-size: 12px; border: none;")
         hint.setAlignment(Qt.AlignCenter)
         dz_layout.addWidget(hint)

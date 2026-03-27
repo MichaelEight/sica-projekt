@@ -5,12 +5,14 @@ import json
 import os
 import time
 
+import threading
 import numpy as np
-from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve, Property
+from PySide6.QtGui import QFont, QPainter, QPen, QColor, QBrush
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QPushButton, QFrame, QStackedWidget, QSlider,
-                                QSizePolicy, QComboBox, QApplication)
+                                QSizePolicy, QComboBox, QApplication, QDialog,
+                                QGraphicsOpacityEffect)
 
 import ui.theme as T
 from ui.theme import STANDARD_LEADS, TARGET_CLASSES
@@ -20,6 +22,149 @@ from ui.ekg_canvas import (EkgCellCanvas, TwelveLeadGrid, SingleLeadCanvas,
 from ui.panels import (InfoPanel, CaliperPanel, AnnotationPanel, ResultsPanel,
                         MonitorSidebar)
 from ecg_measurements import compute_measurements
+
+
+class _CheckmarkWidget(QWidget):
+    """Animated green circle with white checkmark."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(72, 72)
+        self._progress = 0.0  # 0..1 controls checkmark draw length
+
+    def _get_progress(self):
+        return self._progress
+
+    def _set_progress(self, v):
+        self._progress = v
+        self.update()
+
+    progress = Property(float, _get_progress, _set_progress)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        # Green circle
+        p.setBrush(QBrush(QColor("#22c55e")))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(2, 2, 68, 68)
+        # White checkmark
+        if self._progress > 0:
+            pen = QPen(QColor("#ffffff"), 5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            p.setPen(pen)
+            # Checkmark: short stroke (20,38)->(32,50), long stroke (32,50)->(52,26)
+            seg1_len = 0.35  # first segment takes 35% of animation
+            if self._progress <= seg1_len:
+                frac = self._progress / seg1_len
+                x = 20 + (32 - 20) * frac
+                y = 38 + (50 - 38) * frac
+                p.drawLine(20, 38, int(x), int(y))
+            else:
+                p.drawLine(20, 38, 32, 50)
+                frac = (self._progress - seg1_len) / (1.0 - seg1_len)
+                x = 32 + (52 - 32) * frac
+                y = 50 + (26 - 50) * frac
+                p.drawLine(32, 50, int(x), int(y))
+        p.end()
+
+
+class AutoscanOverlay(QDialog):
+    """Modal overlay shown during autoscan processing."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+        self.setFixedSize(320, 200)
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(16)
+
+        # Spinner / checkmark area
+        self._spinner_label = QLabel("⏳")
+        self._spinner_label.setAlignment(Qt.AlignCenter)
+        self._spinner_label.setStyleSheet("font-size: 48px; background: transparent;")
+        layout.addWidget(self._spinner_label, alignment=Qt.AlignCenter)
+
+        self._checkmark = _CheckmarkWidget()
+        self._checkmark.hide()
+        layout.addWidget(self._checkmark, alignment=Qt.AlignCenter)
+
+        self._text = QLabel("Trwa analiza...")
+        self._text.setAlignment(Qt.AlignCenter)
+        self._text.setStyleSheet(
+            "font-size: 16px; font-weight: 600; color: #1e293b; background: transparent;"
+        )
+        layout.addWidget(self._text)
+
+        self._subtext = QLabel("")
+        self._subtext.setAlignment(Qt.AlignCenter)
+        self._subtext.setStyleSheet(
+            "font-size: 12px; color: #64748b; background: transparent;"
+        )
+        layout.addWidget(self._subtext)
+
+        # Pulse animation on the spinner
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.setInterval(500)
+        self._pulse_frames = ["⏳", "⌛"]
+        self._pulse_idx = 0
+        self._pulse_timer.timeout.connect(self._pulse_tick)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setBrush(QColor(255, 255, 255, 240))
+        p.setPen(QPen(QColor("#e2e8f0"), 1))
+        p.drawRoundedRect(self.rect().adjusted(2, 2, -2, -2), 16, 16)
+        p.end()
+
+    def show_loading(self, progress_text=""):
+        self._spinner_label.show()
+        self._checkmark.hide()
+        self._text.setText("Trwa analiza...")
+        self._subtext.setText(progress_text)
+        self._pulse_timer.start()
+        self._center_on_parent()
+        self.show()
+
+    def update_progress(self, text):
+        self._subtext.setText(text)
+
+    def show_done(self):
+        self._pulse_timer.stop()
+        self._spinner_label.hide()
+        self._checkmark.show()
+        self._checkmark._progress = 0.0
+        self._text.setText("Analiza wykonana")
+        self._subtext.setText("")
+
+        # Animate the checkmark
+        self._check_anim = QPropertyAnimation(self._checkmark, b"progress")
+        self._check_anim.setDuration(400)
+        self._check_anim.setStartValue(0.0)
+        self._check_anim.setEndValue(1.0)
+        self._check_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._check_anim.start()
+
+        # Auto-close after 1.2 seconds
+        QTimer.singleShot(1200, self.accept)
+
+    def _pulse_tick(self):
+        self._pulse_idx = (self._pulse_idx + 1) % len(self._pulse_frames)
+        self._spinner_label.setText(self._pulse_frames[self._pulse_idx])
+
+    def _center_on_parent(self):
+        if self.parent():
+            pr = self.parent().rect()
+            x = pr.center().x() - self.width() // 2
+            y = pr.center().y() - self.height() // 2
+            self.move(self.parent().mapToGlobal(pr.topLeft()).x() + x - self.parent().mapToGlobal(pr.topLeft()).x() + x,
+                      self.parent().mapToGlobal(pr.topLeft()).y() + y - self.parent().mapToGlobal(pr.topLeft()).y() + y)
+            # Simpler: just position relative to parent widget
+            self.move(x, y)
 
 
 def discover_models():
@@ -295,15 +440,18 @@ class ViewerPage(QWidget):
         tb2.addWidget(self.view_seg)
         tb2.addWidget(make_separator())
 
-        # Tool buttons
+        # Tool buttons (visible only in 1-lead mode)
         self.tool_btns: list[ToolbarBtn] = []
         for i, (label, active) in enumerate([("Wybierz", True), ("Suwmiarka", False), ("Adnotacja", False)]):
             btn = ToolbarBtn(label, active)
             btn.clicked.connect(lambda checked, idx=i: self._on_tool_mode(idx))
+            btn.setVisible(False)
             self.tool_btns.append(btn)
             tb2.addWidget(btn)
 
-        tb2.addWidget(make_separator())
+        self._tool_sep = make_separator()
+        self._tool_sep.setVisible(False)
+        tb2.addWidget(self._tool_sep)
         tb2.addStretch()
 
         # Model selector
@@ -807,6 +955,8 @@ class ViewerPage(QWidget):
         self.view_stack.setCurrentIndex(idx)
         for btn in self.tool_btns:
             btn.setVisible(idx == 1)
+        # Hide tool separator in non-1-lead modes
+        self._tool_sep.setVisible(idx == 1)
         self._update_statusbar()
 
     def _on_tool_mode(self, idx: int):
@@ -1106,51 +1256,85 @@ class ViewerPage(QWidget):
         step_samples = int(step_sec * self.fs)
         total = self.signal.shape[0]
 
-        # Build window starts
         starts = list(range(0, total - window_samples + 1, step_samples))
-        # Ensure last window ends at signal end
         last_start = total - window_samples
         if not starts or starts[-1] != last_start:
             starts.append(last_start)
 
         n_windows = len(starts)
-        results = []
 
-        for i, s in enumerate(starts):
-            self.st_center.setText(f"Autoskan: {i + 1}/{n_windows} okien...")
-            QApplication.processEvents()
+        # Show loading overlay
+        self._autoscan_overlay = AutoscanOverlay(self)
+        self._autoscan_overlay.show_loading(f"0/{n_windows} okien")
 
-            window = self.signal[s:s + window_samples]
-            t_start = s / self.fs
-            t_end = (s + window_samples) / self.fs
+        # Progress polling timer
+        self._autoscan_poll = QTimer(self)
+        self._autoscan_poll.setInterval(100)
+        self._autoscan_thread_results = None
+        self._autoscan_thread_progress = [0, n_windows]
 
-            try:
-                res = predict_with_model(
-                    model=model, data=window, threshold=0.5,
-                    class_names=TARGET_CLASSES, device=device,
-                )
-                probs = res["probabilities"][0]
-                prob_dict = {cls: float(probs[j]) for j, cls in enumerate(TARGET_CLASSES)}
-            except Exception:
-                prob_dict = {cls: 0.0 for cls in TARGET_CLASSES}
+        def _worker():
+            """Run inference in background thread."""
+            results = []
+            for i, s in enumerate(starts):
+                self._autoscan_thread_progress[0] = i + 1
+                window = self.signal[s:s + window_samples]
+                t_start = s / self.fs
+                t_end = (s + window_samples) / self.fs
 
-            # Determine color
-            top_cls = max(prob_dict, key=prob_dict.get)
-            top_prob = prob_dict[top_cls]
-            if top_cls == "class_healthy" and top_prob >= 0.5:
-                color = 0  # green
-            elif top_cls != "class_healthy" and top_prob >= 0.5:
-                color = 2  # red
-            else:
-                color = 1  # yellow
+                try:
+                    res = predict_with_model(
+                        model=model, data=window, threshold=0.5,
+                        class_names=TARGET_CLASSES, device=device,
+                    )
+                    probs = res["probabilities"][0]
+                    prob_dict = {cls: float(probs[j]) for j, cls in enumerate(TARGET_CLASSES)}
+                except Exception:
+                    prob_dict = {cls: 0.0 for cls in TARGET_CLASSES}
 
-            results.append({
-                "t_start": t_start, "t_end": t_end,
-                "color": color, "probs": prob_dict,
-            })
+                top_cls = max(prob_dict, key=prob_dict.get)
+                top_prob = prob_dict[top_cls]
+                if top_cls == "class_healthy" and top_prob >= 0.5:
+                    color = 0
+                elif top_cls != "class_healthy" and top_prob >= 0.5:
+                    color = 2
+                else:
+                    color = 1
 
-        self._autoscan_results = results
-        self._save_autoscan_cache(results)
+                results.append({
+                    "t_start": t_start, "t_end": t_end,
+                    "color": color, "probs": prob_dict,
+                })
+            self._autoscan_thread_results = results
+
+        def _poll():
+            """Check thread progress from main thread."""
+            done, total_w = self._autoscan_thread_progress
+            if hasattr(self, '_autoscan_overlay') and self._autoscan_overlay:
+                self._autoscan_overlay.update_progress(f"{done}/{total_w} okien")
+            if self._autoscan_thread_results is not None:
+                self._autoscan_poll.stop()
+                self._autoscan_results = self._autoscan_thread_results
+                self._save_autoscan_cache(self._autoscan_thread_results)
+                self._autoscan_thread_results = None
+                # Show done animation
+                if hasattr(self, '_autoscan_overlay') and self._autoscan_overlay:
+                    self._autoscan_overlay.show_done()
+                    QTimer.singleShot(1300, self._autoscan_finish)
+                else:
+                    self._autoscan_finish()
+
+        self._autoscan_poll.timeout.connect(_poll)
+        self._autoscan_poll.start()
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+
+    def _autoscan_finish(self):
+        """Apply results after overlay closes."""
+        if hasattr(self, '_autoscan_overlay') and self._autoscan_overlay:
+            self._autoscan_overlay.close()
+            self._autoscan_overlay = None
         self._apply_autoscan_overlay()
         self._update_statusbar()
 

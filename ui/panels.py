@@ -65,7 +65,7 @@ class InfoPanel(QWidget):
         )
         edit.setAlignment(Qt.AlignRight)
         edit.setFixedWidth(70)
-        edit.textChanged.connect(self.patient_changed.emit)
+        edit.textChanged.connect(lambda _text: self.patient_changed.emit())
         lay.addWidget(lbl)
         lay.addStretch()
         lay.addWidget(edit)
