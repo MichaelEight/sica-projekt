@@ -396,7 +396,7 @@ class ViewerPage(QWidget):
         tb.addWidget(logo)
         tb.addWidget(make_separator())
 
-        self.file_label = QLabel("00888_lr.dat | 500 Hz | 12 odpr. | 10.0 s")
+        self.file_label = QLabel("")
         self.file_label.setStyleSheet(f"font-size:11px; color:{T.BTN_TEXT}; font-family:Menlo;")
         tb.addWidget(self.file_label)
         tb.addStretch()
@@ -543,6 +543,7 @@ class ViewerPage(QWidget):
         self.single_lead = SingleLeadCanvas()
         self.single_lead.draw_border = True
         self.single_lead.clicked.connect(self._on_canvas_click)
+        self.single_lead.annot_canceled.connect(self._on_annot_cancel)
         self.view_stack.addWidget(self.single_lead)
 
         self.monitor_area = QWidget()
@@ -564,6 +565,9 @@ class ViewerPage(QWidget):
         self.annot_panel.hide()
         self.annot_panel.annotation_saved.connect(self._on_annotation_saved)
         self.annot_panel.annotation_deleted.connect(self._on_annotation_deleted)
+        self.annot_panel.annotation_hovered.connect(self._on_annot_hovered)
+        self.annot_panel.annotation_unhovered.connect(self._on_annot_unhovered)
+        self.annot_panel.annotation_selected.connect(self._on_annot_selected)
         self.content.addWidget(self.annot_panel)
 
         self.results_panel = ResultsPanel()
@@ -785,7 +789,7 @@ class ViewerPage(QWidget):
             self._window_1 = 3.0
 
         self.file_label.setText(
-            f"{filename} | {fs} Hz | {len(leads)} odpr. | {self.duration:.1f} s"
+            f"{filename} | {self.duration:.1f} s"
         )
         self.analysis_badge.hide()
         self.results_panel.hide()
@@ -900,6 +904,9 @@ class ViewerPage(QWidget):
                 for a in self._user_annotations if a.get("lead") == lead
             ]
 
+            # Preserve annotation tool state across refresh
+            self.single_lead.annot_mode = (self._tool_mode == 2)
+
             self.single_lead.update()
 
     def _refresh_monitor(self):
@@ -965,6 +972,22 @@ class ViewerPage(QWidget):
             btn.set_active(i == idx)
         self.caliper_panel.setVisible(idx == 1 and self._view_mode == 1)
         self.annot_panel.setVisible(idx == 2 and self._view_mode == 1)
+
+        # Set annotation mode flag and cursor on canvas
+        self.single_lead.annot_mode = (idx == 2)
+        if idx == 2:
+            self.single_lead.setCursor(Qt.CrossCursor)
+        elif idx == 1:
+            self.single_lead.setCursor(Qt.CrossCursor)
+        else:
+            self.single_lead.setCursor(Qt.ArrowCursor)
+
+        # Clear pending state when switching tools
+        if idx != 2:
+            self._annot_click_t1 = None
+            self.single_lead.pending_marker = None
+            self.single_lead.annotation_preview = None
+
         self._refresh_single_lead()
         self._update_statusbar()
 
@@ -1171,31 +1194,95 @@ class ViewerPage(QWidget):
 
         elif self._tool_mode == 2:  # Annotation mode
             if self._annot_click_t1 is None:
+                # Stage 0→1: first point selected
                 self._annot_click_t1 = t
-                self._update_statusbar()
-            else:
-                t1, t2 = min(self._annot_click_t1, t), max(self._annot_click_t1, t)
-                self._annot_click_t1 = None
-                self.annot_panel.set_form_region(lead, t1, t2)
-                # Temporarily add annotation region to canvas for preview
-                self.single_lead.annotations = [(t1, t2)]
+                self.single_lead.annotation_preview = None
+                self.single_lead.pending_marker = t
                 self.single_lead.update()
                 self._update_statusbar()
+            else:
+                # Stage 1→2: second point selected, region complete
+                t1, t2 = min(self._annot_click_t1, t), max(self._annot_click_t1, t)
+                self._annot_click_t1 = None
+                self.single_lead.pending_marker = None
+                self.single_lead.annotation_preview = (t1, t2)
+                self.single_lead.update()
+                self.annot_panel.set_form_region(lead, t1, t2)
+                self._update_statusbar()
+
+    def _on_annot_cancel(self):
+        """Cancel annotation selection (right-click or Escape)."""
+        self._annot_click_t1 = None
+        self.single_lead.pending_marker = None
+        self.single_lead.annotation_preview = None
+        self.single_lead.selected_annotation = None
+        self.annot_panel.set_form_region("—", 0, 0)
+        self.single_lead.update()
+        self._update_statusbar()
+
+    def _on_annot_hovered(self, index):
+        """Highlight annotation on canvas when hovering its card in the list."""
+        lead = self.lead_sidebar.active_lead()
+        # Map global annotation index to lead-local index
+        lead_idx = self._annot_global_to_lead_idx(index, lead)
+        self.single_lead.hovered_annotation = lead_idx
+        self.single_lead.update()
+
+    def _on_annot_unhovered(self):
+        self.single_lead.hovered_annotation = None
+        self.single_lead.update()
+
+    def _on_annot_selected(self, index):
+        """Select annotation — highlight on canvas and populate form for editing."""
+        lead = self.lead_sidebar.active_lead()
+        lead_idx = self._annot_global_to_lead_idx(index, lead)
+        self.single_lead.selected_annotation = lead_idx
+        self.single_lead.update()
+
+        # Populate the form with the selected annotation's data
+        ann = self._user_annotations[index]
+        self.annot_panel.set_form_region(ann["lead"], ann["t1"], ann["t2"])
+        self.annot_panel.category.setCurrentText(ann.get("category", "Patologia"))
+        self.annot_panel.note_edit.setPlainText(ann.get("note", ""))
+        # Clear pending state
+        self._annot_click_t1 = None
+        self.single_lead.pending_marker = None
+        self.single_lead.annotation_preview = None
+
+    def _annot_global_to_lead_idx(self, global_idx, lead):
+        """Convert global annotation index to lead-local annotation index for canvas."""
+        if global_idx < 0 or global_idx >= len(self._user_annotations):
+            return None
+        ann = self._user_annotations[global_idx]
+        if ann.get("lead") != lead:
+            return None
+        # Count how many annotations for this lead come before this one
+        local = 0
+        for i, a in enumerate(self._user_annotations):
+            if a.get("lead") == lead:
+                if i == global_idx:
+                    return local
+                local += 1
+        return None
 
     def _on_annotation_saved(self, category: str, note: str):
         """Handle annotation save from AnnotationPanel form."""
-        # Get region from the panel's form
         lead = self.lead_sidebar.active_lead()
-        # Find the current annotation region on canvas
-        if self.single_lead.annotations:
-            t1, t2 = self.single_lead.annotations[0]
+        # Use preview region (completed but unsaved)
+        preview = self.single_lead.annotation_preview
+        if preview:
+            t1, t2 = preview
             annotation = {
                 "t1": round(t1, 3), "t2": round(t2, 3),
                 "lead": lead, "category": category, "note": note,
                 "source": "user",
             }
             self._user_annotations.append(annotation)
+            self.single_lead.annotation_preview = None
             self.annot_panel.set_annotations(self._user_annotations)
+            # Reset form
+            self.annot_panel.note_edit.clear()
+            self.annot_panel.set_form_region("—", 0, 0)
             self._refresh_single_lead()
             self._save_apwr()
 
@@ -1780,8 +1867,18 @@ class ViewerPage(QWidget):
                 self.st_right.setText(f"t = <b>{self.time_pos:.2f} s</b>")
             elif self._tool_mode == 2:
                 self.st_left.setText("<b>Adnotacja</b> | <b>10 mm/mV</b>")
-                self.st_center.setText("Przeciągnij, aby zaznaczyć | Enter: Zapisz | Esc: Anuluj")
-                self.st_right.setText("Zaznaczenie: <b>2.30 — 2.85 s</b>")
+                if self._annot_click_t1 is not None:
+                    self.st_center.setText(
+                        f"Pierwszy punkt: <b>{self._annot_click_t1:.3f} s</b> — Kliknij drugi punkt | PPM/Esc: Anuluj"
+                    )
+                    self.st_right.setText("")
+                elif self.single_lead.annotation_preview:
+                    ap_t1, ap_t2 = self.single_lead.annotation_preview
+                    self.st_center.setText("Wypełnij formularz i kliknij Zapisz | PPM/Esc: Anuluj")
+                    self.st_right.setText(f"Zaznaczenie: <b>{ap_t1:.2f} — {ap_t2:.2f} s</b>")
+                else:
+                    self.st_center.setText("Kliknij pierwszy punkt na sygnale | Esc: Wyjdź")
+                    self.st_right.setText("")
             else:
                 self.st_left.setText("<b>10 mm/mV</b> | <b>25 mm/s</b>")
                 self.st_center.setText("Tab: Następne | Shift+Tab: Poprzednie | ←/→: Przewiń")

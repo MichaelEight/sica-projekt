@@ -214,6 +214,25 @@ QTextEdit {{
     color: {TEXT};
     background: {WHITE};
 }}
+QMessageBox {{
+    background: {WHITE};
+    color: {TEXT};
+}}
+QMessageBox QLabel {{
+    color: {TEXT};
+    font-size: 13px;
+}}
+QMessageBox QPushButton {{
+    background: {ACCENT};
+    color: {ACCENT_TEXT};
+    padding: 6px 16px;
+    border-radius: 5px;
+    font-weight: 600;
+    min-width: 60px;
+}}
+QMessageBox QPushButton:hover {{
+    background: {'#00c864' if dark else '#3a8eef'};
+}}
 """
 
 

@@ -49,7 +49,12 @@ class EkgCellCanvas(QWidget):
         self.show_cal = True
         self.show_label = True
         self.calipers = []       # list of (t1, t2, color, label)
-        self.annotations = []    # list of (t1, t2)
+        self.annotations = []    # list of (t1, t2) — saved annotations
+        self.hovered_annotation = None  # int index into self.annotations or None
+        self.selected_annotation = None  # int index into self.annotations or None
+        self.pending_marker = None   # float time_s — first click in annotation mode
+        self.annotation_preview = None  # (t1, t2) — completed but unsaved region
+        self.annot_mode = False  # whether annotation tool is active
         self._sweep_pos = None   # fraction 0..1 for monitor mode
         self._old_signal = None  # previous page signal data (1-D)
         self._old_t_start = 0.0
@@ -77,6 +82,11 @@ class EkgCellCanvas(QWidget):
         self.v_max = None
         self.calipers = []
         self.annotations = []
+        self.hovered_annotation = None
+        self.selected_annotation = None
+        self.pending_marker = None
+        self.annotation_preview = None
+        self.annot_mode = False
         self._sweep_pos = None
         self._old_signal = None
         self._old_t_start = 0.0
@@ -193,15 +203,52 @@ class EkgCellCanvas(QWidget):
             painter.drawPath(path)
             sig_start = 5 + cal_w + 4
 
-        # Annotation highlights
+        # Saved annotation highlights — normal / hovered / selected
         if self.annotations:
-            for a_t1, a_t2 in self.annotations:
+            for ai, (a_t1, a_t2) in enumerate(self.annotations):
                 ax1 = sig_start + ((a_t1 - self.t_start) / duration) * (w - sig_start)
                 ax2 = sig_start + ((a_t2 - self.t_start) / duration) * (w - sig_start)
-                painter.fillRect(QRectF(ax1, 0, ax2 - ax1, h), QColor(74, 158, 255, 30))
-                painter.setPen(QPen(QColor(T.ACCENT), 1.5, Qt.DashLine))
+                is_selected = (ai == self.selected_annotation)
+                is_hovered = (ai == self.hovered_annotation) and not is_selected
+
+                if is_selected:
+                    # Selected: strong blue fill, thick solid border
+                    painter.fillRect(QRectF(ax1, 0, ax2 - ax1, h), QColor(74, 158, 255, 60))
+                    painter.setPen(QPen(QColor(T.ACCENT), 2.5))
+                elif is_hovered:
+                    # Hovered: medium fill, dashed border
+                    painter.fillRect(QRectF(ax1, 0, ax2 - ax1, h), QColor(74, 158, 255, 45))
+                    painter.setPen(QPen(QColor(T.ACCENT), 1.5, Qt.DashLine))
+                else:
+                    # Normal: light fill, thin solid border
+                    painter.fillRect(QRectF(ax1, 0, ax2 - ax1, h), QColor(74, 158, 255, 25))
+                    painter.setPen(QPen(QColor(T.ACCENT), 1.0))
                 painter.drawLine(QPointF(ax1, 0), QPointF(ax1, h))
                 painter.drawLine(QPointF(ax2, 0), QPointF(ax2, h))
+
+        # Annotation preview (completed but unsaved — dashed purple)
+        if self.annotation_preview:
+            ap_t1, ap_t2 = self.annotation_preview
+            apx1 = sig_start + ((ap_t1 - self.t_start) / duration) * (w - sig_start)
+            apx2 = sig_start + ((ap_t2 - self.t_start) / duration) * (w - sig_start)
+            painter.fillRect(QRectF(apx1, 0, apx2 - apx1, h), QColor(139, 92, 246, 35))
+            painter.setPen(QPen(QColor(139, 92, 246), 2.0, Qt.DashLine))
+            painter.drawLine(QPointF(apx1, 0), QPointF(apx1, h))
+            painter.drawLine(QPointF(apx2, 0), QPointF(apx2, h))
+
+        # Pending marker + live preview (first click placed, following mouse)
+        if self.pending_marker is not None and self.annot_mode:
+            mk_x = sig_start + ((self.pending_marker - self.t_start) / duration) * (w - sig_start)
+            painter.setPen(QPen(QColor(139, 92, 246), 2.0))
+            painter.drawLine(QPointF(mk_x, 0), QPointF(mk_x, h))
+            # Live fill to hover position
+            if self._hover_x is not None:
+                hx = self._hover_x
+                left_x = min(mk_x, hx)
+                right_x = max(mk_x, hx)
+                painter.fillRect(QRectF(left_x, 0, right_x - left_x, h), QColor(139, 92, 246, 18))
+                painter.setPen(QPen(QColor(139, 92, 246, 120), 1.0, Qt.DotLine))
+                painter.drawLine(QPointF(hx, 0), QPointF(hx, h))
 
         # Zero line
         if self.show_zero_line:
@@ -452,7 +499,15 @@ class EkgCellCanvas(QWidget):
 
         painter.end()
 
+    annot_canceled = Signal()  # emitted on RMB cancel in annotation mode
+
     def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton and self.annot_mode:
+            self.pending_marker = None
+            self.annotation_preview = None
+            self.annot_canceled.emit()
+            self.update()
+            return
         if event.button() == Qt.LeftButton and self.signal is not None:
             w = self.width()
             duration = self.t_end - self.t_start

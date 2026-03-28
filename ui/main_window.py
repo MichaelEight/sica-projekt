@@ -182,6 +182,12 @@ class MainWindow(QMainWindow):
             if self.stack.currentIndex() == 1:
                 if self.viewer_page._analysis_mode:
                     self.viewer_page._toggle_analysis_mode()
+                elif self.viewer_page._tool_mode == 2 and (
+                    self.viewer_page._annot_click_t1 is not None
+                    or self.viewer_page.single_lead.annotation_preview is not None
+                ):
+                    # Cancel annotation selection without leaving annotation mode
+                    self.viewer_page._on_annot_cancel()
                 elif self.viewer_page._view_mode == 2:
                     self.viewer_page.view_seg.set_active(0)
                 elif self.viewer_page._tool_mode != 0:

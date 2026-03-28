@@ -3,7 +3,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QPushButton, QFrame, QComboBox, QTextEdit,
-                                QScrollArea, QSizePolicy, QLineEdit)
+                                QScrollArea, QSizePolicy, QLineEdit,
+                                QStyledItemDelegate, QListView)
 
 import ui.theme as T
 from ui.widgets import section_header, info_row, make_action_btn
@@ -277,10 +278,154 @@ class CaliperPanel(QWidget):
 
 
 # Annotation Panel
+class _AnnotationCard(QFrame):
+    """Clickable card for a saved annotation with hover effects."""
+
+    clicked = Signal(int)
+    hovered = Signal(int)
+    unhovered = Signal()
+    delete_clicked = Signal(int)
+
+    def __init__(self, index, ann, badge_styles, parent=None):
+        super().__init__(parent)
+        self._index = index
+        self._selected = False
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMouseTracking(True)
+
+        cat = ann.get("category", "")
+        border_color, bg_c, text_c = badge_styles.get(
+            cat, (T.TEXT_DIM, T.TAG_BG, T.TEXT_DIM)
+        )
+        self._border_color = border_color
+        self._base_bg = T.BG_SECONDARY
+
+        self.setStyleSheet(self._card_style(False, False))
+
+        card_layout = QVBoxLayout(self)
+        card_layout.setContentsMargins(10, 8, 10, 8)
+        card_layout.setSpacing(4)
+
+        # Row 1: lead + time range
+        meta_text = f"{ann['lead']}: {ann['t1']:.2f} — {ann['t2']:.2f} s"
+        meta_lbl = QLabel(meta_text)
+        meta_lbl.setStyleSheet(f"font-size: 12px; font-family: Menlo; color: {T.TEXT}; background: transparent; border: none;")
+        card_layout.addWidget(meta_lbl)
+
+        # Row 2: badges + delete
+        badge_row = QHBoxLayout()
+        badge_row.setSpacing(4)
+
+        badge_lbl = QLabel(cat)
+        badge_lbl.setStyleSheet(f"""
+            font-size: 10px; padding: 2px 8px; border-radius: 3px;
+            font-weight: 600; background: {bg_c}; color: {text_c}; border: none;
+        """)
+        badge_row.addWidget(badge_lbl)
+
+        source = ann.get("source", "user")
+        if source == "model":
+            src_lbl = QLabel("AI")
+            src_lbl.setStyleSheet(f"""
+                font-size: 9px; padding: 2px 6px; border-radius: 3px;
+                font-weight: 700; background: {T.PURPLE_BG}; color: {T.PURPLE}; border: none;
+            """)
+        else:
+            src_lbl = QLabel("Lekarz")
+            src_lbl.setStyleSheet(f"""
+                font-size: 9px; padding: 2px 6px; border-radius: 3px;
+                font-weight: 700; background: {T.BLUE_BG}; color: {T.BADGE_BLUE_TEXT}; border: none;
+            """)
+        badge_row.addWidget(src_lbl)
+        badge_row.addStretch()
+
+        del_btn = QPushButton("✕")
+        del_btn.setFixedSize(20, 20)
+        del_btn.setCursor(Qt.PointingHandCursor)
+        del_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 12px; border: none; background: transparent;
+                color: {T.TEXT_DIM}; font-weight: 600;
+            }}
+            QPushButton:hover {{ color: {T.RED}; }}
+        """)
+        del_btn.clicked.connect(lambda: self.delete_clicked.emit(self._index))
+        badge_row.addWidget(del_btn)
+        card_layout.addLayout(badge_row)
+
+        # Row 3: note (if any)
+        note_text = ann.get("note", "")
+        if note_text:
+            text_lbl = QLabel(note_text)
+            text_lbl.setStyleSheet(f"font-size: 11px; color: {T.TEXT_SECONDARY}; background: transparent; border: none;")
+            text_lbl.setWordWrap(True)
+            card_layout.addWidget(text_lbl)
+
+    def _card_style(self, hovered, selected):
+        # All states keep identical geometry: 3px left border + 1px other borders
+        # Only colors change — no size shift ever
+        if selected:
+            return f"""
+                _AnnotationCard {{
+                    background: {T.BLUE_BG};
+                    border-left: 3px solid {T.ACCENT};
+                    border-top: 1px solid {T.ACCENT};
+                    border-right: 1px solid {T.ACCENT};
+                    border-bottom: 1px solid {T.ACCENT};
+                    border-radius: 6px;
+                }}
+            """
+        elif hovered:
+            return f"""
+                _AnnotationCard {{
+                    background: {T.BG_SECONDARY};
+                    border-left: 3px solid {self._border_color};
+                    border-top: 1px solid {T.BORDER};
+                    border-right: 1px solid {T.BORDER};
+                    border-bottom: 1px solid {T.BORDER};
+                    border-radius: 6px;
+                }}
+            """
+        else:
+            return f"""
+                _AnnotationCard {{
+                    background: {T.BG_SECONDARY};
+                    border-left: 3px solid {self._border_color};
+                    border-top: 1px solid transparent;
+                    border-right: 1px solid transparent;
+                    border-bottom: 1px solid transparent;
+                    border-radius: 6px;
+                }}
+            """
+
+    def set_selected(self, selected):
+        self._selected = selected
+        self.setStyleSheet(self._card_style(False, selected))
+
+    def enterEvent(self, event):
+        if not self._selected:
+            self.setStyleSheet(self._card_style(True, False))
+        self.hovered.emit(self._index)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.setStyleSheet(self._card_style(False, self._selected))
+        self.unhovered.emit()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self._index)
+        super().mousePressEvent(event)
+
+
 class AnnotationPanel(QWidget):
     annotation_saved = Signal(str, str)
     annotations_changed = Signal()
     annotation_deleted = Signal(int)
+    annotation_hovered = Signal(int)    # index hovered
+    annotation_unhovered = Signal()     # hover left
+    annotation_selected = Signal(int)   # index clicked/selected
 
     _BADGE_STYLES = {
         "Norma": (T.GREEN, T.BADGE_NORM_BG, T.BADGE_NORM_TEXT),
@@ -292,7 +437,13 @@ class AnnotationPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(270)
-        self.setStyleSheet(f"background: {T.WHITE}; border-left: 1px solid {T.BORDER};")
+        self.setStyleSheet(f"""
+            AnnotationPanel {{
+                background: {T.WHITE};
+                border-left: 1px solid {T.BORDER};
+                border-top: none; border-right: none; border-bottom: none;
+            }}
+        """)
         self._annotations: list[dict] = []
 
         layout = QVBoxLayout(self)
@@ -301,50 +452,102 @@ class AnnotationPanel(QWidget):
 
         # Header
         header = QWidget()
-        header.setStyleSheet(f"padding: 12px 14px; border-bottom: 1px solid {T.BORDER};")
+        header.setStyleSheet(f"background: {T.WHITE}; border: none;")
         h_layout = QVBoxLayout(header)
-        h_layout.setContentsMargins(14, 12, 14, 12)
+        h_layout.setContentsMargins(14, 14, 14, 10)
         h_title = QLabel("Adnotacje")
         h_title.setFont(QFont(".AppleSystemUIFont", 13, QFont.DemiBold))
+        h_title.setStyleSheet(f"color: {T.TEXT}; border: none;")
         h_layout.addWidget(h_title)
         layout.addWidget(header)
 
+        # Separator
+        sep1 = QFrame()
+        sep1.setFixedHeight(1)
+        sep1.setStyleSheet(f"background: {T.BORDER}; border: none;")
+        layout.addWidget(sep1)
+
         # New annotation form
         form = QWidget()
-        form.setStyleSheet(f"border-bottom: 1px solid {T.BORDER};")
+        form.setStyleSheet(f"background: {T.WHITE}; border: none;")
         f_layout = QVBoxLayout(form)
-        f_layout.setContentsMargins(12, 12, 12, 12)
+        f_layout.setContentsMargins(14, 12, 14, 12)
         f_layout.setSpacing(8)
 
         f_header = QLabel("Nowa adnotacja")
-        f_header.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {T.ACCENT};")
+        f_header.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {T.ACCENT}; border: none;")
         f_layout.addWidget(f_header)
 
         self._region_label = QLabel("—")
         self._region_label.setStyleSheet(f"""
             font-size: 12px; font-family: Menlo; color: {T.TEXT_SECONDARY};
-            background: {T.BLUE_BG}; padding: 6px 8px; border-radius: 4px;
+            background: {T.BLUE_BG}; padding: 6px 10px; border-radius: 4px; border: none;
         """)
         f_layout.addWidget(self._region_label)
 
         cat_label = QLabel("Kategoria")
-        cat_label.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED};")
+        cat_label.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED}; border: none;")
         f_layout.addWidget(cat_label)
         self.category = QComboBox()
         self.category.addItems(["Patologia", "Norma", "Artefakt", "Do weryfikacji"])
+        self.category.setMaxVisibleItems(4)
+        # Force Qt-drawn popup (not native macOS) via combobox-popup: 0
         self.category.setStyleSheet(f"""
-            padding: 7px 8px; border: 1px solid {T.BORDER}; border-radius: 6px; font-size: 13px;
+            QComboBox {{
+                combobox-popup: 0;
+                padding: 7px 10px; border: 1px solid {T.BORDER}; border-radius: 6px;
+                font-size: 13px; background: {T.WHITE}; color: {T.TEXT};
+            }}
+            QComboBox:hover {{
+                border: 1px solid {T.ACCENT};
+            }}
+            QComboBox::drop-down {{
+                border: none; width: 20px;
+                subcontrol-position: center right;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid {T.TEXT_MUTED};
+                margin-right: 8px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {T.WHITE}; color: {T.TEXT};
+                border: 1px solid {T.BORDER};
+                border-radius: 6px;
+                padding: 4px;
+                font-size: 13px;
+                outline: none;
+                selection-background-color: {T.BLUE_BG};
+                selection-color: {T.ACCENT};
+            }}
+            QComboBox QAbstractItemView::item {{
+                min-height: 28px;
+                padding: 4px 10px;
+            }}
+            QComboBox QAbstractItemView::item:hover {{
+                background: {T.BG_SECONDARY};
+            }}
         """)
+        # Force non-native delegate so stylesheet actually applies
+        self.category.setItemDelegate(QStyledItemDelegate(self.category))
         f_layout.addWidget(self.category)
 
         note_label = QLabel("Notatka")
-        note_label.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED};")
+        note_label.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED}; border: none;")
         f_layout.addWidget(note_label)
         self.note_edit = QTextEdit()
         self.note_edit.setPlaceholderText("Podejrzenie uniesienia ST")
         self.note_edit.setMaximumHeight(60)
         self.note_edit.setStyleSheet(f"""
-            padding: 7px 8px; border: 1px solid {T.BORDER}; border-radius: 6px; font-size: 13px;
+            QTextEdit {{
+                padding: 7px 8px; border: 1px solid {T.BORDER}; border-radius: 6px;
+                font-size: 13px; background: {T.WHITE}; color: {T.TEXT};
+            }}
+            QTextEdit:focus {{
+                border: 1px solid {T.ACCENT};
+            }}
         """)
         f_layout.addWidget(self.note_edit)
 
@@ -357,19 +560,26 @@ class AnnotationPanel(QWidget):
         f_layout.addLayout(btn_row)
         layout.addWidget(form)
 
+        # Separator
+        sep2 = QFrame()
+        sep2.setFixedHeight(1)
+        sep2.setStyleSheet(f"background: {T.BORDER}; border: none;")
+        layout.addWidget(sep2)
+
         # Saved annotations scroll area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("border: none;")
+        scroll.setStyleSheet(f"background: {T.WHITE}; border: none;")
         self._saved_widget = QWidget()
+        self._saved_widget.setStyleSheet(f"background: {T.WHITE}; border: none;")
         self._saved_layout = QVBoxLayout(self._saved_widget)
-        self._saved_layout.setContentsMargins(12, 0, 12, 0)
+        self._saved_layout.setContentsMargins(10, 0, 10, 0)
         self._saved_layout.setAlignment(Qt.AlignTop)
 
         self._saved_header = QLabel("ZAPISANE (0)")
         self._saved_header.setStyleSheet(f"""
-            font-size: 12px; font-weight: 600; color: {T.TEXT_DIM};
-            text-transform: uppercase; margin-top: 12px; margin-bottom: 8px;
+            font-size: 11px; font-weight: 600; color: {T.TEXT_DIM};
+            letter-spacing: 0.5px; margin-top: 10px; margin-bottom: 6px; border: none;
         """)
         self._saved_layout.addWidget(self._saved_header)
 
@@ -377,9 +587,15 @@ class AnnotationPanel(QWidget):
         scroll.setWidget(self._saved_widget)
         layout.addWidget(scroll, stretch=1)
 
+        # Separator
+        sep3 = QFrame()
+        sep3.setFixedHeight(1)
+        sep3.setStyleSheet(f"background: {T.BORDER}; border: none;")
+        layout.addWidget(sep3)
+
         # Export all
         footer = QWidget()
-        footer.setStyleSheet(f"border-top: 1px solid {T.BORDER};")
+        footer.setStyleSheet(f"background: {T.WHITE}; border: none;")
         ft_layout = QVBoxLayout(footer)
         ft_layout.setContentsMargins(10, 10, 10, 10)
         btn_export = make_action_btn("Eksportuj wszystkie adnotacje")
@@ -399,7 +615,8 @@ class AnnotationPanel(QWidget):
         self.annotation_saved.emit(cat, note)
 
     def _rebuild_saved_cards(self):
-        # Remove all widgets except the header and final stretch
+        self._cards: list[_AnnotationCard] = []
+        # Remove all widgets
         while self._saved_layout.count() > 0:
             item = self._saved_layout.takeAt(0)
             w = item.widget()
@@ -409,82 +626,36 @@ class AnnotationPanel(QWidget):
         # Re-add header
         self._saved_header = QLabel(f"ZAPISANE ({len(self._annotations)})")
         self._saved_header.setStyleSheet(f"""
-            font-size: 12px; font-weight: 600; color: {T.TEXT_DIM};
-            text-transform: uppercase; margin-top: 12px; margin-bottom: 8px;
+            font-size: 11px; font-weight: 600; color: {T.TEXT_DIM};
+            letter-spacing: 0.5px; margin-top: 10px; margin-bottom: 6px; border: none;
         """)
         self._saved_layout.addWidget(self._saved_header)
 
         for idx, ann in enumerate(self._annotations):
-            cat = ann.get("category", "")
-            border_color, bg_c, text_c = self._BADGE_STYLES.get(
-                cat, (T.TEXT_DIM, T.TAG_BG, T.TEXT_DIM)
-            )
-            meta_text = f"{ann['lead']}: {ann['t1']:.2f} — {ann['t2']:.2f} s"
-
-            card = QFrame()
-            card.setStyleSheet(f"""
-                QFrame {{
-                    background: {T.BG_SECONDARY}; border-left: 3px solid {border_color};
-                    border-radius: 6px; padding: 8px 10px; margin-bottom: 6px;
-                }}
-            """)
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(10, 8, 10, 8)
-            card_layout.setSpacing(4)
-
-            # Meta row: lead + time, badge, delete button
-            meta_row = QHBoxLayout()
-            meta_lbl = QLabel(meta_text)
-            meta_lbl.setStyleSheet(f"font-size: 11px; font-family: Menlo; color: {T.TEXT_MUTED};")
-            meta_row.addWidget(meta_lbl)
-            badge_lbl = QLabel(cat)
-            badge_lbl.setStyleSheet(f"""
-                font-size: 10px; padding: 1px 6px; border-radius: 3px;
-                font-weight: 600; background: {bg_c}; color: {text_c};
-            """)
-            meta_row.addWidget(badge_lbl)
-
-            # Source badge: ANN (doctor) vs ANN.INF (AI model)
-            source = ann.get("source", "user")
-            if source == "model":
-                src_lbl = QLabel("AI")
-                src_lbl.setStyleSheet(f"""
-                    font-size: 9px; padding: 1px 5px; border-radius: 3px;
-                    font-weight: 700; background: {T.PURPLE_BG}; color: {T.PURPLE};
-                """)
-            else:
-                src_lbl = QLabel("Lekarz")
-                src_lbl.setStyleSheet(f"""
-                    font-size: 9px; padding: 1px 5px; border-radius: 3px;
-                    font-weight: 700; background: {T.BLUE_BG}; color: {T.BADGE_BLUE_TEXT};
-                """)
-            meta_row.addWidget(src_lbl)
-            meta_row.addStretch()
-
-            del_btn = QPushButton("✕")
-            del_btn.setFixedSize(20, 20)
-            del_btn.setCursor(Qt.PointingHandCursor)
-            del_btn.setStyleSheet(f"""
-                QPushButton {{
-                    font-size: 12px; border: none; background: transparent;
-                    color: {T.TEXT_DIM}; font-weight: 600;
-                }}
-                QPushButton:hover {{ color: {T.RED}; }}
-            """)
-            del_btn.clicked.connect(lambda checked, i=idx: self._on_delete(i))
-            meta_row.addWidget(del_btn)
-            card_layout.addLayout(meta_row)
-
-            note_text = ann.get("note", "")
-            if note_text:
-                text_lbl = QLabel(note_text)
-                text_lbl.setStyleSheet(f"font-size: 12px; color: {T.TEXT_SECONDARY};")
-                text_lbl.setWordWrap(True)
-                card_layout.addWidget(text_lbl)
-
+            card = _AnnotationCard(idx, ann, self._BADGE_STYLES)
+            card.clicked.connect(self._on_card_clicked)
+            card.hovered.connect(self._on_card_hovered)
+            card.unhovered.connect(self._on_card_unhovered)
+            card.delete_clicked.connect(self._on_delete)
+            self._cards.append(card)
             self._saved_layout.addWidget(card)
 
         self._saved_layout.addStretch()
+
+    def select_annotation(self, index):
+        """Programmatically select an annotation card."""
+        for card in self._cards:
+            card.set_selected(card._index == index)
+
+    def _on_card_clicked(self, index):
+        self.select_annotation(index)
+        self.annotation_selected.emit(index)
+
+    def _on_card_hovered(self, index):
+        self.annotation_hovered.emit(index)
+
+    def _on_card_unhovered(self):
+        self.annotation_unhovered.emit()
 
     def _on_delete(self, index):
         if 0 <= index < len(self._annotations):
@@ -892,7 +1063,6 @@ class MonitorSidebar(QWidget):
 
     def apply_theme(self):
         self.setStyleSheet(f"background: {T.WHITE}; border-right: 1px solid {T.BORDER};")
-        self.pause_btn.setStyleSheet(self._pause_btn_style(self._paused))
         for lead, btn in self.lead_btns.items():
             btn.setStyleSheet(self._lead_btn_style(btn.property("active")))
         for group_name, btns in self._pill_groups.items():
