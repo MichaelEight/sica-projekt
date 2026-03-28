@@ -517,6 +517,12 @@ class ViewerPage(QWidget):
         # Connect grid double-click for jump to 1-lead
         if hasattr(self.grid_12, 'cell_double_clicked'):
             self.grid_12.cell_double_clicked.connect(self._on_cell_double_click)
+        # Connect scroll_pan on all grid cells for two-finger scrolling in 12-lead
+        for cell in self.grid_12.cells.values():
+            if hasattr(cell, 'scroll_pan'):
+                cell.scroll_pan.connect(self._on_grid_scroll_pan)
+        if hasattr(self.grid_12.rhythm, 'scroll_pan'):
+            self.grid_12.rhythm.scroll_pan.connect(self._on_grid_scroll_pan)
 
         self.single_lead = SingleLeadCanvas()
         self.single_lead.draw_border = True
@@ -1133,8 +1139,17 @@ class ViewerPage(QWidget):
             self._zoom_out()
 
     def _on_scroll_pan(self, dt: float):
-        """Handle two-finger swipe pan from canvas."""
+        """Handle two-finger swipe pan from single-lead canvas."""
         if self._view_mode != 1:
+            return
+        new_pos = self.time_pos + dt
+        new_pos = max(0.0, min(self._scrubber_max, new_pos))
+        self.time_pos = new_pos
+        self.scrubber.setValue(int(new_pos * 100))
+
+    def _on_grid_scroll_pan(self, dt: float):
+        """Handle two-finger swipe pan from 12-lead grid cells."""
+        if self._view_mode != 0:
             return
         new_pos = self.time_pos + dt
         new_pos = max(0.0, min(self._scrubber_max, new_pos))
@@ -1163,7 +1178,7 @@ class ViewerPage(QWidget):
         # Build indicator text
         time_text = f"{dt:.2f} s ({dt_ms:.0f} ms)"
 
-        if dt >= 10.0:
+        if dt >= 10.0 - 0.01:  # small epsilon for floating-point pixel conversion
             # AI scan available
             indicator = f"<b>{time_text}</b>  \u2714 Skan AI dostępny"
             self._sel_indicator.setStyleSheet(f"""
@@ -1229,20 +1244,40 @@ class ViewerPage(QWidget):
             return self._base_path + ".ann"
         return ""
 
+    def _get_patient_dict(self) -> dict:
+        """Read patient fields from InfoPanel into a dict."""
+        pf = self.info_panel._patient_fields
+        return {
+            "name": pf["name"].text() if "name" in pf else "",
+            "id": pf["id"].text() if "id" in pf else "",
+            "age": pf["age"].text() if "age" in pf else "",
+            "sex": pf["sex"].text() if "sex" in pf else "",
+            "date": pf["date"].text() if "date" in pf else "",
+        }
+
     def _load_ann(self):
-        """Load markings from .ann file."""
+        """Load markings and patient data from .ann file."""
         path = self._ann_path()
         if not path or not os.path.exists(path):
             return
-        self._marking_store.load_ann(path)
-        self._refresh_markings()
+        success, patient = self._marking_store.load_ann(path)
+        if success:
+            self._refresh_markings()
+            if patient:
+                self.info_panel.set_patient(
+                    patient_id=patient.get("id", ""),
+                    age=patient.get("age", ""),
+                    sex=patient.get("sex", ""),
+                    date=patient.get("date", ""),
+                    name=patient.get("name", ""),
+                )
 
     def _save_ann(self):
-        """Save current markings to .ann file."""
+        """Save current markings and patient data to .ann file."""
         path = self._ann_path()
         if not path:
             return
-        self._marking_store.save_ann(path)
+        self._marking_store.save_ann(path, patient=self._get_patient_dict())
 
     def _run_full_analysis(self):
         """Run full analysis: sliding window scan across the entire signal."""

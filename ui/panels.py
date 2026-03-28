@@ -61,8 +61,10 @@ class InfoPanel(QWidget):
         lbl.setStyleSheet(f"color: {T.TEXT_MUTED}; font-size: 12px;")
         edit = QLineEdit()
         edit.setStyleSheet(
-            f"font-weight: 600; font-family: Menlo; font-size: 13px; "
-            f"border: 1px solid {T.BORDER}; border-radius: 3px; padding: 1px 4px;"
+            f"QLineEdit {{ font-weight: 600; font-family: Menlo; font-size: 13px; "
+            f"border: 1px solid {T.BORDER}; border-radius: 3px; padding: 2px 4px; "
+            f"background: {T.WHITE}; color: {T.TEXT}; }}"
+            f"QLineEdit:focus {{ border: 1px solid {T.ACCENT}; }}"
         )
         edit.setAlignment(Qt.AlignRight)
         edit.setFixedWidth(70)

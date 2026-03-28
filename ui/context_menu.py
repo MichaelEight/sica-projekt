@@ -159,7 +159,7 @@ class SelectionContextMenu(QWidget):
     def show_at(self, pos, selection_seconds):
         self._cleanup()
 
-        scan_enabled = selection_seconds >= 10.0
+        scan_enabled = selection_seconds >= 10.0 - 0.01
         panel = _PopupPanel(240)
 
         # Adnotacja

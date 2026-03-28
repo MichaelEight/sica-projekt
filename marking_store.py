@@ -242,31 +242,35 @@ class MarkingStore:
 
     # -- file I/O --
 
-    def save_ann(self, path: str) -> bool:
+    def save_ann(self, path: str, patient: dict | None = None) -> bool:
         try:
             data = {
                 "format": "ekg-assistant-ann",
                 "version": 2,
                 "markings": [m.to_dict() for m in self._markings],
             }
+            if patient:
+                data["patient"] = patient
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             return True
         except Exception:
             return False
 
-    def load_ann(self, path: str) -> bool:
+    def load_ann(self, path: str) -> tuple[bool, dict | None]:
+        """Load .ann file. Returns (success, patient_dict_or_None)."""
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if data.get("version") != 2:
-                return False
+                return False, None
             self._markings = [Marking.from_dict(d) for d in data.get("markings", [])]
             self._undo_stack.clear()
             self._redo_stack.clear()
-            return True
+            patient = data.get("patient", None)
+            return True, patient
         except Exception:
-            return False
+            return False, None
 
     def clear(self) -> None:
         self._markings.clear()

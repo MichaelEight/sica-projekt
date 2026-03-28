@@ -130,9 +130,23 @@ class UploadPage(QWidget):
         rc_layout.setContentsMargins(0, 0, 0, 0)
         rc_layout.setSpacing(8)
 
+        rc_header_row = QHBoxLayout()
         rc_header = QLabel("OSTATNIE PLIKI")
         rc_header.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {T.TEXT_DIM}; letter-spacing: 0.5px;")
-        rc_layout.addWidget(rc_header)
+        rc_header_row.addWidget(rc_header)
+        rc_header_row.addStretch()
+        self._clear_recent_btn = QPushButton("Wyczyść")
+        self._clear_recent_btn.setCursor(Qt.PointingHandCursor)
+        self._clear_recent_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 11px; color: {T.TEXT_DIM}; background: transparent;
+                border: none; padding: 2px 6px;
+            }}
+            QPushButton:hover {{ color: {T.RED}; }}
+        """)
+        self._clear_recent_btn.clicked.connect(self._clear_recent)
+        rc_header_row.addWidget(self._clear_recent_btn)
+        rc_layout.addLayout(rc_header_row)
 
         self.recent_list = QVBoxLayout()
         self.recent_list.setSpacing(0)
@@ -156,6 +170,10 @@ class UploadPage(QWidget):
         sb_layout.addWidget(sb_label)
         outer.addWidget(statusbar)
 
+        self._refresh_recent()
+
+    def _clear_recent(self):
+        save_recent([])
         self._refresh_recent()
 
     def _refresh_recent(self):
@@ -198,7 +216,12 @@ class UploadPage(QWidget):
         name = QLabel(entry.get("name", ""))
         name.setStyleSheet("font-size: 13px; font-weight: 600; font-family: Menlo; border: none;")
         info.addWidget(name)
-        meta = QLabel(entry.get("info", ""))
+        # Clean old info format — keep only duration (last "X.X s" part)
+        raw_info = entry.get("info", "")
+        import re
+        duration_match = re.search(r'(\d+\.?\d*\s*s)\s*$', raw_info)
+        clean_info = duration_match.group(1) if duration_match else raw_info
+        meta = QLabel(clean_info)
         meta.setStyleSheet(f"font-size: 11px; color: {T.TEXT_DIM}; border: none;")
         info.addWidget(meta)
         layout.addLayout(info, stretch=1)
