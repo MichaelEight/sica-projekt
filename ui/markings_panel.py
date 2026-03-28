@@ -111,13 +111,12 @@ class _MarkingCard(QFrame):
         self.marking = marking
         self._selected = False
 
-        self.setFixedHeight(self._desired_height(marking))
         self.setCursor(Qt.PointingHandCursor)
 
         # -- build layout --
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 7, 8, 7)
-        root.setSpacing(2)
+        root.setContentsMargins(12, 8, 10, 8)
+        root.setSpacing(3)
 
         # Row 1: dot + lead:time + delete
         row1 = QHBoxLayout()
@@ -131,7 +130,6 @@ class _MarkingCard(QFrame):
         t2 = getattr(marking, "t2", 0.0) or 0.0
         lead = getattr(marking, "lead", "") or ""
         self._meta_label = QLabel(f"{lead}: {t1:.2f} \u2014 {t2:.2f} s")
-        self._meta_label.setFixedHeight(16)
         row1.addWidget(self._meta_label, 1)
 
         self._del_btn = QPushButton("\u2715")
@@ -148,13 +146,12 @@ class _MarkingCard(QFrame):
 
         label_text = getattr(marking, "label", "") or marking.type
         self._label = QLabel(label_text)
-        self._label.setFixedHeight(18)
         row2.addWidget(self._label, 1)
 
         source = getattr(marking, "source", "") or ""
         if source:
             self._badge = QLabel(source)
-            self._badge.setFixedHeight(16)
+            self._badge.setFixedHeight(18)
             self._badge.setAlignment(Qt.AlignCenter)
             row2.addWidget(self._badge, 0)
         else:
@@ -173,29 +170,18 @@ class _MarkingCard(QFrame):
             row3.setSpacing(6)
             if category:
                 self._cat_badge = QLabel(category)
-                self._cat_badge.setFixedHeight(16)
+                self._cat_badge.setFixedHeight(18)
                 self._cat_badge.setAlignment(Qt.AlignCenter)
                 row3.addWidget(self._cat_badge, 0)
             if note:
                 self._note_label = QLabel(note)
                 self._note_label.setWordWrap(True)
-                self._note_label.setFixedHeight(14)
                 row3.addWidget(self._note_label, 1)
             else:
                 row3.addStretch()
             root.addLayout(row3)
 
         self.apply_theme()
-
-    # -- geometry helper --
-    @staticmethod
-    def _desired_height(marking) -> int:
-        base = 58
-        category = getattr(marking, "category", "") or ""
-        note = getattr(marking, "note", "") or ""
-        if marking.type == "annotation" and (category or note):
-            base += 20
-        return base
 
     # -- public --
 
@@ -383,8 +369,8 @@ class MarkingsPanel(QWidget):
 
         self._card_container = QWidget()
         self._card_layout = QVBoxLayout(self._card_container)
-        self._card_layout.setContentsMargins(0, 0, 0, 0)
-        self._card_layout.setSpacing(3)
+        self._card_layout.setContentsMargins(0, 4, 0, 4)
+        self._card_layout.setSpacing(4)
         self._card_layout.addStretch()
 
         self._scroll.setWidget(self._card_container)
@@ -421,7 +407,13 @@ class MarkingsPanel(QWidget):
 
     def apply_theme(self):
         """Reapply all styles for theme switch."""
-        self.setStyleSheet(f"background: {T.WHITE}; border: none;")
+        self.setStyleSheet(
+            f"MarkingsPanel {{"
+            f"  background: {T.WHITE};"
+            f"  border-left: 1px solid {T.BORDER};"
+            f"  border-top: none; border-right: none; border-bottom: none;"
+            f"}}"
+        )
 
         # title
         self._title.setStyleSheet(
@@ -439,12 +431,15 @@ class MarkingsPanel(QWidget):
             f"QLineEdit::placeholder {{ color: {T.TEXT_DIM}; }}"
         )
 
-        # scroll area
+        # scroll area — fill full width, no extra borders
         self._scroll.setStyleSheet(
             f"QScrollArea {{ border: none; background: {T.WHITE}; }}"
+            f"QScrollBar:vertical {{ width: 6px; background: transparent; }}"
+            f"QScrollBar::handle:vertical {{ background: {T.BORDER}; border-radius: 3px; min-height: 20px; }}"
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}"
         )
         self._card_container.setStyleSheet(
-            f"border: none; background: {T.WHITE};"
+            f"background: {T.WHITE}; border: none;"
         )
 
         # pills
