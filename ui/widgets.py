@@ -54,9 +54,24 @@ def make_action_btn(text, primary=False):
     btn.setCursor(Qt.PointingHandCursor)
     if primary:
         btn.setObjectName("primary")
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                padding: 8px; border-radius: 6px; border: none;
+                background: {T.ACCENT}; color: {T.ACCENT_TEXT};
+                font-size: 12px; font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {T.GREEN if T.is_dark_mode() else '#3a8eef'};
+            }}
+        """)
     else:
         btn.setStyleSheet(f"""
-            padding: 8px; border-radius: 6px; border: 1px solid {T.BORDER};
-            background: {T.WHITE}; color: {T.TEXT_SECONDARY}; font-size: 12px;
+            QPushButton {{
+                padding: 8px; border-radius: 6px; border: 1px solid {T.BORDER};
+                background: {T.WHITE}; color: {T.TEXT}; font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background: {T.BG_SECONDARY};
+            }}
         """)
     return btn
