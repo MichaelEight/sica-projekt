@@ -557,24 +557,30 @@ class ViewerPage(QWidget):
         content_widget.setLayout(self.content)
         outer.addWidget(content_widget, stretch=1)
 
-        # Navigation bar
-        self.navbar = QWidget()
-        self.navbar.setFixedHeight(48)
-        self.navbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
-        nav = QHBoxLayout(self.navbar)
-        nav.setContentsMargins(16, 0, 16, 0)
-        nav.setSpacing(8)
+        # Bottom bar container (navbar + selection indicator)
+        bottom_bar = QWidget()
+        bottom_bar.setStyleSheet(f"background: {T.WHITE}; border-top: 1px solid {T.BORDER};")
+        bottom_layout = QVBoxLayout(bottom_bar)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(0)
 
-        # Navigation buttons — using consistent triangles only
+        # Row 1: Navigation bar (always visible, fixed layout)
+        self.navbar = QWidget()
+        self.navbar.setFixedHeight(42)
+        nav = QHBoxLayout(self.navbar)
+        nav.setContentsMargins(12, 0, 12, 0)
+        nav.setSpacing(6)
+
+        # Navigation buttons
         back_buttons = [
-            ("\u23ee", self._nav_start),          # ⏮ skip to start
-            ("\u25c0\u25c0", lambda: self._nav_step(-1.0)),  # ◀◀ fast back
-            ("\u25c0", lambda: self._nav_step(-0.2)),        # ◀ step back
+            ("\u23ee", self._nav_start),
+            ("\u25c0\u25c0", lambda: self._nav_step(-1.0)),
+            ("\u25c0", lambda: self._nav_step(-0.2)),
         ]
         fwd_buttons = [
-            ("\u25b6", lambda: self._nav_step(0.2)),         # ▶ step fwd
-            ("\u25b6\u25b6", lambda: self._nav_step(1.0)),   # ▶▶ fast fwd
-            ("\u23ed", self._nav_end),             # ⏭ skip to end
+            ("\u25b6", lambda: self._nav_step(0.2)),
+            ("\u25b6\u25b6", lambda: self._nav_step(1.0)),
+            ("\u23ed", self._nav_end),
         ]
 
         self._nav_btns = []
@@ -595,8 +601,7 @@ class ViewerPage(QWidget):
         for label, handler in back_buttons:
             _make_nav(label, handler)
 
-        # Pause/resume button — accent-colored to distinguish from nav step buttons
-        self.pause_btn = QPushButton("\u275a\u275a")  # ❚❚ pause
+        self.pause_btn = QPushButton("\u275a\u275a")
         self.pause_btn.setCursor(Qt.PointingHandCursor)
         self._apply_pause_btn_style()
         self.pause_btn.clicked.connect(self._on_navbar_pause)
@@ -614,35 +619,33 @@ class ViewerPage(QWidget):
         nav.addWidget(self.scrubber, stretch=1)
 
         self.time_label = QLabel()
-        self.time_label.setStyleSheet(f"font-size:12px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
+        self.time_label.setFixedWidth(180)
+        self.time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.time_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
         nav.addWidget(self.time_label)
 
-        # Zoom controls
         nav.addWidget(make_separator())
 
-        self._zoom_out_btn = QPushButton("\u2212")  # −
+        # Zoom controls — fixed width group
+        self._zoom_out_btn = QPushButton("\u2212")
         self._zoom_out_btn.setObjectName("nav")
         self._zoom_out_btn.setCursor(Qt.PointingHandCursor)
-        self._zoom_out_btn.setToolTip("")
         self._zoom_out_btn.clicked.connect(self._zoom_out)
         nav.addWidget(self._zoom_out_btn)
 
         self._zoom_label = QLabel("3.0 s")
-        self._zoom_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_MUTED}; min-width:40px;")
+        self._zoom_label.setFixedWidth(42)
+        self._zoom_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_MUTED};")
         self._zoom_label.setAlignment(Qt.AlignCenter)
         nav.addWidget(self._zoom_label)
 
         self._zoom_in_btn = QPushButton("+")
         self._zoom_in_btn.setObjectName("nav")
         self._zoom_in_btn.setCursor(Qt.PointingHandCursor)
-        self._zoom_in_btn.setToolTip("")
         self._zoom_in_btn.clicked.connect(self._zoom_in)
         nav.addWidget(self._zoom_in_btn)
 
         self._zoom_reset_btn = QPushButton("Reset")
-        self._zoom_reset_btn.setObjectName("nav")
-        self._zoom_reset_btn.setCursor(Qt.PointingHandCursor)
-        self._zoom_reset_btn.setToolTip("")
         self._zoom_reset_btn.setStyleSheet(f"""
             QPushButton {{
                 font-size: 10px; padding: 0 8px; height: 28px;
@@ -651,17 +654,20 @@ class ViewerPage(QWidget):
             }}
             QPushButton:hover {{ background: {T.BG_SECONDARY}; color: {T.TEXT}; }}
         """)
+        self._zoom_reset_btn.setCursor(Qt.PointingHandCursor)
         self._zoom_reset_btn.clicked.connect(self._reset_zoom)
         nav.addWidget(self._zoom_reset_btn)
 
-        # Selection indicator (shows during active selection, in navbar)
+        bottom_layout.addWidget(self.navbar)
+
+        # Row 2: Selection indicator bar — always present, fixed height
         self._sel_indicator = QLabel()
         self._sel_indicator.setAlignment(Qt.AlignCenter)
-        self._sel_indicator.setFixedHeight(28)
-        self._sel_indicator.hide()
-        nav.addWidget(self._sel_indicator)
+        self._sel_indicator.setFixedHeight(24)
+        self._sel_indicator.setStyleSheet(f"background: {T.WHITE}; border: none; color: transparent;")
+        bottom_layout.addWidget(self._sel_indicator)
 
-        outer.addWidget(self.navbar)
+        outer.addWidget(bottom_bar)
         self._update_time_display()
 
     def apply_theme(self):
@@ -707,9 +713,8 @@ class ViewerPage(QWidget):
         self.monitor_sidebar.apply_theme()
         self.markings_panel.apply_theme()
 
-        self.navbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
         self.scrubber.setStyleSheet(self._scrubber_style())
-        self.time_label.setStyleSheet(f"font-size:12px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
+        self.time_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
 
         self.grid_12.apply_theme()
 
@@ -999,7 +1004,8 @@ class ViewerPage(QWidget):
         if hasattr(self.single_lead, 'selection_preview'):
             self.single_lead.selection_preview = None
         self.single_lead.update()
-        self._sel_indicator.hide()
+        self._sel_indicator.setText("")
+        self._sel_indicator.setStyleSheet(f"background: {T.WHITE}; border: none; color: transparent;")
 
     def _show_annotation_form(self, lead, t1, t2):
         """Create an annotation marking with default category."""
@@ -1087,27 +1093,29 @@ class ViewerPage(QWidget):
     _ZOOM_STEPS = [0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 15.0, 20.0, 30.0]
 
     def _zoom_in(self):
-        """Decrease the time window (show less time, more detail)."""
+        """Decrease the time window — snap to nearest smaller step."""
         current = self._window_1
-        new_window = self._ZOOM_STEPS[0]
+        # Find the largest step that's strictly less than current
+        target = self._ZOOM_STEPS[0]
         for step in self._ZOOM_STEPS:
             if step < current - 0.01:
-                new_window = step
+                target = step
             else:
                 break
-        self._window_1 = max(new_window, self._ZOOM_STEPS[0])
+        self._window_1 = max(target, self._ZOOM_STEPS[0])
         self._apply_zoom()
 
     def _zoom_out(self):
-        """Increase the time window (show more time, less detail)."""
+        """Increase the time window — snap to nearest larger step."""
         current = self._window_1
         max_window = min(self.duration, self._ZOOM_STEPS[-1])
+        # Find the smallest step that's strictly greater than current
+        target = max_window
         for step in self._ZOOM_STEPS:
             if step > current + 0.01:
-                self._window_1 = min(step, max_window)
+                target = min(step, max_window)
                 break
-        else:
-            self._window_1 = max_window
+        self._window_1 = target
         self._apply_zoom()
 
     def _reset_zoom(self):
@@ -1174,15 +1182,13 @@ class ViewerPage(QWidget):
             """)
 
         self._sel_indicator.setText(indicator)
-        self._sel_indicator.show()
 
     def _zoom_to_region(self, t1, t2):
         """Zoom the 1-lead view to a specific time region."""
         pad = (t2 - t1) * 0.1
         self.time_pos = max(0, t1 - pad)
         self._window_1 = (t2 - t1) + 2 * pad
-        self._restore_scrubber_range()
-        self._refresh_single_lead()
+        self._apply_zoom()
 
     def _export_region_png(self, t1, t2):
         """Export the current canvas view as a PNG file."""
