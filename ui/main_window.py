@@ -164,9 +164,8 @@ class MainWindow(QMainWindow):
         _sc(Qt.Key_1, _on_viewer(lambda: self.viewer_page.view_seg.set_active(0)))
         _sc(Qt.Key_2, _on_viewer(lambda: self.viewer_page.view_seg.set_active(1)))
         _sc(Qt.Key_3, _on_viewer(lambda: self.viewer_page.view_seg.set_active(2)))
-        _sc(Qt.Key_V, _on_viewer(lambda: self.viewer_page._on_tool_mode(0)))
-        _sc(Qt.Key_C, _on_viewer(lambda: self.viewer_page._on_tool_mode(1)))
-        _sc(Qt.Key_A, _on_viewer(lambda: self.viewer_page._on_tool_mode(2)))
+        _sc(QKeySequence("Ctrl+Z"), _on_viewer(lambda: self.viewer_page._undo()))
+        _sc(QKeySequence("Ctrl+Shift+Z"), _on_viewer(lambda: self.viewer_page._redo()))
         _sc(Qt.Key_Left, _on_viewer(lambda: self.viewer_page._nav_step(-0.2)))
         _sc(Qt.Key_Right, _on_viewer(lambda: self.viewer_page._nav_step(0.2)))
         _sc(Qt.Key_Home, _on_viewer(self.viewer_page._nav_start))
@@ -175,23 +174,16 @@ class MainWindow(QMainWindow):
                                      if self.viewer_page._view_mode == 2 else None))
         space_sc.setContext(Qt.WindowShortcut)
         _sc(QKeySequence("Ctrl+E"), _on_viewer(self._go_report))
-        _sc(QKeySequence("Ctrl+Return"), _on_viewer(self.viewer_page._on_analyze))
+        _sc(QKeySequence("Ctrl+Return"), _on_viewer(self.viewer_page._run_full_analysis))
         _sc(QKeySequence("Ctrl+F"), lambda: self.showNormal() if self.isFullScreen() else self.showFullScreen())
 
         def _on_escape():
             if self.stack.currentIndex() == 1:
-                if self.viewer_page._analysis_mode:
-                    self.viewer_page._toggle_analysis_mode()
-                elif self.viewer_page._tool_mode == 2 and (
-                    self.viewer_page._annot_click_t1 is not None
-                    or self.viewer_page.single_lead.annotation_preview is not None
-                ):
-                    # Cancel annotation selection without leaving annotation mode
-                    self.viewer_page._on_annot_cancel()
-                elif self.viewer_page._view_mode == 2:
+                if self.viewer_page._view_mode == 2:
                     self.viewer_page.view_seg.set_active(0)
-                elif self.viewer_page._tool_mode != 0:
-                    self.viewer_page._on_tool_mode(0)
+                else:
+                    # Clear any selection preview on the canvas
+                    self.viewer_page._clear_selection_preview()
             elif self.stack.currentIndex() == 2:
                 self._go_viewer()
         _sc(Qt.Key_Escape, _on_escape)
@@ -325,8 +317,12 @@ class MainWindow(QMainWindow):
         if hasattr(self.viewer_page, '_measurements') and self.viewer_page._measurements:
             self.report_page.set_measurements(self.viewer_page._measurements)
 
-        # Pass annotations
-        annotations = getattr(self.viewer_page, '_user_annotations', [])
+        # Pass annotations from marking store
+        annotations = [
+            {"t1": m.t1, "t2": m.t2, "lead": m.lead, "category": m.category,
+             "note": m.note, "source": m.source}
+            for m in self.viewer_page._marking_store.get_by_type(["annotation"])
+        ]
         self.report_page.set_annotations(annotations)
 
         self.stack.setCurrentIndex(2)

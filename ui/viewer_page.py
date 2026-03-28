@@ -19,8 +19,11 @@ from ui.theme import STANDARD_LEADS, TARGET_CLASSES
 from ui.widgets import make_logo, make_separator
 from ui.ekg_canvas import (EkgCellCanvas, TwelveLeadGrid, SingleLeadCanvas,
                             generate_demo_signal, synth_ekg, LEAD_SEEDS, LEAD_AMPS)
-from ui.panels import (InfoPanel, CaliperPanel, AnnotationPanel, ResultsPanel,
-                        MonitorSidebar)
+from ui.panels import InfoPanel, MonitorSidebar
+from marking_store import MarkingStore, Marking, MARKING_STYLES
+from ui.context_menu import SelectionContextMenu
+from ui.markings_panel import MarkingsPanel
+from PySide6.QtGui import QCursor
 from ecg_measurements import compute_measurements
 
 
@@ -343,14 +346,13 @@ class ViewerPage(QWidget):
         self._v_min = -1.5
         self._v_max = 1.5
         self._view_mode = 0       # 0=12lead, 1=1lead, 2=monitor
-        self._tool_mode = 0       # 0=select, 1=caliper, 2=annotation
-        self._show_results = False
+        self._marking_store = MarkingStore()
+        self._context_menu = None
+        self._pending_selection = None
         self._model = None
         self._model_device = None
         self._model_path = None
         self._last_results = None
-        self._analysis_mode = False
-        self._analysis_start = None
         self._autoscan_active = False
         self._autoscan_results = None
         self._autoscan_file_path = None
@@ -439,19 +441,6 @@ class ViewerPage(QWidget):
         self.view_seg.changed.connect(self._on_view_mode)
         tb2.addWidget(self.view_seg)
         tb2.addWidget(make_separator())
-
-        # Tool buttons (visible only in 1-lead mode)
-        self.tool_btns: list[ToolbarBtn] = []
-        for i, (label, active) in enumerate([("Wybierz", True), ("Suwmiarka", False), ("Adnotacja", False)]):
-            btn = ToolbarBtn(label, active)
-            btn.clicked.connect(lambda checked, idx=i: self._on_tool_mode(idx))
-            btn.setVisible(False)
-            self.tool_btns.append(btn)
-            tb2.addWidget(btn)
-
-        self._tool_sep = make_separator()
-        self._tool_sep.setVisible(False)
-        tb2.addWidget(self._tool_sep)
         tb2.addStretch()
 
         # Model selector
@@ -474,29 +463,19 @@ class ViewerPage(QWidget):
         self.model_combo.currentIndexChanged.connect(self._on_model_changed)
         tb2.addWidget(self.model_combo)
 
-        # Autoscan toggle
-        self.btn_autoscan = ToolbarBtn("Autoskan", False)
-        self.btn_autoscan.clicked.connect(self._toggle_autoscan)
-        tb2.addWidget(self.btn_autoscan)
-
-        # Analysis selection toggle
-        self.btn_mark_analysis = ToolbarBtn("Zaznacz do analizy", False)
-        self.btn_mark_analysis.clicked.connect(self._toggle_analysis_mode)
-        tb2.addWidget(self.btn_mark_analysis)
-
-        # Analyze
-        self.btn_analyze = QPushButton("Analizuj")
-        self.btn_analyze.setObjectName("primary")
-        self.btn_analyze.setCursor(Qt.PointingHandCursor)
+        # Full analysis button (replaces Autoskan + Zaznacz do analizy + Analizuj)
         from ui.theme import is_dark_mode as _idm
         _ah = '#00c864' if _idm() else '#3a8eef'
-        self.btn_analyze.setStyleSheet(f"""
+        self.btn_full_analysis = QPushButton("Pelna Analiza")
+        self.btn_full_analysis.setObjectName("primary")
+        self.btn_full_analysis.setCursor(Qt.PointingHandCursor)
+        self.btn_full_analysis.setStyleSheet(f"""
             QPushButton {{ background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;
                 padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px; }}
             QPushButton:hover {{ background:{_ah}; }}
         """)
-        self.btn_analyze.clicked.connect(self._on_analyze)
-        tb2.addWidget(self.btn_analyze)
+        self.btn_full_analysis.clicked.connect(self._run_full_analysis)
+        tb2.addWidget(self.btn_full_analysis)
 
         tb2.addWidget(make_separator())
 
@@ -514,7 +493,7 @@ class ViewerPage(QWidget):
         self.content.setSpacing(0)
 
         self.info_panel = InfoPanel()
-        self.info_panel.patient_changed.connect(self._save_apwr)
+        self.info_panel.patient_changed.connect(self._save_ann)
         self.content.addWidget(self.info_panel)
 
         self.monitor_sidebar = MonitorSidebar()
@@ -535,15 +514,19 @@ class ViewerPage(QWidget):
 
         self.grid_12 = TwelveLeadGrid()
         self.view_stack.addWidget(self.grid_12)
-        # Connect grid cell clicks for analysis mode
-        for cell in self.grid_12.cells.values():
-            cell.clicked.connect(self._on_canvas_click)
-        self.grid_12.rhythm.clicked.connect(self._on_canvas_click)
+        # Connect grid double-click for jump to 1-lead
+        if hasattr(self.grid_12, 'cell_double_clicked'):
+            self.grid_12.cell_double_clicked.connect(self._on_cell_double_click)
 
         self.single_lead = SingleLeadCanvas()
         self.single_lead.draw_border = True
-        self.single_lead.clicked.connect(self._on_canvas_click)
-        self.single_lead.annot_canceled.connect(self._on_annot_cancel)
+        # Connect selection_completed for the new marking workflow
+        if hasattr(self.single_lead, 'selection_completed'):
+            self.single_lead.selection_completed.connect(self._on_selection_completed)
+        if hasattr(self.single_lead, 'right_clicked'):
+            self.single_lead.right_clicked.connect(self._on_canvas_right_click)
+        if hasattr(self.single_lead, 'selection_live'):
+            self.single_lead.selection_live.connect(self._on_selection_live)
         self.view_stack.addWidget(self.single_lead)
 
         self.monitor_area = QWidget()
@@ -554,25 +537,16 @@ class ViewerPage(QWidget):
 
         self.content.addWidget(self.view_stack, stretch=1)
 
-        # Right panels
-        self.caliper_panel = CaliperPanel()
-        self.caliper_panel.hide()
-        self.caliper_panel.caliper_deleted.connect(self._on_caliper_deleted)
-        self.caliper_panel.clear_all.connect(self._on_clear_all_calipers)
-        self.content.addWidget(self.caliper_panel)
-
-        self.annot_panel = AnnotationPanel()
-        self.annot_panel.hide()
-        self.annot_panel.annotation_saved.connect(self._on_annotation_saved)
-        self.annot_panel.annotation_deleted.connect(self._on_annotation_deleted)
-        self.annot_panel.annotation_hovered.connect(self._on_annot_hovered)
-        self.annot_panel.annotation_unhovered.connect(self._on_annot_unhovered)
-        self.annot_panel.annotation_selected.connect(self._on_annot_selected)
-        self.content.addWidget(self.annot_panel)
-
-        self.results_panel = ResultsPanel()
-        self.results_panel.hide()
-        self.content.addWidget(self.results_panel)
+        # Markings panel (replaces caliper, annotation, results panels)
+        self.markings_panel = MarkingsPanel()
+        self.markings_panel.hide()
+        self.markings_panel.marking_hovered.connect(self._on_marking_hovered)
+        self.markings_panel.marking_unhovered.connect(self._on_marking_unhovered)
+        self.markings_panel.marking_selected.connect(self._on_marking_selected)
+        self.markings_panel.marking_deleted.connect(self._on_marking_deleted)
+        self.markings_panel.undo_requested.connect(self._undo)
+        self.markings_panel.redo_requested.connect(self._redo)
+        self.content.addWidget(self.markings_panel)
 
         content_widget = QWidget()
         content_widget.setLayout(self.content)
@@ -643,6 +617,43 @@ class ViewerPage(QWidget):
         self.time_label.setStyleSheet(f"font-size:12px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
         nav.addWidget(self.time_label)
 
+        # Zoom controls
+        nav.addWidget(make_separator())
+
+        self._zoom_out_btn = QPushButton("\u2212")  # −
+        self._zoom_out_btn.setObjectName("nav")
+        self._zoom_out_btn.setCursor(Qt.PointingHandCursor)
+        self._zoom_out_btn.setToolTip("Oddal (pokaż więcej)")
+        self._zoom_out_btn.clicked.connect(self._zoom_out)
+        nav.addWidget(self._zoom_out_btn)
+
+        self._zoom_label = QLabel("3.0 s")
+        self._zoom_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_MUTED}; min-width:40px;")
+        self._zoom_label.setAlignment(Qt.AlignCenter)
+        nav.addWidget(self._zoom_label)
+
+        self._zoom_in_btn = QPushButton("+")
+        self._zoom_in_btn.setObjectName("nav")
+        self._zoom_in_btn.setCursor(Qt.PointingHandCursor)
+        self._zoom_in_btn.setToolTip("Przybliż (pokaż mniej)")
+        self._zoom_in_btn.clicked.connect(self._zoom_in)
+        nav.addWidget(self._zoom_in_btn)
+
+        self._zoom_reset_btn = QPushButton("Reset")
+        self._zoom_reset_btn.setObjectName("nav")
+        self._zoom_reset_btn.setCursor(Qt.PointingHandCursor)
+        self._zoom_reset_btn.setToolTip("Resetuj powiększenie")
+        self._zoom_reset_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 10px; padding: 0 8px; height: 28px;
+                border: 1px solid {T.BORDER}; border-radius: 6px;
+                background: {T.WHITE}; color: {T.TEXT_MUTED};
+            }}
+            QPushButton:hover {{ background: {T.BG_SECONDARY}; color: {T.TEXT}; }}
+        """)
+        self._zoom_reset_btn.clicked.connect(self._reset_zoom)
+        nav.addWidget(self._zoom_reset_btn)
+
         self.speed_label = QLabel("25 mm/s")
         self.speed_label.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM};")
         nav.addWidget(self.speed_label)
@@ -670,6 +681,13 @@ class ViewerPage(QWidget):
         self.st_right.setStyleSheet(f"font-size:11px; color:{T.TEXT_MUTED}; font-family:Menlo;")
         sb.addWidget(self.st_right)
 
+        # Selection indicator (shows during active selection)
+        self._sel_indicator = QLabel()
+        self._sel_indicator.setAlignment(Qt.AlignCenter)
+        self._sel_indicator.setFixedHeight(22)
+        self._sel_indicator.hide()
+        sb.addWidget(self._sel_indicator)
+
         outer.addWidget(self.statusbar)
         self._update_time_display()
         self._update_statusbar()
@@ -684,17 +702,14 @@ class ViewerPage(QWidget):
             padding: 0px 8px; border-radius: 3px; font-weight: 600;
         """)
         self.view_seg._apply_styles()
-        for btn in self.tool_btns:
-            btn.set_active(btn._active)
 
         from ui.theme import is_dark_mode as _idm
         _ah = '#00c864' if _idm() else '#3a8eef'
-        self.btn_analyze.setStyleSheet(f"""
+        self.btn_full_analysis.setStyleSheet(f"""
             QPushButton {{ background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;
                 padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px; }}
             QPushButton:hover {{ background:{_ah}; }}
         """)
-        self.btn_mark_analysis.set_active(self._analysis_mode)
         self.model_combo.setStyleSheet(f"""
             QComboBox {{
                 color: {T.BTN_TEXT}; background: {T.BTN_DARK};
@@ -718,9 +733,7 @@ class ViewerPage(QWidget):
 
         self.info_panel.apply_theme()
         self.monitor_sidebar.apply_theme()
-        self.caliper_panel.apply_theme()
-        self.annot_panel.apply_theme()
-        self.results_panel.apply_theme()
+        self.markings_panel.apply_theme()
 
         self.navbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
         self.scrubber.setStyleSheet(self._scrubber_style())
@@ -751,10 +764,7 @@ class ViewerPage(QWidget):
         """Load new signal data into the viewer."""
         self._ground_truth = ground_truth
         self._base_path = base_path
-        self._user_calipers = []
-        self._user_annotations = []
-        self._caliper_click_t1 = None
-        self._annot_click_t1 = None
+        self._marking_store.clear()
         self.grid_12.clear()
         self.single_lead.clear()
         for _, strip in self._monitor_strips:
@@ -766,7 +776,6 @@ class ViewerPage(QWidget):
         self.filename = filename
         self.duration = signal.shape[0] / fs
         self.time_pos = 0.0
-        self._show_results = False
         self._monitor_t = 0.0
         self._monitor_playing = False
         self._monitor_timer.stop()
@@ -787,47 +796,28 @@ class ViewerPage(QWidget):
         else:
             self._window_12 = 2.5
             self._window_1 = 3.0
+        self._update_zoom_label()
 
         self.file_label.setText(
             f"{filename} | {self.duration:.1f} s"
         )
         self.analysis_badge.hide()
-        self.results_panel.hide()
-
-        # Reset analysis mode
-        self._analysis_mode = False
-        self._analysis_start = None
-        self.btn_mark_analysis.set_active(False)
-        self._clear_analysis_overlay()
 
         # Reset autoscan
         self._autoscan_active = False
         self._autoscan_results = None
         self._autoscan_file_path = None
-        self.btn_autoscan.set_active(False)
         self.grid_12.clear_autoscan_regions()
         self.single_lead.autoscan_regions = []
 
-        # Enable/disable analysis based on duration
+        # Enable/disable full analysis based on duration
         min_samples = int(10.0 * self.fs)
         if self.signal.shape[0] < min_samples:
-            # Too short — block analysis entirely
-            self.btn_analyze.setEnabled(False)
-            self.btn_analyze.setToolTip("Analiza wymaga co najmniej 10s nagrania")
-            self.btn_mark_analysis.hide()
-            self.btn_autoscan.hide()
-        elif self.signal.shape[0] == min_samples:
-            # Exactly 10s — analyze whole file, no marking needed
-            self.btn_analyze.setEnabled(True)
-            self.btn_analyze.setToolTip("")
-            self.btn_mark_analysis.hide()
-            self.btn_autoscan.hide()
+            self.btn_full_analysis.setEnabled(False)
+            self.btn_full_analysis.setToolTip("Analiza wymaga co najmniej 10s nagrania")
         else:
-            # Longer than 10s — require explicit window selection
-            self.btn_analyze.setEnabled(True)
-            self.btn_analyze.setToolTip("")
-            self.btn_autoscan.show()
-            self.btn_mark_analysis.show()
+            self.btn_full_analysis.setEnabled(True)
+            self.btn_full_analysis.setToolTip("")
 
         max_window = max(self._window_12, self._window_1)
         self._scrubber_max = max(0.0, self.duration - max_window)
@@ -862,8 +852,8 @@ class ViewerPage(QWidget):
         except Exception:
             pass
 
-        # Load APWR file (overrides patient info, loads calipers/annotations)
-        self._load_apwr()
+        # Load .ann file (overrides patient info, loads markings)
+        self._load_ann()
 
         self._refresh_views()
         self._update_time_display()
@@ -892,20 +882,12 @@ class ViewerPage(QWidget):
             self.single_lead.v_max = self._v_max
             self.single_lead.set_data(lead, self.signal[:, idx], self.fs, t_start, t_end)
 
-            # Real calipers for this lead
-            self.single_lead.calipers = [
-                (c["t1"], c["t2"], c["color"], c["label"])
-                for c in self._user_calipers if c.get("lead") == lead
+            # Set markings for this lead from the store
+            lead_markings = [m for m in self._marking_store.get_all() if m.lead == lead]
+            self.single_lead.markings = [
+                {"id": m.id, "t1": m.t1, "t2": m.t2, "type": m.type, "label": m.label}
+                for m in lead_markings
             ]
-
-            # Real annotations for this lead
-            self.single_lead.annotations = [
-                (a["t1"], a["t2"])
-                for a in self._user_annotations if a.get("lead") == lead
-            ]
-
-            # Preserve annotation tool state across refresh
-            self.single_lead.annot_mode = (self._tool_mode == 2)
 
             self.single_lead.update()
 
@@ -934,65 +916,33 @@ class ViewerPage(QWidget):
         # Show pause button only in monitor mode
         self.pause_btn.setVisible(idx == 2)
 
-        self.info_panel.setVisible(idx == 0 or (idx == 0 and self._show_results))
+        self.info_panel.setVisible(idx == 0)
         self.lead_sidebar.setVisible(idx == 1)
         self.monitor_sidebar.setVisible(idx == 2)
+        self.markings_panel.setVisible(idx == 1)
 
         if idx == 0:
-            self.caliper_panel.hide()
-            self.annot_panel.hide()
             self.info_panel.show()
-            if self._show_results:
-                self.results_panel.show()
             self.navbar.show()
             self._restore_scrubber_range()
         elif idx == 1:
             self.info_panel.hide()
-            self._on_tool_mode(self._tool_mode)
+            self.markings_panel.show()
+            self._refresh_markings()
             self.navbar.show()
             self._restore_scrubber_range()
         elif idx == 2:
             self.info_panel.hide()
-            self.caliper_panel.hide()
-            self.annot_panel.hide()
-            self.results_panel.hide()
+            self.markings_panel.hide()
             self.navbar.show()
             self._start_monitor()
 
         self.view_stack.setCurrentIndex(idx)
-        for btn in self.tool_btns:
-            btn.setVisible(idx == 1)
-        # Hide tool separator in non-1-lead modes
-        self._tool_sep.setVisible(idx == 1)
-        self._update_statusbar()
-
-    def _on_tool_mode(self, idx: int):
-        self._tool_mode = idx
-        for i, btn in enumerate(self.tool_btns):
-            btn.set_active(i == idx)
-        self.caliper_panel.setVisible(idx == 1 and self._view_mode == 1)
-        self.annot_panel.setVisible(idx == 2 and self._view_mode == 1)
-
-        # Set annotation mode flag and cursor on canvas
-        self.single_lead.annot_mode = (idx == 2)
-        if idx == 2:
-            self.single_lead.setCursor(Qt.CrossCursor)
-        elif idx == 1:
-            self.single_lead.setCursor(Qt.CrossCursor)
-        else:
-            self.single_lead.setCursor(Qt.ArrowCursor)
-
-        # Clear pending state when switching tools
-        if idx != 2:
-            self._annot_click_t1 = None
-            self.single_lead.pending_marker = None
-            self.single_lead.annotation_preview = None
-
-        self._refresh_single_lead()
         self._update_statusbar()
 
     def _on_lead_selected(self, lead: str):
         self._refresh_single_lead()
+        self._refresh_markings()
 
     def _populate_model_combo(self):
         models = discover_models()
@@ -1024,58 +974,230 @@ class ViewerPage(QWidget):
         self._model_path = path
         return model, device
 
-    def _toggle_analysis_mode(self):
-        """Toggle the analysis window selection mode."""
-        self._analysis_mode = not self._analysis_mode
-        self.btn_mark_analysis.set_active(self._analysis_mode)
-        if self._analysis_mode:
-            self._analysis_start = None
-            self._apply_analysis_overlay()
-            self._update_statusbar()
+    # ── Selection / Marking flow ──────────────────────────────
+
+    def _on_selection_completed(self, t1, t2):
+        """User finished selecting a region on the canvas -- show context menu."""
+        lead = self.lead_sidebar.active_lead()
+        self._pending_selection = (lead, t1, t2)
+
+        # Show context menu at cursor position
+        selection_seconds = t2 - t1
+        self._context_menu = SelectionContextMenu(self)
+        self._context_menu.action_selected.connect(self._on_context_action)
+        global_pos = QCursor.pos()
+        self._context_menu.show_at(global_pos, selection_seconds)
+
+    def _on_context_action(self, action: str):
+        """Handle an action chosen from the selection context menu."""
+        if self._pending_selection is None:
+            return
+        lead, t1, t2 = self._pending_selection
+        dt_ms = (t2 - t1) * 1000
+
+        if action == "annotate":
+            self._show_annotation_form(lead, t1, t2)
+        elif action.startswith("mark_"):
+            mark_type = action.replace("mark_", "")
+            if mark_type == "custom":
+                from PySide6.QtWidgets import QInputDialog
+                label, ok = QInputDialog.getText(self, "Oznaczenie", "Etykieta:")
+                if not ok or not label:
+                    self._clear_selection_preview()
+                    return
+                marking = Marking(type="custom", lead=lead, t1=t1, t2=t2, label=label, value_ms=dt_ms)
+            else:
+                marking = Marking(type=mark_type, lead=lead, t1=t1, t2=t2, value_ms=dt_ms)
+            self._marking_store.add(marking)
+        elif action == "scan":
+            self._run_window_scan(lead, t1, t2)
+        elif action == "zoom":
+            self._zoom_to_region(t1, t2)
+        elif action == "export_png":
+            self._export_region_png(t1, t2)
+
+        self._clear_selection_preview()
+        self._refresh_markings()
+        self._save_ann()
+
+    def _clear_selection_preview(self):
+        """Clear selection preview on canvas."""
+        if hasattr(self.single_lead, 'pending_marker'):
+            self.single_lead.pending_marker = None
+        if hasattr(self.single_lead, 'selection_preview'):
+            self.single_lead.selection_preview = None
+        self.single_lead.update()
+        self._sel_indicator.hide()
+
+    def _show_annotation_form(self, lead, t1, t2):
+        """Create an annotation marking with default category."""
+        marking = Marking(type="annotation", lead=lead, t1=t1, t2=t2,
+                          category="Patologia", source="user")
+        self._marking_store.add(marking)
+        self._refresh_markings()
+        self.markings_panel.set_selected(marking.id)
+
+    def _refresh_markings(self):
+        """Sync marking store to canvas and panel."""
+        lead = self.lead_sidebar.active_lead()
+        # Canvas: set markings for current lead
+        lead_markings = [m for m in self._marking_store.get_all() if m.lead == lead]
+        self.single_lead.markings = [
+            {"id": m.id, "t1": m.t1, "t2": m.t2, "type": m.type, "label": m.label}
+            for m in lead_markings
+        ]
+        self.single_lead.update()
+
+        # Panel: show all markings
+        self.markings_panel.set_markings(self._marking_store.get_all())
+        self.markings_panel.set_undo_enabled(self._marking_store.can_undo)
+        self.markings_panel.set_redo_enabled(self._marking_store.can_redo)
+
+    def _on_marking_hovered(self, marking_id: str):
+        if hasattr(self.single_lead, 'hovered_marking'):
+            self.single_lead.hovered_marking = marking_id
+            self.single_lead.update()
+
+    def _on_marking_unhovered(self):
+        if hasattr(self.single_lead, 'hovered_marking'):
+            self.single_lead.hovered_marking = None
+            self.single_lead.update()
+
+    def _on_marking_selected(self, marking_id: str):
+        if hasattr(self.single_lead, 'selected_marking'):
+            self.single_lead.selected_marking = marking_id
+            self.single_lead.update()
+
+    def _on_marking_deleted(self, marking_id: str):
+        self._marking_store.delete(marking_id)
+        self._refresh_markings()
+        self._save_ann()
+
+    def _undo(self):
+        if self._marking_store.undo():
+            self._refresh_markings()
+            self._save_ann()
+
+    def _redo(self):
+        if self._marking_store.redo():
+            self._refresh_markings()
+            self._save_ann()
+
+    def _on_cell_double_click(self, lead: str, time: float):
+        """Double-click on 12-lead grid cell -- jump to 1-lead view."""
+        self.view_seg.set_active(1)
+        self.lead_sidebar._select(lead)
+        self.time_pos = max(0, time - self._window_1 / 2)
+        self._restore_scrubber_range()
+
+    def _on_canvas_right_click(self, gx, gy):
+        """Show a right-click context menu on the canvas (e.g. reset zoom)."""
+        from PySide6.QtWidgets import QMenu
+        from PySide6.QtCore import QPoint
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background: {T.WHITE}; color: {T.TEXT};
+                border: 1px solid {T.BORDER}; border-radius: 6px;
+                padding: 4px; font-size: 13px;
+            }}
+            QMenu::item {{
+                padding: 6px 16px; border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background: {T.BG_SECONDARY};
+            }}
+        """)
+        reset_action = menu.addAction("Resetuj powiększenie")
+        reset_action.triggered.connect(self._reset_zoom)
+        menu.exec(QPoint(int(gx), int(gy)))
+
+    _ZOOM_STEPS = [0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 15.0, 20.0, 30.0]
+
+    def _zoom_in(self):
+        """Decrease the time window (show less time, more detail)."""
+        current = self._window_1
+        for step in self._ZOOM_STEPS:
+            if step < current - 0.01:
+                new_window = step
+            else:
+                break
         else:
-            self._analysis_start = None
-            self._clear_analysis_overlay()
-            self._update_statusbar()
+            new_window = self._ZOOM_STEPS[0]
+        self._window_1 = max(new_window, self._ZOOM_STEPS[0])
+        self._update_zoom_label()
+        self._restore_scrubber_range()
+        self._refresh_single_lead()
 
-    def _on_canvas_click(self, t: float, v: float):
-        """Handle click on EKG canvas."""
-        if self.signal is None:
-            return
+    def _zoom_out(self):
+        """Increase the time window (show more time, less detail)."""
+        current = self._window_1
+        max_window = min(self.duration, self._ZOOM_STEPS[-1])
+        for step in self._ZOOM_STEPS:
+            if step > current + 0.01:
+                self._window_1 = min(step, max_window)
+                break
+        else:
+            self._window_1 = max_window
+        self._update_zoom_label()
+        self._restore_scrubber_range()
+        self._refresh_single_lead()
 
-        # Analysis mode takes priority
-        if self._analysis_mode:
-            max_start = self.duration - 10.0
-            if max_start <= 0:
-                return
-            t = max(0.0, min(t, max_start))
-            self._analysis_start = t
-            self._apply_analysis_overlay()
-            self._update_statusbar()
-            return
+    def _reset_zoom(self):
+        """Reset 1-lead view to default 3-second window."""
+        self._window_1 = min(3.0, self.duration)
+        self._update_zoom_label()
+        self._restore_scrubber_range()
+        self._refresh_single_lead()
 
-        # Caliper/annotation mode (single-lead view only)
-        if self._view_mode == 1 and self._tool_mode in (1, 2):
-            self._on_caliper_or_annot_click(t, v)
+    def _update_zoom_label(self):
+        if hasattr(self, '_zoom_label'):
+            self._zoom_label.setText(f"{self._window_1:.1f} s")
 
-    def _apply_analysis_overlay(self):
-        """Set the analysis overlay on all visible canvases."""
-        if self.signal is None:
-            return
-        clickable_end = max(0.0, self.duration - 10.0)
-        region = None
-        if self._analysis_start is not None:
-            region = (self._analysis_start, self._analysis_start + 10.0)
-        self.grid_12.set_analysis_overlay(region, clickable_end)
-        self.single_lead.analysis_region = region
-        self.single_lead.analysis_clickable_end = clickable_end
-        self.single_lead.update()
+    def _on_selection_live(self, t1, t2):
+        """Update the selection indicator in the status bar during live selection."""
+        dt = t2 - t1
+        dt_ms = dt * 1000
 
-    def _clear_analysis_overlay(self):
-        """Remove analysis overlay from all canvases."""
-        self.grid_12.clear_analysis_overlay()
-        self.single_lead.analysis_region = None
-        self.single_lead.analysis_clickable_end = None
-        self.single_lead.update()
+        # Build indicator text
+        time_text = f"{dt:.2f} s ({dt_ms:.0f} ms)"
+
+        if dt >= 10.0:
+            # AI scan available
+            indicator = f"<b>{time_text}</b>  \u2714 Skan AI dostępny"
+            self._sel_indicator.setStyleSheet(f"""
+                font-size: 11px; color: {T.GREEN}; font-family: Menlo;
+                background: {T.GREEN_BG}; border: 1px solid {T.GREEN_BORDER};
+                border-radius: 4px; padding: 2px 10px;
+            """)
+        else:
+            # AI scan NOT available — show how much more is needed
+            remaining = 10.0 - dt
+            indicator = f"<b>{time_text}</b>  \u2718 Brakuje {remaining:.1f} s do skanu AI"
+            self._sel_indicator.setStyleSheet(f"""
+                font-size: 11px; color: {T.AMBER_TEXT}; font-family: Menlo;
+                background: {T.AMBER_BG}; border: 1px solid {T.AMBER_BORDER};
+                border-radius: 4px; padding: 2px 10px;
+            """)
+
+        self._sel_indicator.setText(indicator)
+        self._sel_indicator.show()
+
+    def _zoom_to_region(self, t1, t2):
+        """Zoom the 1-lead view to a specific time region."""
+        pad = (t2 - t1) * 0.1
+        self.time_pos = max(0, t1 - pad)
+        self._window_1 = (t2 - t1) + 2 * pad
+        self._restore_scrubber_range()
+        self._refresh_single_lead()
+
+    def _export_region_png(self, t1, t2):
+        """Export the current canvas view as a PNG file."""
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(self, "Eksportuj fragment", "fragment.png", "PNG (*.png)")
+        if path:
+            pixmap = self.single_lead.grab()
+            pixmap.save(path, "PNG")
 
     # ── Autoscan ────────────────────────────────────────────────
 
@@ -1101,228 +1223,42 @@ class ViewerPage(QWidget):
         with open(path, "w") as f:
             json.dump({"windows": results}, f)
 
-    # ── APWR save/load ──────────────────────────────────────
+    # ── .ann file I/O ──────────────────────────────────────
 
-    def _apwr_path(self) -> str:
+    def _ann_path(self) -> str:
         if self._base_path:
-            return self._base_path + ".apwr"
+            return self._base_path + ".ann"
         return ""
 
-    def _load_apwr(self):
-        """Load calipers, annotations, patient overrides from .apwr file."""
-        path = self._apwr_path()
+    def _load_ann(self):
+        """Load markings from .ann file."""
+        path = self._ann_path()
         if not path or not os.path.exists(path):
-            self.caliper_panel.set_calipers([])
-            self.annot_panel.set_annotations([])
             return
-        try:
-            with open(path) as f:
-                data = json.load(f)
-        except Exception:
-            return
+        self._marking_store.load_ann(path)
+        self._refresh_markings()
 
-        # Patient overrides
-        if "patient" in data:
-            p = data["patient"]
-            self.info_panel.set_patient(
-                patient_id=p.get("id", ""),
-                age=p.get("age", ""),
-                sex=p.get("sex", ""),
-                date=p.get("date", ""),
-                name=p.get("name", ""),
-            )
-
-        # Calipers
-        self._user_calipers = data.get("calipers", [])
-        self.caliper_panel.set_calipers(self._user_calipers)
-
-        # Annotations
-        self._user_annotations = data.get("annotations", [])
-        self.annot_panel.set_annotations(self._user_annotations)
-
-    def _save_apwr(self):
-        """Save current state to .apwr file."""
-        path = self._apwr_path()
+    def _save_ann(self):
+        """Save current markings to .ann file."""
+        path = self._ann_path()
         if not path:
             return
-        pf = self.info_panel._patient_fields
-        data = {
-            "version": 1,
-            "patient": {
-                "id": pf["id"].text() if "id" in pf else "",
-                "age": pf["age"].text() if "age" in pf else "",
-                "sex": pf["sex"].text() if "sex" in pf else "",
-                "date": pf["date"].text() if "date" in pf else "",
-                "name": pf["name"].text() if "name" in pf else "",
-            },
-            "calipers": self._user_calipers,
-            "annotations": self._user_annotations,
-        }
-        try:
-            with open(path, "w") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
+        self._marking_store.save_ann(path)
 
-    # ── Caliper/Annotation click handling ─────────────────
-
-    def _on_caliper_or_annot_click(self, t: float, v: float):
-        """Handle clicks in caliper or annotation mode (single-lead view)."""
-        if self._view_mode != 1 or self.signal is None:
-            return
-
-        lead = self.lead_sidebar.active_lead()
-
-        if self._tool_mode == 1:  # Caliper mode
-            if self._caliper_click_t1 is None:
-                self._caliper_click_t1 = t
-                self._update_statusbar()
-            else:
-                t1, t2 = min(self._caliper_click_t1, t), max(self._caliper_click_t1, t)
-                dt_ms = abs(t2 - t1) * 1000
-                colors = [T.ACCENT, T.PURPLE, T.GREEN]
-                color = colors[len(self._user_calipers) % len(colors)]
-                caliper = {
-                    "t1": round(t1, 3), "t2": round(t2, 3),
-                    "lead": lead, "label": f"{dt_ms:.0f} ms", "color": color,
-                }
-                self._user_calipers.append(caliper)
-                self._caliper_click_t1 = None
-                self.caliper_panel.set_calipers(self._user_calipers)
-                self._refresh_single_lead()
-                self._save_apwr()
-
-        elif self._tool_mode == 2:  # Annotation mode
-            if self._annot_click_t1 is None:
-                # Stage 0→1: first point selected
-                self._annot_click_t1 = t
-                self.single_lead.annotation_preview = None
-                self.single_lead.pending_marker = t
-                self.single_lead.update()
-                self._update_statusbar()
-            else:
-                # Stage 1→2: second point selected, region complete
-                t1, t2 = min(self._annot_click_t1, t), max(self._annot_click_t1, t)
-                self._annot_click_t1 = None
-                self.single_lead.pending_marker = None
-                self.single_lead.annotation_preview = (t1, t2)
-                self.single_lead.update()
-                self.annot_panel.set_form_region(lead, t1, t2)
-                self._update_statusbar()
-
-    def _on_annot_cancel(self):
-        """Cancel annotation selection (right-click or Escape)."""
-        self._annot_click_t1 = None
-        self.single_lead.pending_marker = None
-        self.single_lead.annotation_preview = None
-        self.single_lead.selected_annotation = None
-        self.annot_panel.set_form_region("—", 0, 0)
-        self.single_lead.update()
-        self._update_statusbar()
-
-    def _on_annot_hovered(self, index):
-        """Highlight annotation on canvas when hovering its card in the list."""
-        lead = self.lead_sidebar.active_lead()
-        # Map global annotation index to lead-local index
-        lead_idx = self._annot_global_to_lead_idx(index, lead)
-        self.single_lead.hovered_annotation = lead_idx
-        self.single_lead.update()
-
-    def _on_annot_unhovered(self):
-        self.single_lead.hovered_annotation = None
-        self.single_lead.update()
-
-    def _on_annot_selected(self, index):
-        """Select annotation — highlight on canvas and populate form for editing."""
-        lead = self.lead_sidebar.active_lead()
-        lead_idx = self._annot_global_to_lead_idx(index, lead)
-        self.single_lead.selected_annotation = lead_idx
-        self.single_lead.update()
-
-        # Populate the form with the selected annotation's data
-        ann = self._user_annotations[index]
-        self.annot_panel.set_form_region(ann["lead"], ann["t1"], ann["t2"])
-        self.annot_panel.category.setCurrentText(ann.get("category", "Patologia"))
-        self.annot_panel.note_edit.setPlainText(ann.get("note", ""))
-        # Clear pending state
-        self._annot_click_t1 = None
-        self.single_lead.pending_marker = None
-        self.single_lead.annotation_preview = None
-
-    def _annot_global_to_lead_idx(self, global_idx, lead):
-        """Convert global annotation index to lead-local annotation index for canvas."""
-        if global_idx < 0 or global_idx >= len(self._user_annotations):
-            return None
-        ann = self._user_annotations[global_idx]
-        if ann.get("lead") != lead:
-            return None
-        # Count how many annotations for this lead come before this one
-        local = 0
-        for i, a in enumerate(self._user_annotations):
-            if a.get("lead") == lead:
-                if i == global_idx:
-                    return local
-                local += 1
-        return None
-
-    def _on_annotation_saved(self, category: str, note: str):
-        """Handle annotation save from AnnotationPanel form."""
-        lead = self.lead_sidebar.active_lead()
-        # Use preview region (completed but unsaved)
-        preview = self.single_lead.annotation_preview
-        if preview:
-            t1, t2 = preview
-            annotation = {
-                "t1": round(t1, 3), "t2": round(t2, 3),
-                "lead": lead, "category": category, "note": note,
-                "source": "user",
-            }
-            self._user_annotations.append(annotation)
-            self.single_lead.annotation_preview = None
-            self.annot_panel.set_annotations(self._user_annotations)
-            # Reset form
-            self.annot_panel.note_edit.clear()
-            self.annot_panel.set_form_region("—", 0, 0)
-            self._refresh_single_lead()
-            self._save_apwr()
-
-    def _on_caliper_deleted(self, idx: int):
-        if 0 <= idx < len(self._user_calipers):
-            self._user_calipers.pop(idx)
-            self.caliper_panel.set_calipers(self._user_calipers)
-            self._refresh_single_lead()
-            self._save_apwr()
-
-    def _on_annotation_deleted(self, idx: int):
-        if 0 <= idx < len(self._user_annotations):
-            self._user_annotations.pop(idx)
-            self.annot_panel.set_annotations(self._user_annotations)
-            self._refresh_single_lead()
-            self._save_apwr()
-
-    def _on_clear_all_calipers(self):
-        self._user_calipers.clear()
-        self.caliper_panel.set_calipers([])
-        self._refresh_single_lead()
-        self._save_apwr()
-
-    def _toggle_autoscan(self):
+    def _run_full_analysis(self):
+        """Run full analysis: sliding window scan across the entire signal."""
         if self.signal is None:
             return
-        self._autoscan_active = not self._autoscan_active
-        self.btn_autoscan.set_active(self._autoscan_active)
 
-        if self._autoscan_active:
-            # Try cache first
-            self._autoscan_file_path = self.filename
-            cached = self._load_autoscan_cache() if self._model_path else None
-            if cached:
-                self._autoscan_results = cached
-                self._apply_autoscan_overlay()
-            else:
-                self._run_autoscan()
+        # Try cache first
+        self._autoscan_file_path = self.filename
+        cached = self._load_autoscan_cache() if self._model_path else None
+        if cached:
+            self._autoscan_results = cached
+            self._apply_autoscan_results()
+            self._apply_autoscan_overlay()
         else:
-            self._clear_autoscan_overlay()
+            self._run_autoscan()
 
     def _run_autoscan(self):
         """Slide a 10s window across the signal and classify each segment."""
@@ -1332,7 +1268,6 @@ class ViewerPage(QWidget):
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Błąd", f"Nie udało się załadować modelu:\n{e}")
             self._autoscan_active = False
-            self.btn_autoscan.set_active(False)
             return
 
         from model.inference_api import predict_with_model
@@ -1422,8 +1357,51 @@ class ViewerPage(QWidget):
         if hasattr(self, '_autoscan_overlay') and self._autoscan_overlay:
             self._autoscan_overlay.close()
             self._autoscan_overlay = None
+        self._apply_autoscan_results()
         self._apply_autoscan_overlay()
+
+        # Build _last_results for the report page from the first window
+        if self._autoscan_results:
+            first = self._autoscan_results[0]
+            probs = first.get("probs", {})
+            model_name = os.path.basename(self._model_path) if self._model_path else ""
+            self._last_results = {
+                "probabilities": probs,
+                "model_name": model_name,
+                "elapsed": 0.0,
+            }
+            self.analysis_badge.show()
+
         self._update_statusbar()
+
+    def _apply_autoscan_results(self):
+        """Create Marking objects from autoscan results and add to the store."""
+        if not self._autoscan_results:
+            return
+        # Remove old scan markings before adding new ones
+        old_scans = [m for m in self._marking_store.get_all() if m.type == "scan"]
+        for m in old_scans:
+            self._marking_store.delete(m.id)
+        # Clear undo/redo for scan bulk operations
+        self._marking_store._undo_stack.clear()
+        self._marking_store._redo_stack.clear()
+
+        for r in self._autoscan_results:
+            marking = Marking(
+                type="scan",
+                lead="all",
+                t1=r["t_start"],
+                t2=r["t_end"],
+                probs=r.get("probs"),
+                color_code=r.get("color", 0),
+                source="ai",
+            )
+            self._marking_store.add(marking)
+        # Clear undo/redo again (bulk add should not be undoable)
+        self._marking_store._undo_stack.clear()
+        self._marking_store._redo_stack.clear()
+        self._refresh_markings()
+        self._save_ann()
 
     def _apply_autoscan_overlay(self):
         if not self._autoscan_results:
@@ -1521,6 +1499,55 @@ class ViewerPage(QWidget):
         self.single_lead.gt_annotations = []
         self.single_lead.update()
 
+    def _run_window_scan(self, lead: str, t1: float, t2: float):
+        """Run AI scan on the selected region and store result as a scan marking."""
+        if self.signal is None:
+            return
+        window_samples = int((t2 - t1) * self.fs)
+        if window_samples < int(10.0 * self.fs):
+            return  # Need at least 10s
+
+        try:
+            model, device = self._ensure_model_loaded()
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Blad", f"Nie udalo sie zaladowac modelu:\n{e}")
+            return
+
+        from model.inference_api import predict_with_model
+
+        start_sample = int(t1 * self.fs)
+        end_sample = int(t2 * self.fs)
+        window_signal = self.signal[start_sample:end_sample]
+
+        try:
+            res = predict_with_model(
+                model=model, data=window_signal, threshold=0.5,
+                class_names=TARGET_CLASSES, device=device,
+            )
+            probs = res["probabilities"][0]
+            prob_dict = {cls: float(probs[j]) for j, cls in enumerate(TARGET_CLASSES)}
+        except Exception:
+            prob_dict = {cls: 0.0 for cls in TARGET_CLASSES}
+
+        top_cls = max(prob_dict, key=prob_dict.get)
+        top_prob = prob_dict[top_cls]
+        color_code = 0
+        if top_cls == "class_healthy" and top_prob >= 0.5:
+            color_code = 0
+        elif top_cls != "class_healthy" and top_prob >= 0.5:
+            color_code = 2
+        else:
+            color_code = 1
+
+        marking = Marking(
+            type="scan", lead=lead, t1=t1, t2=t2,
+            probs=prob_dict, color_code=color_code, source="ai",
+        )
+        self._marking_store.add(marking)
+        self._refresh_markings()
+        self._save_ann()
+
     def _resolve_ground_truth(self, t_start: float, t_end: float) -> dict | None:
         """Pick the correct ground truth for a given analysis window.
 
@@ -1554,10 +1581,7 @@ class ViewerPage(QWidget):
         target_samples = int(10.0 * self.fs)
         total_samples = self.signal.shape[0]
 
-        if self._analysis_start is not None:
-            start_sample = int(self._analysis_start * self.fs)
-        else:
-            start_sample = int(self.time_pos * self.fs)
+        start_sample = int(self.time_pos * self.fs)
 
         start_sample = max(0, min(start_sample, total_samples - target_samples))
         end_sample = min(start_sample + target_samples, total_samples)
@@ -1568,70 +1592,11 @@ class ViewerPage(QWidget):
         return window, t_start, t_end
 
     def _on_analyze(self):
+        """Run single-window analysis (used by Ctrl+Return shortcut)."""
         if self.signal is None:
             return
-        # For signals > 10s, require explicit window selection
-        if self.duration > 10.0 and self._analysis_start is None:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Zaznacz okno",
-                                   "Użyj 'Zaznacz do analizy' i kliknij na sygnał,\n"
-                                   "aby wybrać 10-sekundowe okno.")
-            return
-
-        # Show loading state immediately
-        self.results_panel.set_loading()
-        self.results_panel.show()
-        self.analysis_badge.hide()
-        QApplication.processEvents()
-
-        try:
-            model, device = self._ensure_model_loaded()
-        except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Błąd", f"Nie udało się załadować modelu:\n{e}")
-            self.results_panel.hide()
-            return
-
-        window_signal, t_start, t_end = self._get_analysis_window()
-
-        from model.inference_api import predict_with_model
-        t0 = time.time()
-        try:
-            result = predict_with_model(
-                model=model,
-                data=window_signal,
-                threshold=0.5,
-                class_names=TARGET_CLASSES,
-                device=device,
-            )
-        except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Błąd", f"Błąd predykcji:\n{e}")
-            self.results_panel.hide()
-            return
-        elapsed = time.time() - t0
-
-        probs = result["probabilities"][0]
-        probabilities = {cls: float(probs[i]) for i, cls in enumerate(TARGET_CLASSES)}
-        model_name = os.path.basename(self._model_path)
-
-        self._last_results = {
-            "probabilities": probabilities,
-            "model_name": model_name,
-            "elapsed": elapsed,
-        }
-
-        window_label = f"{t_start:.1f} – {t_end:.1f} s"
-
-        # Resolve ground truth for this specific window
-        gt = self._resolve_ground_truth(t_start, t_end)
-
-        self._show_results = True
-        self.analysis_badge.show()
-        self.results_panel.set_results(probabilities, model_name, elapsed, window_label,
-                                       ground_truth=gt)
-        if self._view_mode == 0:
-            self.info_panel.show()
+        # Use _run_full_analysis for the new flow
+        self._run_full_analysis()
 
     def _apply_pause_btn_style(self):
         from ui.theme import is_dark_mode
@@ -1842,49 +1807,16 @@ class ViewerPage(QWidget):
         self._start_monitor()
 
     def _update_statusbar(self):
-        # Analysis mode overrides center statusbar
-        if self._analysis_mode:
-            if self._analysis_start is not None:
-                ae = self._analysis_start + 10.0
-                self.st_center.setText(
-                    f"Okno: <b>{self._analysis_start:.1f} – {ae:.1f} s</b> | "
-                    f"Kliknij Analizuj lub wybierz inny punkt | Esc: Wyjdź"
-                )
-            else:
-                self.st_center.setText(
-                    "Kliknij na sygnał, aby wybrać okno 10s do analizy | Esc: Wyjdź"
-                )
-
         if self._view_mode == 0:
             self.st_left.setText("<b>10 mm/mV</b> | <b>25 mm/s</b> | 0.05-150 Hz")
-            if not self._analysis_mode:
-                self.st_center.setText("V: Wybierz | C: Suwmiarka | A: Adnotacja | G: Wzmocnienie | 1/2/3: Widok")
+            self.st_center.setText("1/2/3: Widok | \u2190/\u2192: Przewin")
             self.st_right.setText(f"t = <b>{self.time_pos:.2f} s</b> | V = <b>0.85 mV</b>")
         elif self._view_mode == 1:
-            if self._tool_mode == 1:
-                self.st_left.setText("<b>Suwmiarka</b> | <b>10 mm/mV</b> | <b>25 mm/s</b>")
-                self.st_center.setText("Kliknij 2 punkty | Delete: Usuń | Esc: Wyjdź")
-                self.st_right.setText(f"t = <b>{self.time_pos:.2f} s</b>")
-            elif self._tool_mode == 2:
-                self.st_left.setText("<b>Adnotacja</b> | <b>10 mm/mV</b>")
-                if self._annot_click_t1 is not None:
-                    self.st_center.setText(
-                        f"Pierwszy punkt: <b>{self._annot_click_t1:.3f} s</b> — Kliknij drugi punkt | PPM/Esc: Anuluj"
-                    )
-                    self.st_right.setText("")
-                elif self.single_lead.annotation_preview:
-                    ap_t1, ap_t2 = self.single_lead.annotation_preview
-                    self.st_center.setText("Wypełnij formularz i kliknij Zapisz | PPM/Esc: Anuluj")
-                    self.st_right.setText(f"Zaznaczenie: <b>{ap_t1:.2f} — {ap_t2:.2f} s</b>")
-                else:
-                    self.st_center.setText("Kliknij pierwszy punkt na sygnale | Esc: Wyjdź")
-                    self.st_right.setText("")
-            else:
-                self.st_left.setText("<b>10 mm/mV</b> | <b>25 mm/s</b>")
-                self.st_center.setText("Tab: Następne | Shift+Tab: Poprzednie | ←/→: Przewiń")
-                self.st_right.setText(f"t = <b>{self.time_pos:.2f} s</b> | V = <b>0.92 mV</b>")
+            self.st_left.setText("<b>10 mm/mV</b> | <b>25 mm/s</b>")
+            self.st_center.setText("Zaznacz region na sygnale | Cmd+Z: Cofnij | Cmd+Shift+Z: Ponow")
+            self.st_right.setText(f"t = <b>{self.time_pos:.2f} s</b>")
         elif self._view_mode == 2:
             speed_label = f"{self._monitor_speed:g}x"
             self.st_left.setText(f"<b>Monitor</b> | <b>25 mm/s</b> | {speed_label}")
-            self.st_center.setText("Space: Pauza | Esc: Wyjdź z monitora | ↑↓: Prędkość")
+            self.st_center.setText("Space: Pauza | Esc: Wyjdz z monitora | \u2191\u2193: Predkosc")
             self.st_right.setText(f"t = <b>{self._monitor_t:.2f} s</b> / {self.duration:.2f} s")

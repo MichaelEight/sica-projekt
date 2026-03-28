@@ -8,6 +8,20 @@ from PySide6.QtWidgets import QWidget
 import ui.theme as T
 from ui.theme import LEAD_SEEDS, LEAD_AMPS
 
+# Marking identity colors (RGB tuples)
+MARKING_COLORS = {
+    "annotation": (139, 92, 246),   # purple
+    "pr":         (249, 115, 22),   # orange
+    "qrs":        (239, 68, 68),    # red
+    "qt":         (34, 197, 94),    # green
+    "rr":         (59, 130, 246),   # blue
+    "custom":     (156, 163, 175),  # gray
+    "scan":       None,             # uses color_code from marking dict
+}
+
+_ANNOTATION_TYPES = {"annotation"}
+_MEASUREMENT_TYPES = {"pr", "qrs", "qt", "rr"}
+
 
 # Synthetic EKG generator
 def synth_ekg(t: np.ndarray, seed: float = 0.0, amp: float = 1.0) -> np.ndarray:
@@ -37,7 +51,10 @@ def generate_demo_signal(leads: list[str], fs: int = 500, duration: float = 10.0
 class EkgCellCanvas(QWidget):
     """Draws a single EKG lead cell with paper grid, calibration pulse, and signal."""
 
-    clicked = Signal(float, float)  # time_s, voltage_mV
+    clicked = Signal(float, float)       # time_s, voltage_mV
+    double_clicked = Signal(float, float)  # time_s, voltage_mV
+    selection_completed = Signal(float, float)  # t1, t2 in seconds
+    selection_live = Signal(float, float)  # live t1, t2 during drag/hover
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,13 +65,17 @@ class EkgCellCanvas(QWidget):
         self.t_end = 2.5
         self.show_cal = True
         self.show_label = True
-        self.calipers = []       # list of (t1, t2, color, label)
-        self.annotations = []    # list of (t1, t2) — saved annotations
-        self.hovered_annotation = None  # int index into self.annotations or None
-        self.selected_annotation = None  # int index into self.annotations or None
-        self.pending_marker = None   # float time_s — first click in annotation mode
-        self.annotation_preview = None  # (t1, t2) — completed but unsaved region
-        self.annot_mode = False  # whether annotation tool is active
+
+        # Unified marking system
+        self.markings = []           # list of dicts: {"t1", "t2", "type", "label", "id"}
+        self.hovered_marking = None  # marking id (str) or None
+        self.selected_marking = None # marking id (str) or None
+        self.pending_marker = None   # float time — first click point
+        self.selection_preview = None  # (t1, t2) — live selection (not yet committed)
+        self.selection_mode = True   # always True in 1-lead now (single mode)
+        self._drag_active = False    # True while click-drag is in progress
+        self._drag_start_px = None   # pixel x of drag start
+
         self._sweep_pos = None   # fraction 0..1 for monitor mode
         self._old_signal = None  # previous page signal data (1-D)
         self._old_t_start = 0.0
@@ -80,13 +101,14 @@ class EkgCellCanvas(QWidget):
         self.t_end = 2.5
         self.v_min = None
         self.v_max = None
-        self.calipers = []
-        self.annotations = []
-        self.hovered_annotation = None
-        self.selected_annotation = None
+        self.markings = []
+        self.hovered_marking = None
+        self.selected_marking = None
         self.pending_marker = None
-        self.annotation_preview = None
-        self.annot_mode = False
+        self.selection_preview = None
+        self.selection_mode = True
+        self._drag_active = False
+        self._drag_start_px = None
         self._sweep_pos = None
         self._old_signal = None
         self._old_t_start = 0.0
@@ -203,50 +225,123 @@ class EkgCellCanvas(QWidget):
             painter.drawPath(path)
             sig_start = 5 + cal_w + 4
 
-        # Saved annotation highlights — normal / hovered / selected
-        if self.annotations:
-            for ai, (a_t1, a_t2) in enumerate(self.annotations):
-                ax1 = sig_start + ((a_t1 - self.t_start) / duration) * (w - sig_start)
-                ax2 = sig_start + ((a_t2 - self.t_start) / duration) * (w - sig_start)
-                is_selected = (ai == self.selected_annotation)
-                is_hovered = (ai == self.hovered_annotation) and not is_selected
+        # Unified marking rendering
+        if self.markings:
+            label_font = QFont("Menlo", 9)
+            for marking in self.markings:
+                m_t1, m_t2 = marking["t1"], marking["t2"]
+                m_type = marking.get("type", "annotation")
+                m_label = marking.get("label", "")
+                m_id = marking.get("id", "")
 
-                if is_selected:
-                    # Selected: strong blue fill, thick solid border
-                    painter.fillRect(QRectF(ax1, 0, ax2 - ax1, h), QColor(74, 158, 255, 60))
-                    painter.setPen(QPen(QColor(T.ACCENT), 2.5))
-                elif is_hovered:
-                    # Hovered: medium fill, dashed border
-                    painter.fillRect(QRectF(ax1, 0, ax2 - ax1, h), QColor(74, 158, 255, 45))
-                    painter.setPen(QPen(QColor(T.ACCENT), 1.5, Qt.DashLine))
+                mx1 = sig_start + ((m_t1 - self.t_start) / duration) * (w - sig_start)
+                mx2 = sig_start + ((m_t2 - self.t_start) / duration) * (w - sig_start)
+
+                rgb = MARKING_COLORS.get(m_type)
+                if rgb is None:
+                    rgb = marking.get("color_code", (156, 163, 175))
+                r, g, b = rgb
+
+                is_selected = (m_id == self.selected_marking)
+                is_hovered = (m_id == self.hovered_marking) and not is_selected
+                is_measurement = m_type in _MEASUREMENT_TYPES
+                is_annotation = m_type in _ANNOTATION_TYPES
+                color = QColor(r, g, b)
+
+                if is_measurement:
+                    # Arrow notation: vertical lines at endpoints + horizontal line with arrowheads
+                    pen_w = 2.5 if is_selected else (1.8 if is_hovered else 1.2)
+                    arrow_y = h * 0.18  # arrow line near top
+                    tick_h = 8  # vertical tick height
+
+                    painter.setPen(QPen(color, pen_w))
+                    # Vertical ticks at t1 and t2
+                    painter.drawLine(QPointF(mx1, arrow_y - tick_h / 2), QPointF(mx1, arrow_y + tick_h / 2))
+                    painter.drawLine(QPointF(mx2, arrow_y - tick_h / 2), QPointF(mx2, arrow_y + tick_h / 2))
+                    # Horizontal line connecting them
+                    painter.drawLine(QPointF(mx1, arrow_y), QPointF(mx2, arrow_y))
+                    # Arrowheads (small triangles)
+                    arrow_sz = 5
+                    # Left arrow (pointing left at mx1)
+                    path_l = QPainterPath()
+                    path_l.moveTo(mx1, arrow_y)
+                    path_l.lineTo(mx1 + arrow_sz, arrow_y - arrow_sz / 2)
+                    path_l.lineTo(mx1 + arrow_sz, arrow_y + arrow_sz / 2)
+                    path_l.closeSubpath()
+                    painter.setBrush(QBrush(color))
+                    painter.drawPath(path_l)
+                    # Right arrow (pointing right at mx2)
+                    path_r = QPainterPath()
+                    path_r.moveTo(mx2, arrow_y)
+                    path_r.lineTo(mx2 - arrow_sz, arrow_y - arrow_sz / 2)
+                    path_r.lineTo(mx2 - arrow_sz, arrow_y + arrow_sz / 2)
+                    path_r.closeSubpath()
+                    painter.drawPath(path_r)
+                    painter.setBrush(Qt.NoBrush)
+
+                    # Light vertical dashed lines extending down from ticks
+                    dash_pen = QPen(QColor(r, g, b, 60), 1.0, Qt.DotLine)
+                    painter.setPen(dash_pen)
+                    painter.drawLine(QPointF(mx1, arrow_y + tick_h / 2), QPointF(mx1, h))
+                    painter.drawLine(QPointF(mx2, arrow_y + tick_h / 2), QPointF(mx2, h))
+
+                elif is_annotation:
+                    # Annotation: area fill + dashed borders
+                    alpha = 50 if is_selected else (35 if is_hovered else 20)
+                    painter.fillRect(QRectF(mx1, 0, mx2 - mx1, h), QColor(r, g, b, alpha))
+                    pen_w = 2.5 if is_selected else (1.5 if is_hovered else 1.0)
+                    painter.setPen(QPen(color, pen_w, Qt.DashLine))
+                    painter.drawLine(QPointF(mx1, 0), QPointF(mx1, h))
+                    painter.drawLine(QPointF(mx2, 0), QPointF(mx2, h))
+
                 else:
-                    # Normal: light fill, thin solid border
-                    painter.fillRect(QRectF(ax1, 0, ax2 - ax1, h), QColor(74, 158, 255, 25))
-                    painter.setPen(QPen(QColor(T.ACCENT), 1.0))
-                painter.drawLine(QPointF(ax1, 0), QPointF(ax1, h))
-                painter.drawLine(QPointF(ax2, 0), QPointF(ax2, h))
+                    # Custom / scan / other: area fill + solid borders
+                    alpha = 50 if is_selected else (35 if is_hovered else 20)
+                    painter.fillRect(QRectF(mx1, 0, mx2 - mx1, h), QColor(r, g, b, alpha))
+                    pen_w = 2.5 if is_selected else (1.5 if is_hovered else 1.0)
+                    painter.setPen(QPen(color, pen_w))
+                    painter.drawLine(QPointF(mx1, 0), QPointF(mx1, h))
+                    painter.drawLine(QPointF(mx2, 0), QPointF(mx2, h))
 
-        # Annotation preview (completed but unsaved — dashed purple)
-        if self.annotation_preview:
-            ap_t1, ap_t2 = self.annotation_preview
-            apx1 = sig_start + ((ap_t1 - self.t_start) / duration) * (w - sig_start)
-            apx2 = sig_start + ((ap_t2 - self.t_start) / duration) * (w - sig_start)
-            painter.fillRect(QRectF(apx1, 0, apx2 - apx1, h), QColor(139, 92, 246, 35))
+                # Label pill
+                if m_label:
+                    painter.setFont(QFont("Menlo", 9, QFont.Bold) if is_selected else label_font)
+                    fm = painter.fontMetrics()
+                    tw = fm.horizontalAdvance(m_label)
+                    lx = (mx1 + mx2) / 2 - tw / 2  # centered between endpoints
+                    if is_measurement:
+                        ly = h * 0.18 - fm.height() - 3  # above the arrow line
+                        ly = max(2, ly)
+                    else:
+                        ly = 4
+                    pill_bg = QColor(T.WHITE)
+                    pill_bg.setAlpha(210)
+                    pill_h = fm.height() + 2
+                    painter.fillRect(QRectF(lx - 3, ly, tw + 6, pill_h), pill_bg)
+                    painter.setPen(color)
+                    painter.drawText(QPointF(lx, ly + fm.ascent()), m_label)
+
+        # Selection preview (completed selection, not yet committed — dashed purple)
+        if self.selection_preview:
+            sp_t1, sp_t2 = self.selection_preview
+            spx1 = sig_start + ((sp_t1 - self.t_start) / duration) * (w - sig_start)
+            spx2 = sig_start + ((sp_t2 - self.t_start) / duration) * (w - sig_start)
+            painter.fillRect(QRectF(spx1, 0, spx2 - spx1, h), QColor(139, 92, 246, 30))
             painter.setPen(QPen(QColor(139, 92, 246), 2.0, Qt.DashLine))
-            painter.drawLine(QPointF(apx1, 0), QPointF(apx1, h))
-            painter.drawLine(QPointF(apx2, 0), QPointF(apx2, h))
+            painter.drawLine(QPointF(spx1, 0), QPointF(spx1, h))
+            painter.drawLine(QPointF(spx2, 0), QPointF(spx2, h))
 
         # Pending marker + live preview (first click placed, following mouse)
-        if self.pending_marker is not None and self.annot_mode:
+        if self.pending_marker is not None:
             mk_x = sig_start + ((self.pending_marker - self.t_start) / duration) * (w - sig_start)
-            painter.setPen(QPen(QColor(139, 92, 246), 2.0))
+            painter.setPen(QPen(QColor(139, 92, 246), 2.0, Qt.DashLine))
             painter.drawLine(QPointF(mk_x, 0), QPointF(mk_x, h))
             # Live fill to hover position
             if self._hover_x is not None:
                 hx = self._hover_x
                 left_x = min(mk_x, hx)
                 right_x = max(mk_x, hx)
-                painter.fillRect(QRectF(left_x, 0, right_x - left_x, h), QColor(139, 92, 246, 18))
+                painter.fillRect(QRectF(left_x, 0, right_x - left_x, h), QColor(139, 92, 246, 15))
                 painter.setPen(QPen(QColor(139, 92, 246, 120), 1.0, Qt.DotLine))
                 painter.drawLine(QPointF(hx, 0), QPointF(hx, h))
 
@@ -283,30 +378,6 @@ class EkgCellCanvas(QWidget):
                     else:
                         path.lineTo(sig_start + px_i, py)
                 painter.drawPath(path)
-
-        # Calipers
-        if self.calipers:
-            for i, (t1, t2, color, label) in enumerate(self.calipers):
-                x1 = sig_start + ((t1 - self.t_start) / duration) * (w - sig_start)
-                x2 = sig_start + ((t2 - self.t_start) / duration) * (w - sig_start)
-                y_off = 30 + i * 50
-                pen = QPen(QColor(color), 1.5, Qt.DashLine)
-                painter.setPen(pen)
-                painter.drawLine(QPointF(x1, y_off + 30), QPointF(x1, h - 40))
-                painter.drawLine(QPointF(x2, y_off + 30), QPointF(x2, h - 40))
-                painter.setPen(QPen(QColor(color), 1.5))
-                painter.drawLine(QPointF(x1, y_off + 20), QPointF(x2, y_off + 20))
-                painter.setBrush(QColor(color))
-                painter.setPen(Qt.NoPen)
-                painter.drawEllipse(QPointF(x1, y_off + 20), 4, 4)
-                painter.drawEllipse(QPointF(x2, y_off + 20), 4, 4)
-                painter.setFont(QFont("Menlo", 10, QFont.Bold))
-                fm = painter.fontMetrics()
-                lw = fm.horizontalAdvance(label)
-                lx = (x1 + x2) / 2 - lw / 2
-                painter.fillRect(QRectF(lx - 4, y_off - 2, lw + 8, 18), QColor(T.WHITE))
-                painter.setPen(QColor(color))
-                painter.drawText(QPointF(lx, y_off + 12), label)
 
         # Sweep cursor + old data (monitor mode)
         if self._sweep_pos is not None:
@@ -499,33 +570,106 @@ class EkgCellCanvas(QWidget):
 
         painter.end()
 
-    annot_canceled = Signal()  # emitted on RMB cancel in annotation mode
+    def _px_to_time(self, px_x):
+        """Convert a pixel x position to time in seconds."""
+        w = self.width()
+        duration = self.t_end - self.t_start
+        sig_start = 5 + w * 0.06 + 4 if self.show_cal else 0
+        sig_w = w - sig_start
+        if sig_w <= 0 or duration <= 0:
+            return None
+        frac = (px_x - sig_start) / sig_w
+        return self.t_start + frac * duration
+
+    right_clicked = Signal(float, float)  # global_x, global_y for context menu positioning
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.RightButton and self.annot_mode:
-            self.pending_marker = None
-            self.annotation_preview = None
-            self.annot_canceled.emit()
-            self.update()
-            return
+        # Right-click: cancel pending selection, or emit for context menu
+        if event.button() == Qt.RightButton:
+            if self.pending_marker is not None or self.selection_preview is not None:
+                self.pending_marker = None
+                self.selection_preview = None
+                self._drag_active = False
+                self._drag_start_px = None
+                self.update()
+                return
+            else:
+                gpos = event.globalPosition()
+                self.right_clicked.emit(gpos.x(), gpos.y())
+                return
+
         if event.button() == Qt.LeftButton and self.signal is not None:
-            w = self.width()
-            duration = self.t_end - self.t_start
-            sig_start = 5 + w * 0.06 + 4 if self.show_cal else 0
-            sig_w = w - sig_start
-            if sig_w > 0 and duration > 0:
-                frac = (event.position().x() - sig_start) / sig_w
-                t = self.t_start + frac * duration
+            t = self._px_to_time(event.position().x())
+            if t is not None:
                 idx = int(t * self.fs)
                 idx = max(0, min(idx, len(self.signal) - 1))
                 v = self.signal[idx]
+
+                if self.selection_mode:
+                    if self.pending_marker is not None:
+                        # Second click — complete selection
+                        t1 = min(self.pending_marker, t)
+                        t2 = max(self.pending_marker, t)
+                        self.selection_preview = (t1, t2)
+                        self.pending_marker = None
+                        self._drag_active = False
+                        self._drag_start_px = None
+                        self.selection_completed.emit(t1, t2)
+                        self.update()
+                    else:
+                        # First click — set pending marker, start potential drag
+                        self.pending_marker = t
+                        self.selection_preview = None
+                        self._drag_active = True
+                        self._drag_start_px = event.position().x()
+
                 self.clicked.emit(t, v)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         self._hover_x = event.position().x()
+        # Click-drag or click-hover: update live preview + emit live signal
+        if self.pending_marker is not None:
+            t = self._px_to_time(event.position().x())
+            if t is not None:
+                t1 = min(self.pending_marker, t)
+                t2 = max(self.pending_marker, t)
+                if self._drag_active:
+                    self.selection_preview = (t1, t2)
+                self.selection_live.emit(t1, t2)
         self.update()
         super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._drag_active:
+            px_moved = abs(event.position().x() - (self._drag_start_px or 0))
+            if px_moved > 5:
+                # This was a drag — finalize selection
+                t = self._px_to_time(event.position().x())
+                if t is not None and self.pending_marker is not None:
+                    t1 = min(self.pending_marker, t)
+                    t2 = max(self.pending_marker, t)
+                    self.selection_preview = (t1, t2)
+                    self.pending_marker = None
+                    self._drag_active = False
+                    self._drag_start_px = None
+                    self.selection_completed.emit(t1, t2)
+                    self.update()
+            else:
+                # Barely moved — this is a click, keep pending_marker for click-click
+                self._drag_active = False
+                self._drag_start_px = None
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton and self.signal is not None:
+            t = self._px_to_time(event.position().x())
+            if t is not None:
+                idx = int(t * self.fs)
+                idx = max(0, min(idx, len(self.signal) - 1))
+                v = self.signal[idx]
+                self.double_clicked.emit(t, v)
+        super().mouseDoubleClickEvent(event)
 
     def leaveEvent(self, event):
         self._hover_x = None
@@ -536,6 +680,8 @@ class EkgCellCanvas(QWidget):
 # 12-Lead Grid
 class TwelveLeadGrid(QWidget):
     """4x3 grid of EKG cells + rhythm strip, matching the v2 12-lead design."""
+
+    cell_double_clicked = Signal(str, float)  # lead_name, time_seconds
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -561,6 +707,10 @@ class TwelveLeadGrid(QWidget):
                 cell.draw_border = False
                 cell.INSET = 1
                 self.cells[lead] = cell
+                # Connect double-click to grid-level signal
+                _lead = lead  # capture for closure
+                cell.double_clicked.connect(
+                    lambda t, v, ln=_lead: self.cell_double_clicked.emit(ln, t))
                 row_layout.addWidget(cell)
                 if ci < len(row_leads) - 1:
                     vsep = QFrame()
@@ -584,6 +734,8 @@ class TwelveLeadGrid(QWidget):
         self.rhythm.draw_border = False
         self.rhythm.INSET = 1
         self.rhythm.setFixedHeight(100)
+        self.rhythm.double_clicked.connect(
+            lambda t, v: self.cell_double_clicked.emit("II", t))
         layout.addWidget(self.rhythm)
 
     def apply_theme(self):
