@@ -275,7 +275,7 @@ class MainWindow(QMainWindow):
                 self._fs = record.fs
                 self._filename = os.path.basename(base_path) + ".dat"
 
-                info = f"{self._fs} Hz \u00b7 {len(self._leads)} odprowadze\u0144 \u00b7 {self._signal.shape[0] / self._fs:.1f} s"
+                info = f"{self._signal.shape[0] / self._fs:.1f} s"
                 add_recent(base_path, info)
             except Exception as e:
                 self.statusBar().clearMessage()
@@ -287,7 +287,7 @@ class MainWindow(QMainWindow):
             self._leads = STANDARD_LEADS
             self._fs = 500
             self._filename = os.path.basename(base_path) + ".dat" if base_path else "demo.dat"
-            add_recent(base_path or "demo", f"{self._fs} Hz \u00b7 12 odprowadze\u0144 \u00b7 10.0 s")
+            add_recent(base_path or "demo", "10.0 s")
 
         # Look up ground truth and patient info
         self.statusBar().showMessage("Wczytywanie adnotacji...")
