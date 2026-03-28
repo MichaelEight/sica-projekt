@@ -520,6 +520,7 @@ class ViewerPage(QWidget):
 
         self.single_lead = SingleLeadCanvas()
         self.single_lead.draw_border = True
+        self.single_lead.selection_mode = True  # only single_lead allows selection
         # Connect selection_completed for the new marking workflow
         if hasattr(self.single_lead, 'selection_completed'):
             self.single_lead.selection_completed.connect(self._on_selection_completed)
@@ -527,6 +528,10 @@ class ViewerPage(QWidget):
             self.single_lead.right_clicked.connect(self._on_canvas_right_click)
         if hasattr(self.single_lead, 'selection_live'):
             self.single_lead.selection_live.connect(self._on_selection_live)
+        if hasattr(self.single_lead, 'zoom_requested'):
+            self.single_lead.zoom_requested.connect(self._on_pinch_zoom)
+        if hasattr(self.single_lead, 'scroll_pan'):
+            self.single_lead.scroll_pan.connect(self._on_scroll_pan)
         self.view_stack.addWidget(self.single_lead)
 
         self.monitor_area = QWidget()
@@ -560,21 +565,16 @@ class ViewerPage(QWidget):
         nav.setContentsMargins(16, 0, 16, 0)
         nav.setSpacing(8)
 
-        # Navigation buttons — standard playback icons
-        # ▮◀  ◀◀  ◀  [❚❚/▶]  ▶  ▶▶  ▶▮
-        # Using U+25AE (▮ thick bar) for skip endpoints for visual balance
-        _TRI_L = "\u25c0"  # ◀ BLACK LEFT-POINTING TRIANGLE
-        _TRI_R = "\u25b6"  # ▶ BLACK RIGHT-POINTING TRIANGLE
-        _BAR = "\u25ae"    # ▮ BLACK VERTICAL RECTANGLE (thick, matches triangle weight)
+        # Navigation buttons — using consistent triangles only
         back_buttons = [
-            (_BAR + _TRI_L, self._nav_start),
-            (_TRI_L + _TRI_L, lambda: self._nav_step(-1.0)),
-            (_TRI_L, lambda: self._nav_step(-0.2)),
+            ("\u23ee", self._nav_start),          # ⏮ skip to start
+            ("\u25c0\u25c0", lambda: self._nav_step(-1.0)),  # ◀◀ fast back
+            ("\u25c0", lambda: self._nav_step(-0.2)),        # ◀ step back
         ]
         fwd_buttons = [
-            (_TRI_R, lambda: self._nav_step(0.2)),
-            (_TRI_R + _TRI_R, lambda: self._nav_step(1.0)),
-            (_TRI_R + _BAR, self._nav_end),
+            ("\u25b6", lambda: self._nav_step(0.2)),         # ▶ step fwd
+            ("\u25b6\u25b6", lambda: self._nav_step(1.0)),   # ▶▶ fast fwd
+            ("\u23ed", self._nav_end),             # ⏭ skip to end
         ]
 
         self._nav_btns = []
@@ -623,7 +623,7 @@ class ViewerPage(QWidget):
         self._zoom_out_btn = QPushButton("\u2212")  # −
         self._zoom_out_btn.setObjectName("nav")
         self._zoom_out_btn.setCursor(Qt.PointingHandCursor)
-        self._zoom_out_btn.setToolTip("Oddal (pokaż więcej)")
+        self._zoom_out_btn.setToolTip("")
         self._zoom_out_btn.clicked.connect(self._zoom_out)
         nav.addWidget(self._zoom_out_btn)
 
@@ -635,14 +635,14 @@ class ViewerPage(QWidget):
         self._zoom_in_btn = QPushButton("+")
         self._zoom_in_btn.setObjectName("nav")
         self._zoom_in_btn.setCursor(Qt.PointingHandCursor)
-        self._zoom_in_btn.setToolTip("Przybliż (pokaż mniej)")
+        self._zoom_in_btn.setToolTip("")
         self._zoom_in_btn.clicked.connect(self._zoom_in)
         nav.addWidget(self._zoom_in_btn)
 
         self._zoom_reset_btn = QPushButton("Reset")
         self._zoom_reset_btn.setObjectName("nav")
         self._zoom_reset_btn.setCursor(Qt.PointingHandCursor)
-        self._zoom_reset_btn.setToolTip("Resetuj powiększenie")
+        self._zoom_reset_btn.setToolTip("")
         self._zoom_reset_btn.setStyleSheet(f"""
             QPushButton {{
                 font-size: 10px; padding: 0 8px; height: 28px;
@@ -654,43 +654,15 @@ class ViewerPage(QWidget):
         self._zoom_reset_btn.clicked.connect(self._reset_zoom)
         nav.addWidget(self._zoom_reset_btn)
 
-        self.speed_label = QLabel("25 mm/s")
-        self.speed_label.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM};")
-        nav.addWidget(self.speed_label)
-
-        outer.addWidget(self.navbar)
-
-        # Status bar
-        self.statusbar = QWidget()
-        self.statusbar.setFixedHeight(28)
-        self.statusbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
-        sb = QHBoxLayout(self.statusbar)
-        sb.setContentsMargins(14, 0, 14, 0)
-        sb.setSpacing(16)
-
-        self.st_left = QLabel()
-        self.st_left.setStyleSheet(f"font-size:11px; color:{T.TEXT_MUTED}; font-family:Menlo;")
-        sb.addWidget(self.st_left)
-
-        self.st_center = QLabel()
-        self.st_center.setStyleSheet(f"font-size:10px; color:{T.TEXT_DIM};")
-        self.st_center.setAlignment(Qt.AlignCenter)
-        sb.addWidget(self.st_center, stretch=1)
-
-        self.st_right = QLabel()
-        self.st_right.setStyleSheet(f"font-size:11px; color:{T.TEXT_MUTED}; font-family:Menlo;")
-        sb.addWidget(self.st_right)
-
-        # Selection indicator (shows during active selection)
+        # Selection indicator (shows during active selection, in navbar)
         self._sel_indicator = QLabel()
         self._sel_indicator.setAlignment(Qt.AlignCenter)
-        self._sel_indicator.setFixedHeight(22)
+        self._sel_indicator.setFixedHeight(28)
         self._sel_indicator.hide()
-        sb.addWidget(self._sel_indicator)
+        nav.addWidget(self._sel_indicator)
 
-        outer.addWidget(self.statusbar)
+        outer.addWidget(self.navbar)
         self._update_time_display()
-        self._update_statusbar()
 
     def apply_theme(self):
         """Re-apply all styles after theme change."""
@@ -738,12 +710,7 @@ class ViewerPage(QWidget):
         self.navbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
         self.scrubber.setStyleSheet(self._scrubber_style())
         self.time_label.setStyleSheet(f"font-size:12px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
-        self.speed_label.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM};")
 
-        self.statusbar.setStyleSheet(f"background:{T.WHITE}; border-top:1px solid {T.BORDER};")
-        self.st_left.setStyleSheet(f"font-size:11px; color:{T.TEXT_MUTED}; font-family:Menlo;")
-        self.st_center.setStyleSheet(f"font-size:10px; color:{T.TEXT_DIM};")
-        self.st_right.setStyleSheet(f"font-size:11px; color:{T.TEXT_MUTED}; font-family:Menlo;")
         self.grid_12.apply_theme()
 
     def _build_monitor_area(self):
@@ -814,7 +781,7 @@ class ViewerPage(QWidget):
         min_samples = int(10.0 * self.fs)
         if self.signal.shape[0] < min_samples:
             self.btn_full_analysis.setEnabled(False)
-            self.btn_full_analysis.setToolTip("Analiza wymaga co najmniej 10s nagrania")
+            self.btn_full_analysis.setToolTip("")
         else:
             self.btn_full_analysis.setEnabled(True)
             self.btn_full_analysis.setToolTip("")
@@ -857,7 +824,7 @@ class ViewerPage(QWidget):
 
         self._refresh_views()
         self._update_time_display()
-        self._update_statusbar()
+
 
     def _refresh_views(self):
         if self.signal is None:
@@ -921,6 +888,11 @@ class ViewerPage(QWidget):
         self.monitor_sidebar.setVisible(idx == 2)
         self.markings_panel.setVisible(idx == 1)
 
+        # Selection only in 1-lead mode
+        self.single_lead.selection_mode = (idx == 1)
+        # Clear any pending selection when switching modes
+        self._clear_selection_preview()
+
         if idx == 0:
             self.info_panel.show()
             self.navbar.show()
@@ -938,7 +910,7 @@ class ViewerPage(QWidget):
             self._start_monitor()
 
         self.view_stack.setCurrentIndex(idx)
-        self._update_statusbar()
+
 
     def _on_lead_selected(self, lead: str):
         self._refresh_single_lead()
@@ -1117,17 +1089,14 @@ class ViewerPage(QWidget):
     def _zoom_in(self):
         """Decrease the time window (show less time, more detail)."""
         current = self._window_1
+        new_window = self._ZOOM_STEPS[0]
         for step in self._ZOOM_STEPS:
             if step < current - 0.01:
                 new_window = step
             else:
                 break
-        else:
-            new_window = self._ZOOM_STEPS[0]
         self._window_1 = max(new_window, self._ZOOM_STEPS[0])
-        self._update_zoom_label()
-        self._restore_scrubber_range()
-        self._refresh_single_lead()
+        self._apply_zoom()
 
     def _zoom_out(self):
         """Increase the time window (show more time, less detail)."""
@@ -1139,16 +1108,40 @@ class ViewerPage(QWidget):
                 break
         else:
             self._window_1 = max_window
-        self._update_zoom_label()
-        self._restore_scrubber_range()
-        self._refresh_single_lead()
+        self._apply_zoom()
 
     def _reset_zoom(self):
         """Reset 1-lead view to default 3-second window."""
         self._window_1 = min(3.0, self.duration)
+        self._apply_zoom()
+
+    def _on_pinch_zoom(self, direction: int):
+        """Handle pinch zoom from canvas. +1=in, -1=out."""
+        if self._view_mode != 1:
+            return
+        if direction > 0:
+            self._zoom_in()
+        else:
+            self._zoom_out()
+
+    def _on_scroll_pan(self, dt: float):
+        """Handle two-finger swipe pan from canvas."""
+        if self._view_mode != 1:
+            return
+        new_pos = self.time_pos + dt
+        new_pos = max(0.0, min(self._scrubber_max, new_pos))
+        self.time_pos = new_pos
+        self.scrubber.setValue(int(new_pos * 100))
+
+    def _apply_zoom(self):
+        """Common zoom update: label, scrubber, view, time display."""
+        # Clamp time_pos so window doesn't go past end
+        if self.time_pos + self._window_1 > self.duration:
+            self.time_pos = max(0, self.duration - self._window_1)
         self._update_zoom_label()
         self._restore_scrubber_range()
         self._refresh_single_lead()
+        self._update_time_display()
 
     def _update_zoom_label(self):
         if hasattr(self, '_zoom_label'):
@@ -1372,7 +1365,7 @@ class ViewerPage(QWidget):
             }
             self.analysis_badge.show()
 
-        self._update_statusbar()
+
 
     def _apply_autoscan_results(self):
         """Create Marking objects from autoscan results and add to the store."""
@@ -1679,6 +1672,13 @@ class ViewerPage(QWidget):
                                     self._window_12, self._v_min, self._v_max)
         elif self._view_mode == 1:
             self._refresh_single_lead()
+            # Update AI indicator if user has a pending selection marker
+            if self.single_lead.pending_marker is not None and self.single_lead._hover_x is not None:
+                t = self.single_lead._px_to_time(self.single_lead._hover_x)
+                if t is not None:
+                    t1 = min(self.single_lead.pending_marker, t)
+                    t2 = max(self.single_lead.pending_marker, t)
+                    self._on_selection_live(t1, t2)
 
     def _restore_scrubber_range(self):
         """Restore scrubber range for 12-lead/1-lead modes."""
@@ -1787,7 +1787,7 @@ class ViewerPage(QWidget):
     def _on_monitor_speed(self, speed: float):
         self._monitor_speed = speed
         self._monitor_timer.setInterval(int(50 / speed))
-        self._update_statusbar()
+
 
     def _on_monitor_leads(self, active_leads: list):
         """Rebuild monitor strips with selected leads."""
@@ -1806,17 +1806,3 @@ class ViewerPage(QWidget):
         # Restart monitor playback with new leads
         self._start_monitor()
 
-    def _update_statusbar(self):
-        if self._view_mode == 0:
-            self.st_left.setText("<b>10 mm/mV</b> | <b>25 mm/s</b> | 0.05-150 Hz")
-            self.st_center.setText("1/2/3: Widok | \u2190/\u2192: Przewin")
-            self.st_right.setText(f"t = <b>{self.time_pos:.2f} s</b> | V = <b>0.85 mV</b>")
-        elif self._view_mode == 1:
-            self.st_left.setText("<b>10 mm/mV</b> | <b>25 mm/s</b>")
-            self.st_center.setText("Zaznacz region na sygnale | Cmd+Z: Cofnij | Cmd+Shift+Z: Ponow")
-            self.st_right.setText(f"t = <b>{self.time_pos:.2f} s</b>")
-        elif self._view_mode == 2:
-            speed_label = f"{self._monitor_speed:g}x"
-            self.st_left.setText(f"<b>Monitor</b> | <b>25 mm/s</b> | {speed_label}")
-            self.st_center.setText("Space: Pauza | Esc: Wyjdz z monitora | \u2191\u2193: Predkosc")
-            self.st_right.setText(f"t = <b>{self._monitor_t:.2f} s</b> / {self.duration:.2f} s")

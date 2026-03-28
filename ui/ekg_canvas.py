@@ -72,7 +72,7 @@ class EkgCellCanvas(QWidget):
         self.selected_marking = None # marking id (str) or None
         self.pending_marker = None   # float time — first click point
         self.selection_preview = None  # (t1, t2) — live selection (not yet committed)
-        self.selection_mode = True   # always True in 1-lead now (single mode)
+        self.selection_mode = False  # only enabled on single_lead canvas
         self._drag_active = False    # True while click-drag is in progress
         self._drag_start_px = None   # pixel x of drag start
 
@@ -106,7 +106,7 @@ class EkgCellCanvas(QWidget):
         self.selected_marking = None
         self.pending_marker = None
         self.selection_preview = None
-        self.selection_mode = True
+        # Don't reset selection_mode in clear() — it's set by the viewer
         self._drag_active = False
         self._drag_start_px = None
         self._sweep_pos = None
@@ -226,6 +226,11 @@ class EkgCellCanvas(QWidget):
             sig_start = 5 + cal_w + 4
 
         # Unified marking rendering
+        # Measurement types get stacked at different Y levels to avoid overlap
+        _MEAS_LEVEL = {"pr": 0, "qrs": 1, "qt": 2, "rr": 3, "custom": 4}
+        _LEVEL_SPACING = 20  # px between arrow levels
+        _LEVEL_BASE = 30     # px from top — below annotation labels
+
         if self.markings:
             label_font = QFont("Menlo", 9)
             for marking in self.markings:
@@ -249,77 +254,94 @@ class EkgCellCanvas(QWidget):
                 color = QColor(r, g, b)
 
                 if is_measurement:
-                    # Arrow notation: vertical lines at endpoints + horizontal line with arrowheads
-                    pen_w = 2.5 if is_selected else (1.8 if is_hovered else 1.2)
-                    arrow_y = h * 0.18  # arrow line near top
-                    tick_h = 8  # vertical tick height
+                    # Arrow at a stacked Y level per type
+                    level = _MEAS_LEVEL.get(m_type, 4)
+                    arrow_y = _LEVEL_BASE + level * _LEVEL_SPACING
+                    pen_w = 2.5 if is_selected else (2.0 if is_hovered else 1.5)
+                    tick_top = arrow_y - 6
+                    tick_bot = arrow_y + 6
+                    arrow_sz = 6
 
+                    # Vertical ticks (full height = prominent)
                     painter.setPen(QPen(color, pen_w))
-                    # Vertical ticks at t1 and t2
-                    painter.drawLine(QPointF(mx1, arrow_y - tick_h / 2), QPointF(mx1, arrow_y + tick_h / 2))
-                    painter.drawLine(QPointF(mx2, arrow_y - tick_h / 2), QPointF(mx2, arrow_y + tick_h / 2))
-                    # Horizontal line connecting them
+                    painter.drawLine(QPointF(mx1, tick_top), QPointF(mx1, tick_bot))
+                    painter.drawLine(QPointF(mx2, tick_top), QPointF(mx2, tick_bot))
+                    # Horizontal connector
                     painter.drawLine(QPointF(mx1, arrow_y), QPointF(mx2, arrow_y))
-                    # Arrowheads (small triangles)
-                    arrow_sz = 5
-                    # Left arrow (pointing left at mx1)
+                    # Left arrowhead
                     path_l = QPainterPath()
                     path_l.moveTo(mx1, arrow_y)
-                    path_l.lineTo(mx1 + arrow_sz, arrow_y - arrow_sz / 2)
-                    path_l.lineTo(mx1 + arrow_sz, arrow_y + arrow_sz / 2)
+                    path_l.lineTo(mx1 + arrow_sz, arrow_y - arrow_sz * 0.5)
+                    path_l.lineTo(mx1 + arrow_sz, arrow_y + arrow_sz * 0.5)
                     path_l.closeSubpath()
                     painter.setBrush(QBrush(color))
                     painter.drawPath(path_l)
-                    # Right arrow (pointing right at mx2)
+                    # Right arrowhead
                     path_r = QPainterPath()
                     path_r.moveTo(mx2, arrow_y)
-                    path_r.lineTo(mx2 - arrow_sz, arrow_y - arrow_sz / 2)
-                    path_r.lineTo(mx2 - arrow_sz, arrow_y + arrow_sz / 2)
+                    path_r.lineTo(mx2 - arrow_sz, arrow_y - arrow_sz * 0.5)
+                    path_r.lineTo(mx2 - arrow_sz, arrow_y + arrow_sz * 0.5)
                     path_r.closeSubpath()
                     painter.drawPath(path_r)
                     painter.setBrush(Qt.NoBrush)
 
-                    # Light vertical dashed lines extending down from ticks
-                    dash_pen = QPen(QColor(r, g, b, 60), 1.0, Qt.DotLine)
+                    # Dashed vertical lines extending down to signal area
+                    dash_pen = QPen(QColor(r, g, b, 80), 1.0, Qt.DotLine)
                     painter.setPen(dash_pen)
-                    painter.drawLine(QPointF(mx1, arrow_y + tick_h / 2), QPointF(mx1, h))
-                    painter.drawLine(QPointF(mx2, arrow_y + tick_h / 2), QPointF(mx2, h))
+                    painter.drawLine(QPointF(mx1, tick_bot), QPointF(mx1, h))
+                    painter.drawLine(QPointF(mx2, tick_bot), QPointF(mx2, h))
+
+                    # Label centered above arrow
+                    if m_label:
+                        painter.setFont(QFont("Menlo", 9, QFont.Bold) if is_selected else label_font)
+                        fm = painter.fontMetrics()
+                        tw = fm.horizontalAdvance(m_label)
+                        lx = (mx1 + mx2) / 2 - tw / 2
+                        ly = tick_top - fm.height() - 1
+                        ly = max(1, ly)
+                        pill_bg = QColor(T.WHITE)
+                        pill_bg.setAlpha(220)
+                        painter.fillRect(QRectF(lx - 3, ly, tw + 6, fm.height() + 2), pill_bg)
+                        painter.setPen(color)
+                        painter.drawText(QPointF(lx, ly + fm.ascent()), m_label)
 
                 elif is_annotation:
-                    # Annotation: area fill + dashed borders
                     alpha = 50 if is_selected else (35 if is_hovered else 20)
                     painter.fillRect(QRectF(mx1, 0, mx2 - mx1, h), QColor(r, g, b, alpha))
                     pen_w = 2.5 if is_selected else (1.5 if is_hovered else 1.0)
                     painter.setPen(QPen(color, pen_w, Qt.DashLine))
                     painter.drawLine(QPointF(mx1, 0), QPointF(mx1, h))
                     painter.drawLine(QPointF(mx2, 0), QPointF(mx2, h))
+                    if m_label:
+                        painter.setFont(QFont("Menlo", 9, QFont.Bold) if is_selected else label_font)
+                        fm = painter.fontMetrics()
+                        tw = fm.horizontalAdvance(m_label)
+                        lx = mx1 + 4
+                        ly = 4
+                        pill_bg = QColor(T.WHITE)
+                        pill_bg.setAlpha(210)
+                        painter.fillRect(QRectF(lx - 3, ly, tw + 6, fm.height() + 2), pill_bg)
+                        painter.setPen(color)
+                        painter.drawText(QPointF(lx, ly + fm.ascent()), m_label)
 
                 else:
-                    # Custom / scan / other: area fill + solid borders
                     alpha = 50 if is_selected else (35 if is_hovered else 20)
                     painter.fillRect(QRectF(mx1, 0, mx2 - mx1, h), QColor(r, g, b, alpha))
                     pen_w = 2.5 if is_selected else (1.5 if is_hovered else 1.0)
                     painter.setPen(QPen(color, pen_w))
                     painter.drawLine(QPointF(mx1, 0), QPointF(mx1, h))
                     painter.drawLine(QPointF(mx2, 0), QPointF(mx2, h))
-
-                # Label pill
-                if m_label:
-                    painter.setFont(QFont("Menlo", 9, QFont.Bold) if is_selected else label_font)
-                    fm = painter.fontMetrics()
-                    tw = fm.horizontalAdvance(m_label)
-                    lx = (mx1 + mx2) / 2 - tw / 2  # centered between endpoints
-                    if is_measurement:
-                        ly = h * 0.18 - fm.height() - 3  # above the arrow line
-                        ly = max(2, ly)
-                    else:
+                    if m_label:
+                        painter.setFont(QFont("Menlo", 9, QFont.Bold) if is_selected else label_font)
+                        fm = painter.fontMetrics()
+                        tw = fm.horizontalAdvance(m_label)
+                        lx = mx1 + 4
                         ly = 4
-                    pill_bg = QColor(T.WHITE)
-                    pill_bg.setAlpha(210)
-                    pill_h = fm.height() + 2
-                    painter.fillRect(QRectF(lx - 3, ly, tw + 6, pill_h), pill_bg)
-                    painter.setPen(color)
-                    painter.drawText(QPointF(lx, ly + fm.ascent()), m_label)
+                        pill_bg = QColor(T.WHITE)
+                        pill_bg.setAlpha(210)
+                        painter.fillRect(QRectF(lx - 3, ly, tw + 6, fm.height() + 2), pill_bg)
+                        painter.setPen(color)
+                        painter.drawText(QPointF(lx, ly + fm.ascent()), m_label)
 
         # Selection preview (completed selection, not yet committed — dashed purple)
         if self.selection_preview:
@@ -582,6 +604,7 @@ class EkgCellCanvas(QWidget):
         return self.t_start + frac * duration
 
     right_clicked = Signal(float, float)  # global_x, global_y for context menu positioning
+    zoom_requested = Signal(int)  # +1 = zoom in, -1 = zoom out
 
     def mousePressEvent(self, event):
         # Right-click: cancel pending selection, or emit for context menu
@@ -670,6 +693,39 @@ class EkgCellCanvas(QWidget):
                 v = self.signal[idx]
                 self.double_clicked.emit(t, v)
         super().mouseDoubleClickEvent(event)
+
+    scroll_pan = Signal(float)  # pan delta in seconds (negative=left, positive=right)
+
+    def wheelEvent(self, event):
+        """Handle trackpad/mouse wheel gestures.
+
+        macOS pinch-to-zoom arrives as Ctrl+scrollY (Qt translates pinch
+        into synthetic Ctrl+wheel events).  Two-finger swipe arrives as
+        plain scrollX (horizontal) or scrollY (vertical).
+        """
+        has_ctrl = bool(event.modifiers() & Qt.ControlModifier)
+        dx = event.angleDelta().x()
+        dy = event.angleDelta().y()
+
+        if has_ctrl and dy != 0:
+            # Pinch-to-zoom (Ctrl held = macOS pinch gesture)
+            self.zoom_requested.emit(1 if dy > 0 else -1)
+            event.accept()
+        elif dx != 0:
+            # Horizontal two-finger swipe → pan
+            # angleDelta is in 1/8 degree units; 120 = one "notch"
+            duration = self.t_end - self.t_start
+            pan_frac = -dx / 600.0  # negative dx = swipe left = move forward
+            self.scroll_pan.emit(pan_frac * duration)
+            event.accept()
+        elif dy != 0 and not has_ctrl:
+            # Vertical two-finger swipe without Ctrl → also pan
+            duration = self.t_end - self.t_start
+            pan_frac = dy / 600.0  # positive dy = swipe up = move backward
+            self.scroll_pan.emit(pan_frac * duration)
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
     def leaveEvent(self, event):
         self._hover_x = None

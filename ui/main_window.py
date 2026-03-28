@@ -179,10 +179,16 @@ class MainWindow(QMainWindow):
 
         def _on_escape():
             if self.stack.currentIndex() == 1:
+                # Close context menu if open — and stop here
+                ctx = getattr(self.viewer_page, '_context_menu', None)
+                if ctx is not None and ctx.isVisible():
+                    ctx.close()
+                    self.viewer_page._context_menu = None
+                    self.viewer_page._clear_selection_preview()
+                    return
                 if self.viewer_page._view_mode == 2:
                     self.viewer_page.view_seg.set_active(0)
                 else:
-                    # Clear any selection preview on the canvas
                     self.viewer_page._clear_selection_preview()
             elif self.stack.currentIndex() == 2:
                 self._go_viewer()
