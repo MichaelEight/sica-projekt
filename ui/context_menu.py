@@ -1,9 +1,9 @@
 """Theme-aware custom context menu for EKG selection workflow."""
 
-from PySide6.QtCore import Qt, Signal, QPoint, QTimer
+from PySide6.QtCore import Qt, Signal, QPoint, QTimer, QObject, QEvent
 from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGraphicsDropShadowEffect,
+    QWidget, QVBoxLayout, QGraphicsDropShadowEffect, QApplication,
 )
 
 import ui.theme as T
@@ -14,59 +14,36 @@ class _MenuItem(QWidget):
 
     clicked = Signal()
     hovered = Signal()
-    unhovered = Signal()
 
-    def __init__(
-        self,
-        label: str,
-        right_text: str = "",
-        has_submenu: bool = False,
-        enabled: bool = True,
-        parent: QWidget | None = None,
-    ):
+    def __init__(self, label, right_text="", has_submenu=False, enabled=True, parent=None):
         super().__init__(parent)
         self._label = label
         self._right_text = right_text
         self._has_submenu = has_submenu
         self._enabled = enabled
         self._is_hovered = False
-
-        self.setFixedHeight(36)
+        self.setFixedHeight(34)
         self.setCursor(Qt.PointingHandCursor if enabled else Qt.ArrowCursor)
         self.setMouseTracking(True)
-
-    # ── painting ─────────────────────────────────────────────────────
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-
-        # hover background
         if self._is_hovered and self._enabled:
             p.setBrush(QColor(T.BG_SECONDARY))
             p.setPen(Qt.NoPen)
             p.drawRoundedRect(self.rect().adjusted(4, 2, -4, -2), 6, 6)
-
-        # text color
         text_color = QColor(T.TEXT) if self._enabled else QColor(T.TEXT_DIM)
         p.setPen(text_color)
         p.setFont(self.font())
-
-        # label
-        label_rect = self.rect().adjusted(16, 0, -16, 0)
-        p.drawText(label_rect, Qt.AlignLeft | Qt.AlignVCenter, self._label)
-
-        # right side text / submenu arrow
+        r = self.rect().adjusted(16, 0, -16, 0)
+        p.drawText(r, Qt.AlignLeft | Qt.AlignVCenter, self._label)
         if self._has_submenu:
-            p.drawText(label_rect, Qt.AlignRight | Qt.AlignVCenter, "\u25b8")
+            p.drawText(r, Qt.AlignRight | Qt.AlignVCenter, "\u25b8")
         elif self._right_text:
-            dim_color = QColor(T.TEXT_DIM)
-            p.setPen(dim_color)
-            p.drawText(label_rect, Qt.AlignRight | Qt.AlignVCenter, self._right_text)
-
+            p.setPen(QColor(T.TEXT_DIM))
+            p.drawText(r, Qt.AlignRight | Qt.AlignVCenter, self._right_text)
         p.end()
-
-    # ── hover ────────────────────────────────────────────────────────
 
     def enterEvent(self, event):
         if self._enabled:
@@ -77,9 +54,6 @@ class _MenuItem(QWidget):
     def leaveEvent(self, event):
         self._is_hovered = False
         self.update()
-        self.unhovered.emit()
-
-    # ── click ────────────────────────────────────────────────────────
 
     def mousePressEvent(self, event):
         if self._enabled and event.button() == Qt.LeftButton:
@@ -87,32 +61,29 @@ class _MenuItem(QWidget):
 
 
 class _Separator(QWidget):
-    """Thin horizontal divider."""
-
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(9)
 
     def paintEvent(self, event):
         p = QPainter(self)
-        pen = QPen(QColor(T.BORDER))
-        pen.setWidthF(1.0)
-        p.setPen(pen)
+        p.setPen(QPen(QColor(T.BORDER), 1.0))
         y = self.height() // 2
         p.drawLine(12, y, self.width() - 12, y)
         p.end()
 
 
 class _PopupPanel(QWidget):
-    """Base rounded-corner popup panel with translucent background."""
+    """Rounded popup panel with manual lifecycle."""
 
-    def __init__(self, width: int, parent: QWidget | None = None):
+    def __init__(self, width, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFixedWidth(width)
+        self.setMouseTracking(True)
 
-        # drop shadow
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(24)
         shadow.setOffset(0, 4)
@@ -123,50 +94,52 @@ class _PopupPanel(QWidget):
         self._layout.setContentsMargins(4, 6, 4, 6)
         self._layout.setSpacing(0)
 
-    def add_item(self, item: QWidget):
+    def add_item(self, item):
         self._layout.addWidget(item)
 
     def finish_layout(self):
-        """Call after all items are added to resize height properly."""
         self.adjustSize()
-
-    # ── rounded background ───────────────────────────────────────────
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-
         path = QPainterPath()
         path.addRoundedRect(self.rect().adjusted(2, 2, -2, -2), 10, 10)
-
-        # background fill
         p.fillPath(path, QColor(T.WHITE))
-
-        # border
-        border_pen = QPen(QColor(T.BORDER))
-        border_pen.setWidthF(1.0)
-        p.setPen(border_pen)
+        p.setPen(QPen(QColor(T.BORDER), 1.0))
         p.drawPath(path)
-
         p.end()
 
 
+class _ClickOutsideFilter(QObject):
+    """Event filter: detects clicks outside the menu to close it."""
+
+    triggered = Signal()
+
+    def __init__(self, menu, parent=None):
+        super().__init__(parent)
+        self._menu = menu
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonPress:
+            gpos = event.globalPosition().toPoint() if hasattr(event, 'globalPosition') else event.globalPos()
+            panel = self._menu._panel
+            submenu = self._menu._submenu
+            inside = False
+            if panel and panel.isVisible() and panel.geometry().contains(gpos):
+                inside = True
+            if submenu and submenu.isVisible() and submenu.geometry().contains(gpos):
+                inside = True
+            if not inside and panel and panel.isVisible():
+                self.triggered.emit()
+                return True
+        return False
+
+
 class SelectionContextMenu(QWidget):
-    """Custom context menu for the EKG selection workflow.
-
-    Usage::
-
-        menu = SelectionContextMenu(parent)
-        menu.action_selected.connect(on_action)
-        menu.show_at(global_pos, selection_seconds=12.5)
-    """
+    """Custom context menu for the EKG selection workflow."""
 
     action_selected = Signal(str)
-
-    _ACTION_ANNOTATE = "annotate"
-    _ACTION_SCAN = "scan"
-    _ACTION_ZOOM = "zoom"
-    _ACTION_EXPORT = "export_png"
 
     _MARK_ACTIONS = [
         ("PR", "mark_pr"),
@@ -175,108 +148,99 @@ class SelectionContextMenu(QWidget):
         ("R-R", "mark_rr"),
     ]
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
         self.hide()
+        self._panel = None
+        self._submenu = None
+        self._mark_item = None
+        self._click_filter = None
 
-        self._panel: _PopupPanel | None = None
-        self._submenu: _PopupPanel | None = None
-        self._submenu_timer = QTimer(self)
-        self._submenu_timer.setSingleShot(True)
-        self._submenu_timer.setInterval(250)
-        self._submenu_timer.timeout.connect(self._close_submenu)
-        self._mark_item: _MenuItem | None = None
-
-    # ── public API ───────────────────────────────────────────────────
-
-    def show_at(self, pos: QPoint, selection_seconds: float):
-        """Show the menu at *pos* (global coordinates).
-
-        *selection_seconds* controls whether the scan action is available
-        (requires >= 10 s).
-        """
+    def show_at(self, pos, selection_seconds):
         self._cleanup()
 
         scan_enabled = selection_seconds >= 10.0
         panel = _PopupPanel(240)
 
-        # -- Adnotacja
-        item_annotate = _MenuItem("Adnotacja", parent=panel)
-        item_annotate.clicked.connect(lambda: self._emit(self._ACTION_ANNOTATE))
-        panel.add_item(item_annotate)
+        # Adnotacja
+        item = _MenuItem("Adnotacja", parent=panel)
+        item.clicked.connect(lambda: self._emit("annotate"))
+        item.hovered.connect(self._close_submenu)
+        panel.add_item(item)
 
-        # -- Oznacz...  (with submenu arrow)
+        # Oznacz...
         item_mark = _MenuItem("Oznacz\u2026", has_submenu=True, parent=panel)
-        item_mark.hovered.connect(self._show_submenu)
-        item_mark.unhovered.connect(self._schedule_close_submenu)
+        item_mark.hovered.connect(self._open_submenu)
         panel.add_item(item_mark)
         self._mark_item = item_mark
 
         panel.add_item(_Separator(panel))
 
-        # -- Skanuj
-        right_hint = "" if scan_enabled else "min. 10 s"
-        item_scan = _MenuItem("Skanuj", right_text=right_hint, enabled=scan_enabled, parent=panel)
-        item_scan.clicked.connect(lambda: self._emit(self._ACTION_SCAN))
-        panel.add_item(item_scan)
+        # Skanuj
+        hint = "" if scan_enabled else "min. 10 s"
+        item = _MenuItem("Skanuj", right_text=hint, enabled=scan_enabled, parent=panel)
+        item.clicked.connect(lambda: self._emit("scan"))
+        item.hovered.connect(self._close_submenu)
+        panel.add_item(item)
 
         panel.add_item(_Separator(panel))
 
-        # -- Powiekszenie
-        item_zoom = _MenuItem("Powi\u0119ksz", parent=panel)
-        item_zoom.clicked.connect(lambda: self._emit(self._ACTION_ZOOM))
-        panel.add_item(item_zoom)
+        # Powiększ
+        item = _MenuItem("Powi\u0119ksz", parent=panel)
+        item.clicked.connect(lambda: self._emit("zoom"))
+        item.hovered.connect(self._close_submenu)
+        panel.add_item(item)
 
-        # -- Eksportuj
-        item_export = _MenuItem("Eksportuj fragment PNG", parent=panel)
-        item_export.clicked.connect(lambda: self._emit(self._ACTION_EXPORT))
-        panel.add_item(item_export)
+        # Eksportuj
+        item = _MenuItem("Eksportuj fragment PNG", parent=panel)
+        item.clicked.connect(lambda: self._emit("export_png"))
+        item.hovered.connect(self._close_submenu)
+        panel.add_item(item)
 
         panel.finish_layout()
         panel.move(pos)
         panel.show()
         self._panel = panel
 
-    # ── submenu ──────────────────────────────────────────────────────
+        # Install click-outside filter
+        self._click_filter = _ClickOutsideFilter(self)
+        self._click_filter.triggered.connect(self._cleanup)
+        app = QApplication.instance()
+        if app:
+            app.installEventFilter(self._click_filter)
 
-    def _show_submenu(self):
-        self._submenu_timer.stop()
+    def close(self):
+        self._cleanup()
+        super().close()
 
+    def isVisible(self):
+        return self._panel is not None and self._panel.isVisible()
+
+    # -- submenu --
+
+    def _open_submenu(self):
         if self._submenu is not None:
             return
 
         sub = _PopupPanel(120)
-
         for label, action in self._MARK_ACTIONS:
             mi = _MenuItem(label, parent=sub)
             mi.clicked.connect(lambda a=action: self._emit(a))
-            mi.hovered.connect(self._submenu_timer.stop)
             sub.add_item(mi)
 
         sub.add_item(_Separator(sub))
-
-        mi_custom = _MenuItem("Inne\u2026", parent=sub)
-        mi_custom.clicked.connect(lambda: self._emit("mark_custom"))
-        mi_custom.hovered.connect(self._submenu_timer.stop)
-        sub.add_item(mi_custom)
+        mi = _MenuItem("Inne\u2026", parent=sub)
+        mi.clicked.connect(lambda: self._emit("mark_custom"))
+        sub.add_item(mi)
 
         sub.finish_layout()
 
-        # position to the right of the mark item
         if self._panel and self._mark_item:
-            item_global = self._mark_item.mapToGlobal(QPoint(0, 0))
-            sub.move(
-                item_global.x() + self._panel.width() - 6,
-                item_global.y() - 6,
-            )
+            g = self._mark_item.mapToGlobal(QPoint(0, 0))
+            sub.move(g.x() + self._panel.width() - 6, g.y() - 6)
 
         sub.show()
         self._submenu = sub
-
-    def _schedule_close_submenu(self):
-        self._submenu_timer.start()
 
     def _close_submenu(self):
         if self._submenu is not None:
@@ -284,9 +248,9 @@ class SelectionContextMenu(QWidget):
             self._submenu.deleteLater()
             self._submenu = None
 
-    # ── helpers ──────────────────────────────────────────────────────
+    # -- helpers --
 
-    def _emit(self, action: str):
+    def _emit(self, action):
         self.action_selected.emit(action)
         self._cleanup()
 
@@ -296,3 +260,9 @@ class SelectionContextMenu(QWidget):
             self._panel.close()
             self._panel.deleteLater()
             self._panel = None
+        self._mark_item = None
+        if self._click_filter:
+            app = QApplication.instance()
+            if app:
+                app.removeEventFilter(self._click_filter)
+            self._click_filter = None
