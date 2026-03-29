@@ -555,6 +555,9 @@ class ViewerPage(QWidget):
         self.markings_panel.marking_unhovered.connect(self._on_marking_unhovered)
         self.markings_panel.marking_selected.connect(self._on_marking_selected)
         self.markings_panel.marking_deleted.connect(self._on_marking_deleted)
+        self.markings_panel.marking_edited.connect(self._on_marking_edited)
+        self.markings_panel.marking_focus.connect(self._on_marking_focus)
+        self.markings_panel.annotation_created.connect(self._on_annotation_created)
         self.markings_panel.undo_requested.connect(self._undo)
         self.markings_panel.redo_requested.connect(self._redo)
         self.content.addWidget(self.markings_panel)
@@ -1014,12 +1017,8 @@ class ViewerPage(QWidget):
         self._sel_indicator.setStyleSheet(f"background: {T.WHITE}; border: none; color: transparent;")
 
     def _show_annotation_form(self, lead, t1, t2):
-        """Create an annotation marking with default category."""
-        marking = Marking(type="annotation", lead=lead, t1=t1, t2=t2,
-                          category="Patologia", source="user")
-        self._marking_store.add(marking)
-        self._refresh_markings()
-        self.markings_panel.set_selected(marking.id)
+        """Open the annotation creation form in the markings panel."""
+        self.markings_panel.show_annotation_form(lead, t1, t2)
 
     def _refresh_markings(self):
         """Sync marking store to canvas and panel."""
@@ -1032,7 +1031,8 @@ class ViewerPage(QWidget):
         ]
         self.single_lead.update()
 
-        # Panel: show all markings
+        # Panel: show all markings + set current lead for filtering
+        self.markings_panel.set_current_lead(lead)
         self.markings_panel.set_markings(self._marking_store.get_all())
         self.markings_panel.set_undo_enabled(self._marking_store.can_undo)
         self.markings_panel.set_redo_enabled(self._marking_store.can_redo)
@@ -1056,6 +1056,42 @@ class ViewerPage(QWidget):
         self._marking_store.delete(marking_id)
         self._refresh_markings()
         self._save_ann()
+
+    def _on_marking_focus(self, marking_id: str):
+        """Scroll canvas to show the marking, switching lead if needed."""
+        m = self._marking_store.get_by_id(marking_id)
+        if not m:
+            return
+        # Switch to the marking's lead
+        if m.lead != self.lead_sidebar.active_lead():
+            self.lead_sidebar._select(m.lead)
+        # Center the view on the marking
+        mid = (m.t1 + m.t2) / 2
+        self.time_pos = max(0.0, mid - self._window_1 / 2)
+        self.time_pos = min(self.time_pos, max(0.0, self.duration - self._window_1))
+        self._restore_scrubber_range()
+        self._refresh_single_lead()
+        self._update_time_display()
+        # Highlight it
+        self.single_lead.selected_marking = marking_id
+        self.single_lead.update()
+
+    def _on_marking_edited(self, marking_id: str, field: str, value: str):
+        self._marking_store.edit(marking_id, **{field: value})
+        # Regenerate label for annotations when category changes
+        m = self._marking_store.get_by_id(marking_id)
+        if m and m.type == "annotation" and field == "category":
+            self._marking_store.edit(marking_id, label=value)
+        self._refresh_markings()
+        self._save_ann()
+
+    def _on_annotation_created(self, lead: str, category: str, note: str, t1: float, t2: float):
+        marking = Marking(type="annotation", lead=lead, t1=t1, t2=t2,
+                          category=category, note=note, source="user")
+        self._marking_store.add(marking)
+        self._refresh_markings()
+        self._save_ann()
+        self.markings_panel.set_selected(marking.id)
 
     def _undo(self):
         if self._marking_store.undo():
