@@ -293,13 +293,15 @@ class _MarkingCard(QFrame):
 # ---------------------------------------------------------------------------
 
 class MarkingsPanel(QWidget):
-    """Unified markings side-panel (280px wide)."""
+    """Unified markings side-panel with list + annotation form views."""
 
     marking_hovered = Signal(str)
     marking_unhovered = Signal()
     marking_selected = Signal(str)
     marking_deleted = Signal(str)
-    marking_edited = Signal(str, str, str)
+    marking_edited = Signal(str, str, str)  # id, field, new_value
+    annotation_created = Signal(str, str, str, float, float)  # lead, category, note, t1, t2
+    marking_focus = Signal(str)  # id — scroll canvas to show this marking
     undo_requested = Signal()
     redo_requested = Signal()
 
@@ -311,6 +313,8 @@ class MarkingsPanel(QWidget):
         self._markings: list = []
         self._cards: list[_MarkingCard] = []
         self._selected_id: str | None = None
+        self._current_lead: str = ""
+        self._lead_filter_active: bool = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 10)
@@ -340,45 +344,218 @@ class MarkingsPanel(QWidget):
         h_lay.addWidget(self._redo_btn)
 
         root.addWidget(header)
-
-        # separator
         root.addWidget(self._separator())
 
-        # --- 2. Filter pills ---
+        # --- 2. Lead scope toggle (two-button segmented control) ---
+        scope_row = QHBoxLayout()
+        scope_row.setContentsMargins(0, 4, 0, 4)
+        scope_row.setSpacing(0)
+
+        self._scope_all_btn = QPushButton("Wszystkie")
+        self._scope_all_btn.setFixedHeight(26)
+        self._scope_all_btn.setCursor(Qt.PointingHandCursor)
+        self._scope_all_btn.clicked.connect(lambda: self._set_lead_filter(False))
+        scope_row.addWidget(self._scope_all_btn)
+
+        self._scope_lead_btn = QPushButton("—")
+        self._scope_lead_btn.setFixedHeight(26)
+        self._scope_lead_btn.setCursor(Qt.PointingHandCursor)
+        self._scope_lead_btn.clicked.connect(lambda: self._set_lead_filter(True))
+        scope_row.addWidget(self._scope_lead_btn)
+
+        scope_row.addStretch()
+        root.addLayout(scope_row)
+
+        # --- 3. Filter pills ---
         self._pills = _FilterPills()
         self._pills.filter_changed.connect(self._rebuild_visible)
         root.addWidget(self._pills)
-        root.addSpacing(6)
-
-        # separator
+        root.addSpacing(4)
         root.addWidget(self._separator())
-        root.addSpacing(6)
+        root.addSpacing(4)
 
-        # --- 3. Search bar ---
+        # --- 4. Search bar ---
         self._search = QLineEdit()
         self._search.setPlaceholderText("Szukaj...")
-        self._search.setFixedHeight(30)
+        self._search.setFixedHeight(28)
         self._search.textChanged.connect(self._rebuild_visible)
         root.addWidget(self._search)
-        root.addSpacing(6)
+        root.addSpacing(4)
 
-        # --- 4. Scroll area ---
+        # --- 5. Stacked content: list view vs annotation form ---
+        from PySide6.QtWidgets import QStackedWidget, QComboBox, QTextEdit
+        self._stack = QStackedWidget()
+
+        # Page 0: card list
+        list_page = QWidget()
+        list_page.setStyleSheet(f"background: {T.WHITE}; border: none;")
+        list_lay = QVBoxLayout(list_page)
+        list_lay.setContentsMargins(0, 0, 0, 0)
+        list_lay.setSpacing(0)
+
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
         self._card_container = QWidget()
         self._card_layout = QVBoxLayout(self._card_container)
         self._card_layout.setContentsMargins(0, 4, 0, 4)
         self._card_layout.setSpacing(4)
         self._card_layout.addStretch()
-
         self._scroll.setWidget(self._card_container)
-        root.addWidget(self._scroll, 1)
+        list_lay.addWidget(self._scroll, 1)
 
-        # initial undo/redo state
+        self._stack.addWidget(list_page)  # index 0
+
+        # Page 1: annotation form
+        form_page = QWidget()
+        form_page.setStyleSheet(f"background: {T.WHITE}; border: none;")
+        form_lay = QVBoxLayout(form_page)
+        form_lay.setContentsMargins(0, 8, 0, 0)
+        form_lay.setSpacing(8)
+
+        form_title = QLabel("Nowa adnotacja")
+        form_title.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {T.ACCENT}; border: none;")
+        form_lay.addWidget(form_title)
+
+        self._form_region = QLabel("—")
+        self._form_region.setStyleSheet(
+            f"font-size: 12px; font-family: Menlo; color: {T.TEXT_SECONDARY};"
+            f"background: {T.BLUE_BG}; padding: 6px 10px; border-radius: 4px; border: none;"
+        )
+        form_lay.addWidget(self._form_region)
+
+        cat_lbl = QLabel("Kategoria")
+        cat_lbl.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED}; border: none;")
+        form_lay.addWidget(cat_lbl)
+
+        from PySide6.QtWidgets import QStyledItemDelegate
+        self._form_category = QComboBox()
+        self._form_category.addItems(["Patologia", "Norma", "Artefakt", "Do weryfikacji"])
+        self._form_category.setItemDelegate(QStyledItemDelegate(self._form_category))
+        self._form_category.setStyleSheet(
+            f"QComboBox {{ combobox-popup: 0; padding: 6px 10px; border: 1px solid {T.BORDER};"
+            f"  border-radius: 6px; font-size: 13px; background: {T.WHITE}; color: {T.TEXT}; }}"
+            f"QComboBox:hover {{ border-color: {T.ACCENT}; }}"
+            f"QComboBox::drop-down {{ border: none; width: 20px; }}"
+            f"QComboBox::down-arrow {{ image: none; border-left: 4px solid transparent;"
+            f"  border-right: 4px solid transparent; border-top: 5px solid {T.TEXT_MUTED}; margin-right: 8px; }}"
+            f"QComboBox QAbstractItemView {{ background: {T.WHITE}; color: {T.TEXT};"
+            f"  border: 1px solid {T.BORDER}; padding: 4px; font-size: 13px; outline: none;"
+            f"  selection-background-color: {T.BLUE_BG}; selection-color: {T.ACCENT}; }}"
+        )
+        form_lay.addWidget(self._form_category)
+
+        note_lbl = QLabel("Notatka")
+        note_lbl.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED}; border: none;")
+        form_lay.addWidget(note_lbl)
+
+        self._form_note = QTextEdit()
+        self._form_note.setPlaceholderText("Opis adnotacji...")
+        self._form_note.setMaximumHeight(80)
+        self._form_note.setStyleSheet(
+            f"QTextEdit {{ padding: 6px 8px; border: 1px solid {T.BORDER}; border-radius: 6px;"
+            f"  font-size: 13px; background: {T.WHITE}; color: {T.TEXT}; }}"
+            f"QTextEdit:focus {{ border-color: {T.ACCENT}; }}"
+        )
+        form_lay.addWidget(self._form_note)
+
+        from ui.widgets import make_action_btn
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(6)
+        btn_save = make_action_btn("Zapisz", primary=True)
+        btn_save.clicked.connect(self._on_form_save)
+        btn_row.addWidget(btn_save)
+        btn_cancel = make_action_btn("Anuluj")
+        btn_cancel.clicked.connect(self._on_form_cancel)
+        btn_row.addWidget(btn_cancel)
+        form_lay.addLayout(btn_row)
+        form_lay.addStretch()
+
+        self._stack.addWidget(form_page)  # index 1
+
+        # Page 2: edit form (for existing markings)
+        edit_page = QWidget()
+        edit_page.setStyleSheet(f"background: {T.WHITE}; border: none;")
+        edit_lay = QVBoxLayout(edit_page)
+        edit_lay.setContentsMargins(0, 8, 0, 0)
+        edit_lay.setSpacing(8)
+
+        edit_title = QLabel("Edytuj oznaczenie")
+        edit_title.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {T.ACCENT}; border: none;")
+        edit_lay.addWidget(edit_title)
+
+        self._edit_region = QLabel("—")
+        self._edit_region.setStyleSheet(
+            f"font-size: 12px; font-family: Menlo; color: {T.TEXT_SECONDARY};"
+            f"background: {T.BLUE_BG}; padding: 6px 10px; border-radius: 4px; border: none;"
+        )
+        edit_lay.addWidget(self._edit_region)
+
+        self._edit_cat_label = QLabel("Kategoria")
+        self._edit_cat_label.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED}; border: none;")
+        edit_lay.addWidget(self._edit_cat_label)
+
+        self._edit_category = QComboBox()
+        self._edit_category.addItems(["Patologia", "Norma", "Artefakt", "Do weryfikacji"])
+        self._edit_category.setItemDelegate(QStyledItemDelegate(self._edit_category))
+        self._edit_category.setStyleSheet(self._form_category.styleSheet())
+        edit_lay.addWidget(self._edit_category)
+
+        self._edit_note_label = QLabel("Notatka")
+        self._edit_note_label.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED}; border: none;")
+        edit_lay.addWidget(self._edit_note_label)
+
+        self._edit_note = QTextEdit()
+        self._edit_note.setPlaceholderText("Opis adnotacji...")
+        self._edit_note.setMaximumHeight(80)
+        self._edit_note.setStyleSheet(self._form_note.styleSheet())
+        edit_lay.addWidget(self._edit_note)
+
+        # Action buttons — row 1: save + focus
+        edit_row1 = QHBoxLayout()
+        edit_row1.setSpacing(6)
+        btn_edit_save = make_action_btn("Zapisz zmiany", primary=True)
+        btn_edit_save.clicked.connect(self._on_edit_save)
+        edit_row1.addWidget(btn_edit_save)
+        btn_edit_focus = QPushButton("Pokaż na wykresie")
+        btn_edit_focus.setCursor(Qt.PointingHandCursor)
+        btn_edit_focus.setStyleSheet(
+            f"QPushButton {{ padding: 8px; border-radius: 6px; border: 1px solid {T.ACCENT};"
+            f"  background: {T.WHITE}; color: {T.ACCENT}; font-size: 12px; }}"
+            f"QPushButton:hover {{ background: {T.BLUE_BG}; }}"
+        )
+        btn_edit_focus.clicked.connect(self._on_edit_focus)
+        edit_row1.addWidget(btn_edit_focus)
+        edit_lay.addLayout(edit_row1)
+
+        # Action buttons — row 2: delete + back
+        edit_row2 = QHBoxLayout()
+        edit_row2.setSpacing(6)
+        btn_edit_del = QPushButton("Usuń")
+        btn_edit_del.setCursor(Qt.PointingHandCursor)
+        btn_edit_del.setStyleSheet(
+            f"QPushButton {{ padding: 8px; border-radius: 6px; border: 1px solid {T.RED};"
+            f"  background: {T.WHITE}; color: {T.RED}; font-size: 12px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {T.RED}; color: {T.ACCENT_TEXT}; }}"
+        )
+        btn_edit_del.clicked.connect(self._on_edit_delete)
+        edit_row2.addWidget(btn_edit_del)
+        btn_edit_back = make_action_btn("Powrót")
+        btn_edit_back.clicked.connect(self._on_edit_back)
+        edit_row2.addWidget(btn_edit_back)
+        edit_lay.addLayout(edit_row2)
+        edit_lay.addStretch()
+
+        self._stack.addWidget(edit_page)  # index 2
+
+        root.addWidget(self._stack, 1)
+
         self._undo_enabled = False
         self._redo_enabled = False
+        self._form_lead = ""
+        self._form_t1 = 0.0
+        self._form_t2 = 0.0
+        self._editing_id = None
 
         self.apply_theme()
 
@@ -387,15 +564,46 @@ class MarkingsPanel(QWidget):
     # ---------------------------------------------------------------
 
     def set_markings(self, markings: list):
-        """Replace all cards with a new marking list."""
         self._markings = list(markings)
         self._rebuild_visible()
 
+    def set_current_lead(self, lead: str):
+        self._current_lead = lead
+        self._style_scope_buttons()
+        if self._lead_filter_active:
+            self._rebuild_visible()
+
     def set_selected(self, marking_id: str | None):
-        """Programmatically select a card (or deselect with None)."""
         self._selected_id = marking_id
         for card in self._cards:
             card.set_selected(card.marking.id == marking_id)
+
+    def show_annotation_form(self, lead: str, t1: float, t2: float):
+        """Switch to annotation creation form."""
+        self._form_lead = lead
+        self._form_t1 = t1
+        self._form_t2 = t2
+        self._form_region.setText(f"{lead}: {t1:.2f} — {t2:.2f} s")
+        self._form_category.setCurrentIndex(0)
+        self._form_note.clear()
+        self._stack.setCurrentIndex(1)
+
+    def show_edit_form(self, marking):
+        """Switch to edit form for an existing marking."""
+        self._editing_id = marking.id
+        self._edit_region.setText(f"{marking.lead}: {marking.t1:.2f} — {marking.t2:.2f} s")
+        if marking.type == "annotation":
+            self._edit_cat_label.show()
+            self._edit_category.show()
+            self._edit_category.setCurrentText(getattr(marking, "category", "Patologia"))
+        else:
+            self._edit_cat_label.hide()
+            self._edit_category.hide()
+        self._edit_note.setPlainText(getattr(marking, "note", ""))
+        self._stack.setCurrentIndex(2)
+
+    def show_list(self):
+        self._stack.setCurrentIndex(0)
 
     def set_undo_enabled(self, enabled: bool):
         self._undo_enabled = enabled
@@ -406,46 +614,31 @@ class MarkingsPanel(QWidget):
         self._style_undo_redo()
 
     def apply_theme(self):
-        """Reapply all styles for theme switch."""
         self.setStyleSheet(
-            f"MarkingsPanel {{"
-            f"  background: {T.WHITE};"
+            f"MarkingsPanel {{ background: {T.WHITE};"
             f"  border-left: 1px solid {T.BORDER};"
-            f"  border-top: none; border-right: none; border-bottom: none;"
-            f"}}"
+            f"  border-top: none; border-right: none; border-bottom: none; }}"
         )
-
-        # title
         self._title.setStyleSheet(
             f"border: none; color: {T.TEXT}; font-size: 14px;"
             f"  font-weight: 700; font-family: 'Helvetica Neue';"
         )
-
         self._style_undo_redo()
-
-        # search
+        self._style_scope_buttons()
         self._search.setStyleSheet(
             f"QLineEdit {{ border: 1px solid {T.BORDER}; border-radius: 6px;"
             f"  background: {T.WHITE}; color: {T.TEXT}; font-size: 12px;"
             f"  font-family: 'Helvetica Neue'; padding: 0 8px; }}"
             f"QLineEdit::placeholder {{ color: {T.TEXT_DIM}; }}"
         )
-
-        # scroll area — fill full width, no extra borders
         self._scroll.setStyleSheet(
             f"QScrollArea {{ border: none; background: {T.WHITE}; }}"
             f"QScrollBar:vertical {{ width: 6px; background: transparent; }}"
             f"QScrollBar::handle:vertical {{ background: {T.BORDER}; border-radius: 3px; min-height: 20px; }}"
             f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}"
         )
-        self._card_container.setStyleSheet(
-            f"background: {T.WHITE}; border: none;"
-        )
-
-        # pills
+        self._card_container.setStyleSheet(f"background: {T.WHITE}; border: none;")
         self._pills.apply_theme()
-
-        # cards
         for card in self._cards:
             card.apply_theme()
 
@@ -459,57 +652,69 @@ class MarkingsPanel(QWidget):
         sep.setStyleSheet(f"background: {T.BORDER}; border: none;")
         return sep
 
+    def _set_lead_filter(self, active: bool):
+        self._lead_filter_active = active
+        self._style_scope_buttons()
+        self._rebuild_visible()
+
+    def _style_scope_buttons(self):
+        lead = self._current_lead or "—"
+        self._scope_lead_btn.setText(f"Tylko {lead}")
+
+        active_style = (
+            f"QPushButton {{ border: 1px solid {T.ACCENT}; background: {T.ACCENT}; color: {T.ACCENT_TEXT};"
+            f"  font-size: 11px; padding: 4px 14px; border-radius: 4px; font-weight: 600; }}"
+        )
+        inactive_style = (
+            f"QPushButton {{ border: 1px solid {T.BORDER}; background: {T.WHITE}; color: {T.TEXT_MUTED};"
+            f"  font-size: 11px; padding: 4px 14px; border-radius: 4px; }}"
+            f"QPushButton:hover {{ background: {T.BG_SECONDARY}; color: {T.TEXT}; }}"
+        )
+
+        if self._lead_filter_active:
+            self._scope_all_btn.setStyleSheet(inactive_style)
+            self._scope_lead_btn.setStyleSheet(active_style)
+        else:
+            self._scope_all_btn.setStyleSheet(active_style)
+            self._scope_lead_btn.setStyleSheet(inactive_style)
+
     def _style_undo_redo(self):
-        for btn, enabled in (
-            (self._undo_btn, self._undo_enabled),
-            (self._redo_btn, self._redo_enabled),
-        ):
+        for btn, enabled in ((self._undo_btn, self._undo_enabled), (self._redo_btn, self._redo_enabled)):
             if enabled:
                 btn.setEnabled(True)
                 btn.setStyleSheet(
                     f"QPushButton {{ border: 1px solid {T.BORDER}; background: {T.WHITE};"
-                    f"  color: {T.TEXT}; font-size: 11px; border-radius: 4px;"
-                    f"  padding: 2px 8px; }}"
-                    f"QPushButton:hover {{ background: {T.BG_SECONDARY};"
-                    f"  border-color: {T.ACCENT}; color: {T.ACCENT}; }}"
+                    f"  color: {T.TEXT}; font-size: 11px; border-radius: 4px; padding: 2px 8px; }}"
+                    f"QPushButton:hover {{ background: {T.BG_SECONDARY}; border-color: {T.ACCENT}; color: {T.ACCENT}; }}"
                 )
             else:
                 btn.setEnabled(False)
                 btn.setStyleSheet(
                     f"QPushButton {{ border: 1px solid {T.BORDER_LIGHT}; background: transparent;"
-                    f"  color: {T.TEXT_DIM}; font-size: 11px; border-radius: 4px;"
-                    f"  padding: 2px 8px; }}"
+                    f"  color: {T.TEXT_DIM}; font-size: 11px; border-radius: 4px; padding: 2px 8px; }}"
                 )
 
     def _rebuild_visible(self):
-        """Clear and recreate cards based on current filter + search."""
-        # remove old cards
         for card in self._cards:
             card.setParent(None)
             card.deleteLater()
         self._cards.clear()
-
-        # remove stretch
         while self._card_layout.count():
             item = self._card_layout.takeAt(0)
-            # stretch items have no widget
             if item.widget():
                 item.widget().setParent(None)
 
         query = self._search.text().strip().lower()
-
         for m in self._markings:
-            # filter by pills
             if not self._pills.accepts(m.type):
                 continue
-            # filter by search text
+            if self._lead_filter_active and self._current_lead:
+                if getattr(m, "lead", "") != self._current_lead:
+                    continue
             if query:
                 haystack = " ".join([
-                    getattr(m, "label", "") or "",
-                    getattr(m, "lead", "") or "",
-                    getattr(m, "category", "") or "",
-                    getattr(m, "note", "") or "",
-                    m.type,
+                    getattr(m, "label", "") or "", getattr(m, "lead", "") or "",
+                    getattr(m, "category", "") or "", getattr(m, "note", "") or "", m.type,
                 ]).lower()
                 if query not in haystack:
                     continue
@@ -519,13 +724,10 @@ class MarkingsPanel(QWidget):
             card.hovered.connect(self.marking_hovered.emit)
             card.unhovered.connect(self.marking_unhovered.emit)
             card.delete_clicked.connect(self.marking_deleted.emit)
-
             if self._selected_id and m.id == self._selected_id:
                 card.set_selected(True)
-
             self._card_layout.addWidget(card)
             self._cards.append(card)
-
         self._card_layout.addStretch()
 
     def _on_card_clicked(self, marking_id: str):
@@ -533,3 +735,45 @@ class MarkingsPanel(QWidget):
         for card in self._cards:
             card.set_selected(card.marking.id == marking_id)
         self.marking_selected.emit(marking_id)
+
+        # Open edit form for the clicked marking
+        for m in self._markings:
+            if m.id == marking_id:
+                self.show_edit_form(m)
+                break
+
+    # --- form handlers ---
+
+    def _on_form_save(self):
+        cat = self._form_category.currentText()
+        note = self._form_note.toPlainText()
+        self.annotation_created.emit(self._form_lead, cat, note, self._form_t1, self._form_t2)
+        self._form_note.clear()
+        self._stack.setCurrentIndex(0)
+
+    def _on_form_cancel(self):
+        self._form_note.clear()
+        self._stack.setCurrentIndex(0)
+
+    def _on_edit_focus(self):
+        if self._editing_id:
+            self.marking_focus.emit(self._editing_id)
+
+    def _on_edit_save(self):
+        if self._editing_id:
+            cat = self._edit_category.currentText()
+            note = self._edit_note.toPlainText()
+            self.marking_edited.emit(self._editing_id, "category", cat)
+            self.marking_edited.emit(self._editing_id, "note", note)
+        self._stack.setCurrentIndex(0)
+        self._editing_id = None
+
+    def _on_edit_delete(self):
+        if self._editing_id:
+            self.marking_deleted.emit(self._editing_id)
+        self._stack.setCurrentIndex(0)
+        self._editing_id = None
+
+    def _on_edit_back(self):
+        self._stack.setCurrentIndex(0)
+        self._editing_id = None
