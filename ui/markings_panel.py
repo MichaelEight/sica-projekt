@@ -383,12 +383,17 @@ class MarkingsPanel(QWidget):
         root.addSpacing(4)
 
         # --- 5. Stacked content: list view vs annotation form ---
+        root.addWidget(self._separator())
+        root.addSpacing(4)
+
         from PySide6.QtWidgets import QStackedWidget, QComboBox, QTextEdit
         self._stack = QStackedWidget()
+        self._stack.setStyleSheet(f"background: {T.BG_SECONDARY}; border: none;")
 
         # Page 0: card list
         list_page = QWidget()
-        list_page.setStyleSheet(f"background: {T.WHITE}; border: none;")
+        list_page.setAutoFillBackground(True)
+        list_page.setStyleSheet(f"background: {T.BG_SECONDARY}; border: none;")
         list_lay = QVBoxLayout(list_page)
         list_lay.setContentsMargins(0, 0, 0, 0)
         list_lay.setSpacing(0)
@@ -408,9 +413,10 @@ class MarkingsPanel(QWidget):
 
         # Page 1: annotation form
         form_page = QWidget()
-        form_page.setStyleSheet(f"background: {T.WHITE}; border: none;")
+        form_page.setAutoFillBackground(True)
+        form_page.setStyleSheet(f"background: {T.BG_SECONDARY}; border: none;")
         form_lay = QVBoxLayout(form_page)
-        form_lay.setContentsMargins(0, 8, 0, 0)
+        form_lay.setContentsMargins(0, 10, 0, 10)
         form_lay.setSpacing(8)
 
         form_title = QLabel("Nowa adnotacja")
@@ -475,9 +481,10 @@ class MarkingsPanel(QWidget):
 
         # Page 2: edit form (for existing markings)
         edit_page = QWidget()
-        edit_page.setStyleSheet(f"background: {T.WHITE}; border: none;")
+        edit_page.setAutoFillBackground(True)
+        edit_page.setStyleSheet(f"background: {T.BG_SECONDARY}; border: none;")
         edit_lay = QVBoxLayout(edit_page)
-        edit_lay.setContentsMargins(0, 8, 0, 0)
+        edit_lay.setContentsMargins(0, 10, 0, 10)
         edit_lay.setSpacing(8)
 
         edit_title = QLabel("Edytuj oznaczenie")
@@ -614,8 +621,9 @@ class MarkingsPanel(QWidget):
         self._style_undo_redo()
 
     def apply_theme(self):
+        bg = T.BG_SECONDARY
         self.setStyleSheet(
-            f"MarkingsPanel {{ background: {T.WHITE};"
+            f"MarkingsPanel {{ background: {bg};"
             f"  border-left: 1px solid {T.BORDER};"
             f"  border-top: none; border-right: none; border-bottom: none; }}"
         )
@@ -631,13 +639,15 @@ class MarkingsPanel(QWidget):
             f"  font-family: 'Helvetica Neue'; padding: 0 8px; }}"
             f"QLineEdit::placeholder {{ color: {T.TEXT_DIM}; }}"
         )
+        bg = T.BG_SECONDARY
         self._scroll.setStyleSheet(
-            f"QScrollArea {{ border: none; background: {T.WHITE}; }}"
+            f"QScrollArea {{ border: none; background: {bg}; }}"
             f"QScrollBar:vertical {{ width: 6px; background: transparent; }}"
             f"QScrollBar::handle:vertical {{ background: {T.BORDER}; border-radius: 3px; min-height: 20px; }}"
             f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}"
         )
-        self._card_container.setStyleSheet(f"background: {T.WHITE}; border: none;")
+        self._card_container.setStyleSheet(f"background: {bg}; border: none;")
+        self._stack.setStyleSheet(f"background: {bg}; border: none;")
         self._pills.apply_theme()
         for card in self._cards:
             card.apply_theme()
