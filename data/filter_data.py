@@ -8,23 +8,12 @@ from typing import Dict, Iterable, Tuple
 import pandas as pd
 import wfdb
 from sklearn.model_selection import train_test_split
-import numpy as np
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATASET_DIR = os.path.join(BASE_DIR, "ptb-xl")
 PTBXL_DATABASE_PATH = os.path.join(DATASET_DIR, "ptbxl_database.csv")
 TRAINING_PATH = os.path.join(BASE_DIR, "training")
-
-# Mnożniki augmentacji dla klas mniejszościowych (tylko w zbiorze TRAIN).
-# Wartość oznacza, ile dodatkowych sygnałów stworzymy z jednego oryginalnego.
-AUGMENTATION_MULTIPLIERS = {
-    "back_heart_attack": 50,  # Z 8 sztuk w train zrobimy dodatkowe 400
-    "side_heart_attack": 15,  # Z 66 sztuk w train zrobimy dodatkowe 990
-    "complete_right_conduction_disorder": 3,
-    "complete_left_conduction_disorder": 3,
-    "incomplete_right_conduction_disorder": 1,
-}
 
 # Reguly agregacji:
 # - "add": sygnaly komplementarne sumujemy i obcinamy do 100.
@@ -35,12 +24,12 @@ CLASS_RULES: Dict[str, Dict[str, Iterable[str]]] = {
         "add": ["INJAS", "INJAL"],
         "average": ["AMI", "ASMI", "ALMI"],
     },
-    "side_heart_attack": {"add": ["INJLA"], "average": ["LMI"]},
+    "first_degree_av_block": {"add": ["1AVB"], "average": []},
     "bottom_heart_attack": {
         "add": ["INJIN"],
         "average": ["IMI", "ILMI"],
     },
-    "back_heart_attack": {"add": ["PMI"], "average": []},
+    "atrial_fibrillation": {"add": ["AFIB", "AFLT"], "average": []},
     "complete_right_conduction_disorder": {"add": ["CRBBB"], "average": []},
     "incomplete_right_conduction_disorder": {"add": ["IRBBB"], "average": []},
     "complete_left_conduction_disorder": {"add": ["CLBBB"], "average": []},
@@ -66,9 +55,9 @@ NEW_CLASS_COLUMNS = [
     "primary_class_probability",
     "class_healthy",
     "class_front_heart_attack",
-    "class_side_heart_attack",
+    "class_first_degree_av_block",
     "class_bottom_heart_attack",
-    "class_back_heart_attack",
+    "class_atrial_fibrillation",
     "class_complete_right_conduction_disorder",
     "class_incomplete_right_conduction_disorder",
     "class_complete_left_conduction_disorder",
@@ -183,37 +172,6 @@ def reset_split_dir(path: str) -> None:
         shutil.rmtree(path)
     os.makedirs(path, exist_ok=True)
 
-def generate_augmented_record(source_base: str, output_dir: str, new_record_name: str) -> None:
-    record = wfdb.rdrecord(source_base)
-    p_signal = record.p_signal.copy()
-
-    # Losowy wybór metody augmentacji
-    aug_type = np.random.choice(["noise", "scale", "shift"])
-
-    if aug_type == "noise":
-        noise = np.random.normal(0, 0.05, p_signal.shape)
-        p_signal += noise
-    elif aug_type == "scale":
-        scale_factor = np.random.uniform(0.85, 1.15)
-        p_signal *= scale_factor
-    elif aug_type == "shift":
-        shift_val = np.random.randint(-50, 50)
-        p_signal = np.roll(p_signal, shift_val, axis=0)
-
-    num_channels = p_signal.shape[1]
-    fmt = record.fmt if record.fmt else ["16"] * num_channels
-    units = record.units if record.units else ["mV"] * num_channels
-    sig_name = record.sig_name if record.sig_name else [f"CH{i}" for i in range(num_channels)]
-
-    wfdb.wrsamp(
-        record_name=new_record_name,
-        fs=record.fs,
-        units=units,
-        sig_name=sig_name,
-        p_signal=p_signal,
-        fmt=fmt,
-        write_dir=output_dir,
-    )
 
 def save_split(
     split_df: pd.DataFrame,
@@ -226,7 +184,6 @@ def save_split(
     reset_split_dir(split_dir)
 
     copied_files = 0
-    augmented_files = 0
     split_rows = []
     files_manifest = []
     wfdb_validated = 0
@@ -267,28 +224,6 @@ def save_split(
                     f"Brak pliku zrodlowego dla ecg_id={row['ecg_id']}: {src}"
                 )
 
-        if split_name == "train":
-            multiplier = AUGMENTATION_MULTIPLIERS.get(row["primary_class_8"], 0)
-            for i in range(multiplier):
-                aug_record_base = f"{local_record_base}_aug_{i}"
-
-                if not dry_run:
-                    generate_augmented_record(source_base, split_dir, aug_record_base)
-
-                augmented_files += 2  # .dat i .hea
-
-                # Stworzenie wpisu meta dla nowo wygenerowanego pliku
-                aug_row = row_out.copy()
-                aug_row.update(
-                    {
-                        "local_record_base": aug_record_base,
-                        "local_dat_file": aug_record_base + ".dat",
-                        "local_hea_file": aug_record_base + ".hea",
-                    }
-                )
-                split_rows.append(aug_row)
-                files_manifest.append(aug_record_base)
-
     split_df_with_meta = pd.DataFrame(split_rows)
 
     base_columns = [
@@ -319,9 +254,8 @@ def save_split(
         file_list.write("\n".join(files_manifest) + "\n")
 
     print(
-        f"[{split_name}] oryg. rekordow={len(split_df)}; po augmentacji={len(split_df_clean)}; "
-        f"wfdb_ok={wfdb_validated}; skop._pliki={copied_files}; aug._pliki={augmented_files}; "
-        f"csv={csv_path}; lista={file_list_path}"
+        f"[{split_name}] rekordow={len(split_df)}; wfdb_ok={wfdb_validated}; "
+        f"skopiowane_pliki={copied_files}; csv={csv_path}; lista={file_list_path}"
     )
 
 
