@@ -1,109 +1,123 @@
 # Zasady redukcji PTB-XL do 8 klas
 
-Ten dokument opisuje, jak i dlaczego etykiety SCP z PTB-XL zostaly zredukowane do 8 klas docelowych.
+Ten dokument opisuje aktualna logike z `data/filter_data.py`:
+agregacje etykiet SCP do 8 klas, filtrowanie rekordow oraz split 70/10/20.
 
 ## Cel
 
-- Zachowac procenty z `scp_codes` (bez utraty informacji o pozostalych chorobach).
-- Utworzyc jedna etykiete dominujaca (`primary_class_8`) do stratified split 70/10/20.
-- Uproscic klasy do zakresu, ktory obsluguje system.
+- Zmapowac `scp_codes` do 8 wspieranych klas.
+- Zachowac pelna informacje diagnostyczna w metadanych (`scp_codes_full`).
+- Przygotowac stabilny split stratified do treningu (`primary_class_8`).
 
-## Klasy docelowe i operacje
+## Aktualne klasy docelowe i reguly agregacji
 
-W kazdym rekordzie liczone sa kolumny `class_<nazwa_klasy>`.
-Kazdy wynik klasy po agregacji jest obcinany do maksymalnie `100.0`.
+W kazdym rekordzie wyliczane sa kolumny `class_<nazwa_klasy>`.
+Kazdy wynik jest liczony jako:
+
+`min(100.0, suma_kodow_add + srednia_kodow_average)`
+
+gdzie:
+- `add` - kody sumowane,
+- `average` - kody usredniane (tylko te obecne w `scp_codes`).
+
+Aktualne mapowanie (`CLASS_RULES`):
 
 1. `healthy`
-   - Kody: `NORM`
-   - Operacja: **dodawanie** (tu praktycznie wartosc bezposrednia)
-   - Uzasadnienie: to pojedynczy kod reprezentujacy brak istotnej patologii.
+   - `add`: `NORM`
+   - `average`: brak
 
 2. `front_heart_attack`
-   - Kody usredniane: `AMI`, `ASMI`, `ALMI`
-   - Kody dodawane: `INJAS`, `INJAL`
-   - Operacja koncowa: **suma(dodawane) + srednia(usredniane)**, obcieta do 100
-   - Uzasadnienie: kody AMI/ASMI/ALMI to blisko powiazane warianty zblizonego fenotypu, a INJAS/INJAL sa dodatkowym sygnalem urazowym dla tej samej lokalizacji.
+   - `add`: `INJAS`, `INJAL`
+   - `average`: `AMI`, `ASMI`, `ALMI`
 
-3. `side_heart_attack`
-   - Kody usredniane: `LMI`
-   - Kody dodawane: `INJLA`
-   - Operacja: **suma + srednia**
-   - Uzasadnienie: laczenie cechy zawalu bocznego i urazu bocznego.
+3. `first_degree_av_block`
+   - `add`: `1AVB`
+   - `average`: brak
 
 4. `bottom_heart_attack`
-   - Kody usredniane: `IMI`, `ILMI`
-   - Kody dodawane: `INJIN`
-   - Operacja: **suma + srednia**
-   - Uzasadnienie: analogicznie do innych lokalizacji zawalu, laczymy warianty zawalowe i urazowe.
+   - `add`: `INJIN`
+   - `average`: `IMI`, `ILMI`
 
-5. `back_heart_attack`
-   - Kody: `PMI`
-   - Operacja: **dodawanie**
-   - Uzasadnienie: pojedynczy kod reprezentujacy te klase.
+5. `atrial_fibrillation`
+   - `add`: `AFIB`, `AFLT`
+   - `average`: brak
 
 6. `complete_right_conduction_disorder`
-   - Kody: `CRBBB`
-   - Operacja: **dodawanie**
-   - Uzasadnienie: bezposrednie mapowanie 1:1.
+   - `add`: `CRBBB`
+   - `average`: brak
 
 7. `incomplete_right_conduction_disorder`
-   - Kody: `IRBBB`
-   - Operacja: **dodawanie**
-   - Uzasadnienie: bezposrednie mapowanie 1:1.
+   - `add`: `IRBBB`
+   - `average`: brak
 
 8. `complete_left_conduction_disorder`
-   - Kody: `CLBBB`
-   - Operacja: **dodawanie**
-   - Uzasadnienie: bezposrednie mapowanie 1:1.
+   - `add`: `CLBBB`
+   - `average`: brak
 
-## Co zostaje usuniete, a co zachowane
+## Filtrowanie rekordow
 
-- **Usuwane z klasyfikacji 8-klasowej:** wszystkie kody SCP nienalezace do listy powyzej.
-- **NIE gubimy informacji:** wszystkie oryginalne `scp_codes` sa zapisywane do `scp_codes_full`.
-- Dodatkowo zapisywane sa:
-  - `unsupported_codes` - kody spoza 8 klas,
-  - `unsupported_total_probability` - suma ich procentow.
+- Dla kazdego rekordu liczony jest wektor 8 klas.
+- Jesli maksymalny wynik klas (`max_score`) jest `<= 0`, rekord jest odrzucany.
+- Klasa dominujaca:
+  - `primary_class_8` = klasa z najwyzszym wynikiem,
+  - `primary_class_probability` = jej wartosc.
 
-Dzieki temu model trenuje na 8 klasach, ale metadane zachowuja pelna informacje diagnostyczna.
+## Co jest zachowywane poza 8 klasami
 
-## Wybor klasy dominujacej i split
+- Oryginalne `scp_codes` sa zachowane jako `scp_codes_full` (JSON).
+- Kody spoza mapowania trafiaja do:
+  - `unsupported_codes` (JSON),
+  - `unsupported_total_probability` (suma ich prawdopodobienstw).
 
-- `primary_class_8` = klasa z najwyzszym wynikiem wsrod 8 klas.
-- Split wykonujemy stratified po `primary_class_8`:
-  - train: 70%
-  - val: 10%
-  - test: 20%
+## Split 70/10/20 (stratified)
 
-To utrzymuje podobny rozklad klas w kazdej czesci zbioru.
+Split jest wykonywany dwuetapowo:
+
+1. `train_test_split(..., test_size=0.30, stratify=primary_class_8)`
+   - daje `train=70%` i `temp=30%`.
+2. `temp` dzielone na `val` i `test`:
+   - `test_size=2/3` dla `temp`,
+   - finalnie: `val=10%`, `test=20%` calego zbioru.
+
+Seed podzialu jest sterowany przez `--seed` (domyslnie `42`).
 
 ## Struktura wyjscia
+
+Tworzone sa katalogi:
 
 - `data/training/train/`
 - `data/training/val/`
 - `data/training/test/`
 
-Kazdy folder zawiera:
-- pliki `.dat` i `.hea` (bez podfolderow klas),
-- plik listy rekordow (`train_files.txt`, `val_files.txt`, `test_files.txt`),
-- CSV metadanych splitu (`train_metadata.csv`, `val_metadata.csv`, `test_metadata.csv`) z:
-  - wiekszoscia metadanych rekordu z `ptbxl_database.csv` (pod UI/wizualizacje),
-  - informacja o pliku,
-  - procentami 8 klas,
-  - klasa dominujaca,
-  - pelnym `scp_codes` i kodami niewspieranymi,
-  - lokalnymi nazwami plikow (`local_dat_file`, `local_hea_file`).
+Kazdy split zawiera:
 
-Podczas zapisu nowego CSV usuwane sa kolumny zwiazane ze starymi oznaczeniami/podzialem,
-np. `scp_codes`, `heart_axis`, `infarction_stadium1`, `infarction_stadium2`, `strat_fold`
-oraz oryginalne sciezki plikow (`filename_lr`, `filename_hr`, `signal_path`, `signal_file`).
+- pliki rekordow `.dat` i `.hea` (bez podfolderow klas),
+- liste rekordow: `train_files.txt` / `val_files.txt` / `test_files.txt`,
+- metadane: `train_metadata.csv` / `val_metadata.csv` / `test_metadata.csv`.
 
-## Dlaczego dalej korzystamy z WFDB
+W CSV sa m.in.:
 
-- Dla kazdego rekordu wykonywana jest walidacja `wfdb.rdheader(...)` przed kopiowaniem plikow.
-- Tylko rekordy z poprawnym naglowkiem WFDB sa przetwarzane dalej.
-- Parametry techniczne z naglowka (np. czestotliwosc) nie sa zapisywane do CSV,
-  bo w tym zbiorze wszystkie rekordy sa 500 Hz.
+- `ecg_id`,
+- `local_record_base`, `local_dat_file`, `local_hea_file`,
+- dane wejscowe z `ptbxl_database.csv` (poza wycietymi kolumnami legacy),
+- kolumny klas 8-klasowych i `primary_class_8`,
+- `unsupported_codes`, `unsupported_total_probability`.
 
-To daje pewnosc, ze po usunieciu katalogu `ptb-xl` pozostaje gotowy, sprawdzony i samowystarczalny zbior treningowy.
+Usuwane sa kolumny legacy (`OLD_LABEL_COLUMNS`), m.in.:
+`scp_codes`, `heart_axis`, `infarction_stadium1`, `infarction_stadium2`, `strat_fold`,
+`filename_lr`, `filename_hr`, `signal_path`, `signal_file`, `wfdb_fs`, `wfdb_sig_len`, `wfdb_n_sig`.
+
+## WFDB i walidacja rekordow
+
+- Dla kazdego rekordu wykonywane jest `wfdb.rdheader(...)`.
+- Jesli naglowek jest nieczytelny, proces przerywa blad.
+- Sprawdzana jest tez obecnosc plikow `.dat` i `.hea`.
+
+Opcja `--dry-run`:
+
+- nie kopiuje plikow `.dat/.hea`,
+- ale nadal wykonuje walidacje WFDB i generuje metadane/listy.
+
+To pozwala zbudowac spojną, samowystarczalna strukture `data/training/*` zgodna z aktualnym pipeline.
 
 
