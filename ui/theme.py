@@ -15,7 +15,9 @@ def set_dark_mode(dark: bool):
     global GRID_MINOR, GRID_MAJOR, SIGNAL_COLOR
     global GREEN, YELLOW, AMBER_BG, AMBER_BORDER, AMBER_TEXT, AMBER_SUB
     global PURPLE, RED, SEPARATOR, BADGE_NORM_BG, BADGE_NORM_TEXT
-    global BADGE_WARN_BG, BADGE_WARN_TEXT, TAG_BG, ICON_BG, STYLESHEET
+    global BADGE_WARN_BG, BADGE_WARN_TEXT, TAG_BG, ICON_BG
+    global GREEN_BG, GREEN_BORDER, BLUE_BG, PURPLE_BG
+    global BADGE_BLUE_BG, BADGE_BLUE_TEXT, AMBER, BAR_BG, BORDER_DASHED, STYLESHEET
 
     _dark_mode = dark
     if dark:
@@ -51,6 +53,15 @@ def set_dark_mode(dark: bool):
         BADGE_WARN_TEXT = "#ffd600"
         TAG_BG = "#1e1e1e"
         ICON_BG = "#0a1e0a"
+        GREEN_BG = "#0a2e1a"
+        GREEN_BORDER = "#1a4a2a"
+        BLUE_BG = "#0a1e3a"
+        PURPLE_BG = "#1a0a2e"
+        BADGE_BLUE_BG = "#1e3a5f"
+        BADGE_BLUE_TEXT = "#93c5fd"
+        AMBER = "#f59e0b"
+        BAR_BG = "#3a3a3a"
+        BORDER_DASHED = "#3a3a3a"
     else:
         BG = "#f5f6f8"
         BG_SECONDARY = "#f9fafb"
@@ -84,6 +95,15 @@ def set_dark_mode(dark: bool):
         BADGE_WARN_TEXT = "#92400e"
         TAG_BG = "#f0f1f3"
         ICON_BG = "#eef4ff"
+        GREEN_BG = "#f0fdf4"
+        GREEN_BORDER = "#bbf7d0"
+        BLUE_BG = "#eff6ff"
+        PURPLE_BG = "#f5f3ff"
+        BADGE_BLUE_BG = "#dbeafe"
+        BADGE_BLUE_TEXT = "#1e40af"
+        AMBER = "#f59e0b"
+        BAR_BG = "#d1d5db"
+        BORDER_DASHED = "#c5cad3"
 
     STYLESHEET = f"""
 QMainWindow, QWidget#centralWidget {{

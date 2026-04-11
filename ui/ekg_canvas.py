@@ -7,6 +7,9 @@ from PySide6.QtWidgets import QWidget
 
 import ui.theme as T
 from ui.theme import LEAD_SEEDS, LEAD_AMPS
+from ui.app_logger import get_logger
+
+_log = get_logger("ekg_canvas")
 
 # Marking identity colors (RGB tuples)
 MARKING_COLORS = {
@@ -141,6 +144,27 @@ class EkgCellCanvas(QWidget):
         if self.width() < 2 or self.height() < 2:
             return
         p = QPainter(self)
+        try:
+            self._paint_impl(p, event)
+        except Exception:
+            _log.exception(
+                "paintEvent failed: lead=%s t_start=%s t_end=%s sig_len=%s "
+                "size=%sx%s sweep=%s autoscan=%s gt=%s analysis=%s",
+                getattr(self, "lead_name", None),
+                getattr(self, "t_start", None),
+                getattr(self, "t_end", None),
+                (len(self.signal) if self.signal is not None else None),
+                self.width(), self.height(),
+                getattr(self, "_sweep_pos", None),
+                len(getattr(self, "autoscan_regions", []) or []),
+                len(getattr(self, "gt_annotations", []) or []),
+                getattr(self, "analysis_region", None),
+            )
+        finally:
+            if p.isActive():
+                p.end()
+
+    def _paint_impl(self, p, event):
         p.setRenderHint(QPainter.Antialiasing, True)
         full_w, full_h = self.width(), self.height()
         ins = self.INSET
@@ -269,109 +293,109 @@ class EkgCellCanvas(QWidget):
                     arrow_sz = 6
 
                     # Vertical ticks (full height = prominent)
-                    painter.setPen(QPen(color, pen_w))
-                    painter.drawLine(QPointF(mx1, tick_top), QPointF(mx1, tick_bot))
-                    painter.drawLine(QPointF(mx2, tick_top), QPointF(mx2, tick_bot))
+                    p.setPen(QPen(color, pen_w))
+                    p.drawLine(QPointF(mx1, tick_top), QPointF(mx1, tick_bot))
+                    p.drawLine(QPointF(mx2, tick_top), QPointF(mx2, tick_bot))
                     # Horizontal connector
-                    painter.drawLine(QPointF(mx1, arrow_y), QPointF(mx2, arrow_y))
+                    p.drawLine(QPointF(mx1, arrow_y), QPointF(mx2, arrow_y))
                     # Left arrowhead
                     path_l = QPainterPath()
                     path_l.moveTo(mx1, arrow_y)
                     path_l.lineTo(mx1 + arrow_sz, arrow_y - arrow_sz * 0.5)
                     path_l.lineTo(mx1 + arrow_sz, arrow_y + arrow_sz * 0.5)
                     path_l.closeSubpath()
-                    painter.setBrush(QBrush(color))
-                    painter.drawPath(path_l)
+                    p.setBrush(QBrush(color))
+                    p.drawPath(path_l)
                     # Right arrowhead
                     path_r = QPainterPath()
                     path_r.moveTo(mx2, arrow_y)
                     path_r.lineTo(mx2 - arrow_sz, arrow_y - arrow_sz * 0.5)
                     path_r.lineTo(mx2 - arrow_sz, arrow_y + arrow_sz * 0.5)
                     path_r.closeSubpath()
-                    painter.drawPath(path_r)
-                    painter.setBrush(Qt.NoBrush)
+                    p.drawPath(path_r)
+                    p.setBrush(Qt.NoBrush)
 
                     # Dashed vertical lines extending down to signal area
                     dash_pen = QPen(QColor(r, g, b, 80), 1.0, Qt.DotLine)
-                    painter.setPen(dash_pen)
-                    painter.drawLine(QPointF(mx1, tick_bot), QPointF(mx1, h))
-                    painter.drawLine(QPointF(mx2, tick_bot), QPointF(mx2, h))
+                    p.setPen(dash_pen)
+                    p.drawLine(QPointF(mx1, tick_bot), QPointF(mx1, h))
+                    p.drawLine(QPointF(mx2, tick_bot), QPointF(mx2, h))
 
                     # Label centered above arrow
                     if m_label:
-                        painter.setFont(QFont("Menlo", 9, QFont.Bold) if is_selected else label_font)
-                        fm = painter.fontMetrics()
+                        p.setFont(QFont("Menlo", 9, QFont.Bold) if is_selected else label_font)
+                        fm = p.fontMetrics()
                         tw = fm.horizontalAdvance(m_label)
                         lx = (mx1 + mx2) / 2 - tw / 2
                         ly = tick_top - fm.height() - 1
                         ly = max(1, ly)
                         pill_bg = QColor(T.WHITE)
                         pill_bg.setAlpha(220)
-                        painter.fillRect(QRectF(lx - 3, ly, tw + 6, fm.height() + 2), pill_bg)
-                        painter.setPen(color)
-                        painter.drawText(QPointF(lx, ly + fm.ascent()), m_label)
+                        p.fillRect(QRectF(lx - 3, ly, tw + 6, fm.height() + 2), pill_bg)
+                        p.setPen(color)
+                        p.drawText(QPointF(lx, ly + fm.ascent()), m_label)
 
                 elif is_annotation:
                     alpha = 50 if is_selected else (35 if is_hovered else 20)
-                    painter.fillRect(QRectF(mx1, 0, mx2 - mx1, h), QColor(r, g, b, alpha))
+                    p.fillRect(QRectF(mx1, 0, mx2 - mx1, h), QColor(r, g, b, alpha))
                     pen_w = 2.5 if is_selected else (1.5 if is_hovered else 1.0)
-                    painter.setPen(QPen(color, pen_w, Qt.DashLine))
-                    painter.drawLine(QPointF(mx1, 0), QPointF(mx1, h))
-                    painter.drawLine(QPointF(mx2, 0), QPointF(mx2, h))
+                    p.setPen(QPen(color, pen_w, Qt.DashLine))
+                    p.drawLine(QPointF(mx1, 0), QPointF(mx1, h))
+                    p.drawLine(QPointF(mx2, 0), QPointF(mx2, h))
                     if m_label:
-                        painter.setFont(QFont("Menlo", 9, QFont.Bold) if is_selected else label_font)
-                        fm = painter.fontMetrics()
+                        p.setFont(QFont("Menlo", 9, QFont.Bold) if is_selected else label_font)
+                        fm = p.fontMetrics()
                         tw = fm.horizontalAdvance(m_label)
                         lx = mx1 + 4
                         ly = 4
                         pill_bg = QColor(T.WHITE)
                         pill_bg.setAlpha(210)
-                        painter.fillRect(QRectF(lx - 3, ly, tw + 6, fm.height() + 2), pill_bg)
-                        painter.setPen(color)
-                        painter.drawText(QPointF(lx, ly + fm.ascent()), m_label)
+                        p.fillRect(QRectF(lx - 3, ly, tw + 6, fm.height() + 2), pill_bg)
+                        p.setPen(color)
+                        p.drawText(QPointF(lx, ly + fm.ascent()), m_label)
 
                 else:
                     alpha = 50 if is_selected else (35 if is_hovered else 20)
-                    painter.fillRect(QRectF(mx1, 0, mx2 - mx1, h), QColor(r, g, b, alpha))
+                    p.fillRect(QRectF(mx1, 0, mx2 - mx1, h), QColor(r, g, b, alpha))
                     pen_w = 2.5 if is_selected else (1.5 if is_hovered else 1.0)
-                    painter.setPen(QPen(color, pen_w))
-                    painter.drawLine(QPointF(mx1, 0), QPointF(mx1, h))
-                    painter.drawLine(QPointF(mx2, 0), QPointF(mx2, h))
+                    p.setPen(QPen(color, pen_w))
+                    p.drawLine(QPointF(mx1, 0), QPointF(mx1, h))
+                    p.drawLine(QPointF(mx2, 0), QPointF(mx2, h))
                     if m_label:
-                        painter.setFont(QFont("Menlo", 9, QFont.Bold) if is_selected else label_font)
-                        fm = painter.fontMetrics()
+                        p.setFont(QFont("Menlo", 9, QFont.Bold) if is_selected else label_font)
+                        fm = p.fontMetrics()
                         tw = fm.horizontalAdvance(m_label)
                         lx = mx1 + 4
                         ly = 4
                         pill_bg = QColor(T.WHITE)
                         pill_bg.setAlpha(210)
-                        painter.fillRect(QRectF(lx - 3, ly, tw + 6, fm.height() + 2), pill_bg)
-                        painter.setPen(color)
-                        painter.drawText(QPointF(lx, ly + fm.ascent()), m_label)
+                        p.fillRect(QRectF(lx - 3, ly, tw + 6, fm.height() + 2), pill_bg)
+                        p.setPen(color)
+                        p.drawText(QPointF(lx, ly + fm.ascent()), m_label)
 
         # Selection preview (completed selection, not yet committed — dashed purple)
         if self.selection_preview:
             sp_t1, sp_t2 = self.selection_preview
             spx1 = sig_start + ((sp_t1 - self.t_start) / duration) * (w - sig_start)
             spx2 = sig_start + ((sp_t2 - self.t_start) / duration) * (w - sig_start)
-            painter.fillRect(QRectF(spx1, 0, spx2 - spx1, h), QColor(139, 92, 246, 30))
-            painter.setPen(QPen(QColor(139, 92, 246), 2.0, Qt.DashLine))
-            painter.drawLine(QPointF(spx1, 0), QPointF(spx1, h))
-            painter.drawLine(QPointF(spx2, 0), QPointF(spx2, h))
+            p.fillRect(QRectF(spx1, 0, spx2 - spx1, h), QColor(139, 92, 246, 30))
+            p.setPen(QPen(QColor(139, 92, 246), 2.0, Qt.DashLine))
+            p.drawLine(QPointF(spx1, 0), QPointF(spx1, h))
+            p.drawLine(QPointF(spx2, 0), QPointF(spx2, h))
 
         # Pending marker + live preview (first click placed, following mouse)
         if self.pending_marker is not None:
             mk_x = sig_start + ((self.pending_marker - self.t_start) / duration) * (w - sig_start)
-            painter.setPen(QPen(QColor(139, 92, 246), 2.0, Qt.DashLine))
-            painter.drawLine(QPointF(mk_x, 0), QPointF(mk_x, h))
+            p.setPen(QPen(QColor(139, 92, 246), 2.0, Qt.DashLine))
+            p.drawLine(QPointF(mk_x, 0), QPointF(mk_x, h))
             # Live fill to hover position
             if self._hover_x is not None:
                 hx = self._hover_x
                 left_x = min(mk_x, hx)
                 right_x = max(mk_x, hx)
-                painter.fillRect(QRectF(left_x, 0, right_x - left_x, h), QColor(139, 92, 246, 15))
-                painter.setPen(QPen(QColor(139, 92, 246, 120), 1.0, Qt.DotLine))
-                painter.drawLine(QPointF(hx, 0), QPointF(hx, h))
+                p.fillRect(QRectF(left_x, 0, right_x - left_x, h), QColor(139, 92, 246, 15))
+                p.setPen(QPen(QColor(139, 92, 246, 120), 1.0, Qt.DotLine))
+                p.drawLine(QPointF(hx, 0), QPointF(hx, h))
 
         # Zero line
         if self.show_zero_line:
@@ -463,13 +487,13 @@ class EkgCellCanvas(QWidget):
                     ax1 = max(sig_s_a, ax1)
                     ax2 = min(float(w), ax2)
                     if ax2 > ax1:
-                        painter.fillRect(QRectF(ax1, 0, ax2 - ax1, h),
+                        p.fillRect(QRectF(ax1, 0, ax2 - ax1, h),
                                          _AUTOSCAN_COLORS[min(code, 2)])
 
                 # Draw autoscan labels — second pass after all regions
                 if self.show_autoscan_labels:
-                    painter.setFont(QFont("Menlo", 14, QFont.Bold))
-                    fm = painter.fontMetrics()
+                    p.setFont(QFont("Menlo", 14, QFont.Bold))
+                    fm = p.fontMetrics()
                     line_h = fm.height()
                     label_idx = 0
                     for region in self.autoscan_regions:
@@ -497,14 +521,14 @@ class EkgCellCanvas(QWidget):
                         if pill_x + pill_w > sig_s_a and pill_x < w:
                             bg = QColor(T.WHITE)
                             bg.setAlpha(220)
-                            painter.fillRect(
+                            p.fillRect(
                                 QRectF(pill_x, by - 3, pill_w, total_h + 6), bg)
-                            painter.setPen(QColor(T.TEXT))
+                            p.setPen(QColor(T.TEXT))
                             for li, line in enumerate(label_lines):
                                 tw = fm.horizontalAdvance(line)
                                 tx = pill_x + (pill_w - tw) / 2
                                 ty = by + (li + 1) * line_h
-                                painter.drawText(QPointF(tx, ty), line)
+                                p.drawText(QPointF(tx, ty), line)
 
         # Ground truth annotation brackets
         if self.gt_annotations and self.show_autoscan_labels:
@@ -513,8 +537,8 @@ class EkgCellCanvas(QWidget):
             sig_w_g = w - sig_s_g
             if sig_w_g > 0 and duration > 0:
                 gt_color = QColor(T.GREEN)
-                painter.setFont(QFont("Menlo", 10, QFont.Bold))
-                fm_gt = painter.fontMetrics()
+                p.setFont(QFont("Menlo", 10, QFont.Bold))
+                fm_gt = p.fontMetrics()
                 tick_h = 8
                 bracket_y = 28  # below lead label
                 for gt_s, gt_e, gt_label in self.gt_annotations:
@@ -525,11 +549,11 @@ class EkgCellCanvas(QWidget):
                     if gx2 <= gx1:
                         continue
                     # Bracket: vertical ticks + horizontal line
-                    painter.setPen(QPen(gt_color, 1.5))
-                    painter.drawLine(QPointF(gx1, bracket_y), QPointF(gx1, bracket_y + tick_h))
-                    painter.drawLine(QPointF(gx2, bracket_y), QPointF(gx2, bracket_y + tick_h))
+                    p.setPen(QPen(gt_color, 1.5))
+                    p.drawLine(QPointF(gx1, bracket_y), QPointF(gx1, bracket_y + tick_h))
+                    p.drawLine(QPointF(gx2, bracket_y), QPointF(gx2, bracket_y + tick_h))
                     line_y = bracket_y + tick_h / 2
-                    painter.drawLine(QPointF(gx1, line_y), QPointF(gx2, line_y))
+                    p.drawLine(QPointF(gx1, line_y), QPointF(gx2, line_y))
                     # Label centered above the line
                     tw = fm_gt.horizontalAdvance(gt_label)
                     tx = (gx1 + gx2) / 2 - tw / 2
@@ -537,9 +561,9 @@ class EkgCellCanvas(QWidget):
                     # Background pill for readability
                     pill_bg = QColor(T.WHITE)
                     pill_bg.setAlpha(220)
-                    painter.fillRect(QRectF(tx - 4, ty - fm_gt.ascent(), tw + 8, fm_gt.height() + 2), pill_bg)
-                    painter.setPen(gt_color)
-                    painter.drawText(QPointF(tx, ty), gt_label)
+                    p.fillRect(QRectF(tx - 4, ty - fm_gt.ascent(), tw + 8, fm_gt.height() + 2), pill_bg)
+                    p.setPen(gt_color)
+                    p.drawText(QPointF(tx, ty), gt_label)
 
         # Analysis overlay
         if self.analysis_clickable_end is not None or self.analysis_region is not None:
@@ -556,7 +580,7 @@ class EkgCellCanvas(QWidget):
                     if ce < self.t_end:
                         gx = t_to_x(ce)
                         gray = QColor(128, 128, 128, 60)
-                        painter.fillRect(QRectF(gx, 0, w - gx, h), gray)
+                        p.fillRect(QRectF(gx, 0, w - gx, h), gray)
 
                 # Selected 10s region
                 if self.analysis_region is not None:
@@ -565,20 +589,20 @@ class EkgCellCanvas(QWidget):
                     ax2 = min(float(w), t_to_x(ar_end))
                     if ax2 > ax1:
                         sel = QColor(74, 158, 255, 35)
-                        painter.fillRect(QRectF(ax1, 0, ax2 - ax1, h), sel)
-                        painter.setPen(QPen(QColor(T.ACCENT), 1.5, Qt.DashLine))
-                        painter.drawLine(QPointF(ax1, 0), QPointF(ax1, h))
-                        painter.drawLine(QPointF(ax2, 0), QPointF(ax2, h))
+                        p.fillRect(QRectF(ax1, 0, ax2 - ax1, h), sel)
+                        p.setPen(QPen(QColor(T.ACCENT), 1.5, Qt.DashLine))
+                        p.drawLine(QPointF(ax1, 0), QPointF(ax1, h))
+                        p.drawLine(QPointF(ax2, 0), QPointF(ax2, h))
                         # Label
                         label = f"{ar_start:.1f} – {ar_end:.1f} s"
-                        painter.setFont(QFont("Menlo", 8))
-                        painter.setPen(QColor(T.ACCENT))
+                        p.setFont(QFont("Menlo", 8))
+                        p.setPen(QColor(T.ACCENT))
                         lbl_bg = QColor(T.WHITE)
                         lbl_bg.setAlpha(200)
-                        lw = painter.fontMetrics().horizontalAdvance(label) + 6
+                        lw = p.fontMetrics().horizontalAdvance(label) + 6
                         lx = (ax1 + ax2) / 2 - lw / 2
-                        painter.fillRect(QRectF(lx, 2, lw, 14), lbl_bg)
-                        painter.drawText(QPointF(lx + 3, 12), label)
+                        p.fillRect(QRectF(lx, 2, lw, 14), lbl_bg)
+                        p.drawText(QPointF(lx + 3, 12), label)
 
         # Lead label
         if self.show_label and self.lead_name:
@@ -598,10 +622,8 @@ class EkgCellCanvas(QWidget):
                 else:
                     hover_color = QColor(0, 0, 0, 77)
                 hover_pen = QPen(hover_color, 1.0, Qt.DashLine)
-                painter.setPen(hover_pen)
-                painter.drawLine(QPointF(hx, 0), QPointF(hx, h))
-
-        painter.end()
+                p.setPen(hover_pen)
+                p.drawLine(QPointF(hx, 0), QPointF(hx, h))
 
     def _px_to_time(self, px_x):
         """Convert a pixel x position to time in seconds."""

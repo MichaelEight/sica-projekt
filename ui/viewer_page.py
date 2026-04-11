@@ -1216,6 +1216,17 @@ class ViewerPage(QWidget):
         self.time_pos = new_pos
         self.scrubber.setValue(int(new_pos * 100))
 
+    def _restore_scrubber_range(self):
+        """Recompute scrubber range from current signal duration and zoom."""
+        if self.signal is None:
+            return
+        max_window = max(self._window_12, self._window_1)
+        self._scrubber_max = max(0.0, self.duration - max_window)
+        self.scrubber.blockSignals(True)
+        self.scrubber.setRange(0, int(self._scrubber_max * 100))
+        self.scrubber.setValue(int(self.time_pos * 100))
+        self.scrubber.blockSignals(False)
+
     def _apply_zoom(self):
         """Common zoom update: label, scrubber, view, time display."""
         # Clamp time_pos so window doesn't go past end

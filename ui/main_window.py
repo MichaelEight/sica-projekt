@@ -10,6 +10,9 @@ from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QMessageBox,
 
 import ui.theme as T
 from ui.theme import STANDARD_LEADS
+from ui.app_logger import get_logger
+
+_log = get_logger("main_window")
 from ui.upload_page import UploadPage, add_recent
 from ui.viewer_page import ViewerPage
 from ui.report_page import ReportPage
@@ -204,8 +207,11 @@ class MainWindow(QMainWindow):
     def _bg_load_gt(self):
         """Background thread: load or build ground truth cache."""
         try:
+            _log.info("loading ground truth cache in background")
             self._gt_lookup = _load_or_build_gt_cache()
+            _log.info("gt cache loaded: %d entries", len(self._gt_lookup or {}))
         except Exception:
+            _log.exception("failed to load ground truth cache")
             self._gt_lookup = {}
         self._gt_ready.set()
 
@@ -251,6 +257,18 @@ class MainWindow(QMainWindow):
 
     def _load_file(self, base_path: str):
         """Load a WFDB record or generate demo data."""
+        _log.info("load_file: %s", base_path)
+        try:
+            self._load_file_impl(base_path)
+        except Exception:
+            _log.exception("load_file failed: base_path=%r", base_path)
+            self.statusBar().clearMessage()
+            QMessageBox.critical(
+                self, "Błąd krytyczny",
+                "Nie udało się wczytać pliku. Szczegóły w logs/app.log"
+            )
+
+    def _load_file_impl(self, base_path: str):
         # Validate file format
         ext = os.path.splitext(base_path)[1].lower()
         if ext and ext not in ('.dat', '.hea', ''):
