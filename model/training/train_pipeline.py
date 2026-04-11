@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ from model.training.dataset import ECGWFDBDataset, compute_label_stats, compute_
 from model.training.evaluate import run_evaluation
 from model.training.metadata_inspector import inspect_all_metadata
 from model.training.metrics import safe_macro_auc
+from model.training.schema import infer_file_columns, infer_label_columns
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -84,9 +86,9 @@ class FocalLoss(nn.Module):
 
 
 class TolerantImbalanceBCELoss(nn.Module):
-    """BCEWithLogits z pos_weight + mniejsza kara dla błędów <= ok. 5 p.p."""
+    """BCEWithLogits z pos_weight + mniejsza kara dla błędów <= ok. 1 p.p."""
 
-    def __init__(self, pos_weight: torch.Tensor, tolerance: float = 0.05, in_tolerance_weight: float = 0.15) -> None:
+    def __init__(self, pos_weight: torch.Tensor, tolerance: float = 0.01, in_tolerance_weight: float = 0.15) -> None:
         super().__init__()
         self.register_buffer("pos_weight", pos_weight)
         self.tolerance = float(tolerance)
@@ -103,7 +105,7 @@ class TolerantImbalanceBCELoss(nn.Module):
         probs = torch.sigmoid(logits).detach()
         abs_err = torch.abs(probs - targets)
 
-        # Dla błędów w okolicy 5 p.p. waga jest wyraźnie mniejsza, ale niezerowa.
+        # Dla błędów w okolicy 1 p.p. waga jest wyraźnie mniejsza, ale niezerowa.
         denom = max(2.0 * self.tolerance, 1e-6)
         ramp = torch.clamp(abs_err / denom, min=0.0, max=1.0)
         scale = self.in_tolerance_weight + (1.0 - self.in_tolerance_weight) * (ramp**2)
@@ -133,12 +135,8 @@ def _derive_columns_fast() -> tuple[list[str], dict[str, str | None]]:
     train_meta_path = DATA_ROOT / "train" / "train_metadata.csv"
     meta = pd.read_csv(train_meta_path, nrows=0)
     cols = list(meta.columns)
-    label_columns = [c for c in cols if c.startswith("class_")]
-    file_columns: dict[str, str | None] = {
-        "base": "local_record_base" if "local_record_base" in cols else None,
-        "dat": next((c for c in cols if c.endswith("_dat_file")), None),
-        "hea": next((c for c in cols if c.endswith("_hea_file")), None),
-    }
+    label_columns = infer_label_columns(cols)
+    file_columns = infer_file_columns(cols)
     return label_columns, file_columns
 
 
@@ -146,6 +144,28 @@ def _derive_columns_fast() -> tuple[list[str], dict[str, str | None]]:
 def _ensure_output_dirs() -> None:
     os.makedirs(ANNOTATIONS_DIR, exist_ok=True)
 
+
+
+def _load_or_refresh_metadata_inspection() -> dict[str, object]:
+    cache_path = ANNOTATIONS_DIR / "metadata_inspection.json"
+    current_cols = list(pd.read_csv(DATA_ROOT / "train" / "train_metadata.csv", nrows=0).columns)
+    current_label_columns = infer_label_columns(current_cols)
+    current_file_columns = infer_file_columns(current_cols)
+
+    if cache_path.exists():
+        with cache_path.open(encoding="utf-8") as f:
+            cached = json.load(f)
+
+        if cached.get("label_columns") == current_label_columns and cached.get("file_columns") == current_file_columns:
+            print("[CACHE] Loaded metadata inspection from cache.")
+            return cached
+
+        print("[CACHE] Metadata inspection cache is stale; rebuilding.")
+
+    inspection = inspect_all_metadata(DATA_ROOT)
+    save_json(cache_path, inspection)
+    print("[CACHE] Metadata inspection saved to cache.")
+    return inspection
 
 
 def _build_dataloaders(
@@ -330,17 +350,7 @@ def main() -> None:
     if args.sanity:
         label_columns, file_columns = _derive_columns_fast()
     else:
-        cache_path = ANNOTATIONS_DIR / "metadata_inspection.json"
-        if cache_path.exists():
-            import json
-
-            with cache_path.open(encoding="utf-8") as f:
-                inspection = json.load(f)
-            print("[CACHE] Loaded metadata inspection from cache.")
-        else:
-            inspection = inspect_all_metadata(DATA_ROOT)
-            save_json(cache_path, inspection)
-            print("[CACHE] Metadata inspection saved to cache.")
+        inspection = _load_or_refresh_metadata_inspection()
         label_columns = inspection["label_columns"]  # type: ignore[assignment]
         file_columns = inspection["file_columns"]  # type: ignore[assignment]
 
@@ -372,7 +382,7 @@ def main() -> None:
         # TolerantImbalanceBCELoss
         criterion = TolerantImbalanceBCELoss(
             pos_weight=pos_weight.to(device),
-            tolerance=0.05,
+            tolerance=0.01,
             in_tolerance_weight=0.15,
         )
         print(f"[LOSS] Using TolerantImbalanceBCELoss")
