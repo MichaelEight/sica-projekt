@@ -360,7 +360,10 @@ class MainWindow(QMainWindow):
 
     def _toggle_dark_mode(self):
         from ui.theme import is_dark_mode, set_dark_mode
-        set_dark_mode(not is_dark_mode())
+        from ui import config
+        new_dark = not is_dark_mode()
+        set_dark_mode(new_dark)
+        config.set_dark_mode(new_dark)
         # Re-apply global stylesheet
         self.setStyleSheet(T.STYLESHEET)
         # Re-apply all component styles

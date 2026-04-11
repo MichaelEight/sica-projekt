@@ -459,7 +459,7 @@ class ViewerPage(QWidget):
 
         # Full analysis button (replaces Autoskan + Zaznacz do analizy + Analizuj)
         from ui.theme import is_dark_mode as _idm
-        _ah = '#00c864' if _idm() else '#3a8eef'
+        _ah = '#047857' if _idm() else '#3a8eef'
         self.btn_full_analysis = QPushButton("Pelna Analiza")
         self.btn_full_analysis.setObjectName("primary")
         self.btn_full_analysis.setCursor(Qt.PointingHandCursor)
@@ -684,7 +684,7 @@ class ViewerPage(QWidget):
         self.view_seg._apply_styles()
 
         from ui.theme import is_dark_mode as _idm
-        _ah = '#00c864' if _idm() else '#3a8eef'
+        _ah = '#047857' if _idm() else '#3a8eef'
         self.btn_full_analysis.setStyleSheet(f"""
             QPushButton {{ background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;
                 padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px; }}
@@ -1713,7 +1713,7 @@ class ViewerPage(QWidget):
 
     def _apply_pause_btn_style(self):
         from ui.theme import is_dark_mode
-        hover = '#00c864' if is_dark_mode() else '#3a8eef'
+        hover = '#047857' if is_dark_mode() else '#3a8eef'
         self.pause_btn.setStyleSheet(f"""
             QPushButton {{
                 height: 32px; padding: 0 14px; border: none;

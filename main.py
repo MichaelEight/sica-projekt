@@ -17,7 +17,13 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("EKG Assistant")
+    app.setOrganizationName("EKG Assistant")
     app.setFont(QFont(".AppleSystemUIFont", 13))
+
+    # Restore persisted theme before constructing widgets
+    from ui import config
+    from ui.theme import set_dark_mode
+    set_dark_mode(config.get_dark_mode())
 
     window = MainWindow()
     window.show()

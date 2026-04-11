@@ -24,8 +24,8 @@ def set_dark_mode(dark: bool):
         BG = "#0a0a0a"
         BG_SECONDARY = "#111111"
         TOPBAR = "#111111"
-        ACCENT = "#00e676"
-        ACCENT_TEXT = "#000000"       # black text on bright green
+        ACCENT = "#059669"
+        ACCENT_TEXT = "#ffffff"       # white text on dark green
         TEXT = "#e0e0e0"
         TEXT_SECONDARY = "#b0b0b0"
         TEXT_MUTED = "#9e9e9e"
@@ -141,7 +141,7 @@ QPushButton#primary {{
     font-weight: 600;
 }}
 QPushButton#primary:hover {{
-    background: {'#00c864' if dark else '#3a8eef'};
+    background: {'#047857' if dark else '#3a8eef'};
 }}
 QPushButton#secondary {{
     background: {BTN_DARK};
@@ -190,7 +190,7 @@ QPushButton#navPause {{
     font-weight: 700;
 }}
 QPushButton#navPause:hover {{
-    background: {'#00c864' if dark else '#3a8eef'};
+    background: {'#047857' if dark else '#3a8eef'};
 }}
 QScrollArea {{
     border: none;
@@ -231,7 +231,7 @@ QMessageBox QPushButton {{
     min-width: 60px;
 }}
 QMessageBox QPushButton:hover {{
-    background: {'#00c864' if dark else '#3a8eef'};
+    background: {'#047857' if dark else '#3a8eef'};
 }}
 """
 

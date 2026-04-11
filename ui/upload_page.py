@@ -212,7 +212,7 @@ class UploadPage(QWidget):
         icon.setFixedSize(32, 32)
         icon.setAlignment(Qt.AlignCenter)
         icon.setStyleSheet(f"""
-            background: #eef4ff; border-radius: 6px;
+            background: {T.ICON_BG}; border-radius: 6px;
             color: {T.ACCENT}; font-size: 14px; font-weight: 700; border: none;
         """)
         layout.addWidget(icon)
