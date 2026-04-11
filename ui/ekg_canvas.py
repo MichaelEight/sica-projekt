@@ -627,13 +627,14 @@ class EkgCellCanvas(QWidget):
 
     def _px_to_time(self, px_x):
         """Convert a pixel x position to time in seconds."""
-        w = self.width()
+        ins = self.INSET
+        w = self.width() - 2 * ins
         duration = self.t_end - self.t_start
         sig_start = 5 + w * 0.06 + 4 if self.show_cal else 0
         sig_w = w - sig_start
         if sig_w <= 0 or duration <= 0:
             return None
-        frac = (px_x - sig_start) / sig_w
+        frac = ((px_x - ins) - sig_start) / sig_w
         return self.t_start + frac * duration
 
     right_clicked = Signal(float, float)  # global_x, global_y for context menu positioning

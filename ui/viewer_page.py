@@ -7,7 +7,7 @@ import time
 
 import threading
 import numpy as np
-from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve, Property
+from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve, Property, QPoint
 from PySide6.QtGui import QFont, QPainter, QPen, QColor, QBrush
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QPushButton, QFrame, QStackedWidget, QSlider,
@@ -160,14 +160,12 @@ class AutoscanOverlay(QDialog):
         self._spinner_label.setText(self._pulse_frames[self._pulse_idx])
 
     def _center_on_parent(self):
-        if self.parent():
-            pr = self.parent().rect()
+        parent = self.parent()
+        if parent:
+            pr = parent.rect()
             x = pr.center().x() - self.width() // 2
             y = pr.center().y() - self.height() // 2
-            self.move(self.parent().mapToGlobal(pr.topLeft()).x() + x - self.parent().mapToGlobal(pr.topLeft()).x() + x,
-                      self.parent().mapToGlobal(pr.topLeft()).y() + y - self.parent().mapToGlobal(pr.topLeft()).y() + y)
-            # Simpler: just position relative to parent widget
-            self.move(x, y)
+            self.move(parent.mapToGlobal(QPoint(x, y)))
 
 
 def discover_models():
@@ -1287,7 +1285,9 @@ class ViewerPage(QWidget):
     # ── Autoscan ────────────────────────────────────────────────
 
     def _autoscan_cache_path(self) -> str:
-        key = f"{self._autoscan_file_path}:{self._model_path}"
+        file_key = self._base_path or self.filename or ""
+        model_key = self.model_combo.currentData() or self._model_path or ""
+        key = f"{file_key}:{model_key}"
         h = hashlib.md5(key.encode()).hexdigest()
         return os.path.join(".cache", "autoscan", f"{h}.json")
 
@@ -1355,9 +1355,9 @@ class ViewerPage(QWidget):
         if self.signal is None:
             return
 
-        # Try cache first
+        # Try cache first (keyed by full base_path + selected model)
         self._autoscan_file_path = self.filename
-        cached = self._load_autoscan_cache() if self._model_path else None
+        cached = self._load_autoscan_cache()
         if cached:
             self._autoscan_results = cached
             self._apply_autoscan_results()
@@ -1487,9 +1487,6 @@ class ViewerPage(QWidget):
         old_scans = [m for m in self._marking_store.get_all() if m.type == "scan"]
         for m in old_scans:
             self._marking_store.delete(m.id)
-        # Clear undo/redo for scan bulk operations
-        self._marking_store._undo_stack.clear()
-        self._marking_store._redo_stack.clear()
 
         for r in self._autoscan_results:
             marking = Marking(
@@ -1502,9 +1499,8 @@ class ViewerPage(QWidget):
                 source="ai",
             )
             self._marking_store.add(marking)
-        # Clear undo/redo again (bulk add should not be undoable)
-        self._marking_store._undo_stack.clear()
-        self._marking_store._redo_stack.clear()
+        # Scan bulk operations are not undoable
+        self._marking_store.clear_history()
         self._refresh_markings()
         self._save_ann()
 
@@ -1616,7 +1612,7 @@ class ViewerPage(QWidget):
             model, device = self._ensure_model_loaded()
         except Exception as e:
             from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Blad", f"Nie udalo sie zaladowac modelu:\n{e}")
+            QMessageBox.warning(self, "Błąd", f"Nie udało się załadować modelu:\n{e}")
             return
 
         from model.inference_api import predict_with_model

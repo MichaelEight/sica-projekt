@@ -32,21 +32,31 @@ def section_header(text):
     return lbl
 
 
+def _format_val(value, unit):
+    return f'{value} <span style="font-size:10px;color:{T.TEXT_DIM};">{unit}</span>' if unit else value
+
+
 def info_row(label, value, unit=""):
     row = QWidget()
     layout = QHBoxLayout(row)
     layout.setContentsMargins(0, 0, 0, 0)
     lbl = QLabel(label)
     lbl.setStyleSheet(f"color: {T.TEXT_MUTED}; font-size: 12px;")
-    val_text = f'{value} <span style="font-size:10px;color:{T.TEXT_DIM};">{unit}</span>' if unit else value
-    val = QLabel(val_text)
+    val = QLabel(_format_val(value, unit))
     val.setTextFormat(Qt.RichText)
     val.setStyleSheet("font-weight: 600; font-family: Menlo; font-size: 13px;")
     val.setAlignment(Qt.AlignRight)
     layout.addWidget(lbl)
     layout.addStretch()
     layout.addWidget(val)
+    row.value_label = val
+    row.unit = unit
     return row
+
+
+def set_info_row(row, value):
+    """Update an info_row in place without recreating widgets."""
+    row.value_label.setText(_format_val(value, row.unit))
 
 
 def make_action_btn(text, primary=False):
