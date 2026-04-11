@@ -447,6 +447,7 @@ def main() -> None:
             print(f"[WARN] Fresh start: existing best_model.pt backed up to {backup.name}")
 
     for epoch in range(start_epoch, max_epochs + 1):
+        should_stop = False
         train_loss, _, _ = _run_epoch(
             model,
             train_loader,
@@ -481,6 +482,17 @@ def main() -> None:
         if should_validate:
             _append_train_log(log_csv, epoch, train_loss, val_loss, val_macro_auc)
 
+        # Early stopping state update - wykonaj PRZED logowaniem,
+        # aby no_improve odzwierciedlało bieżącą walidację.
+        if should_validate:
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                no_improve = 0
+                _save_checkpoint(ANNOTATIONS_DIR / "best_model.pt", model, optimizer, epoch, best_val_loss)
+            else:
+                no_improve += 1
+                should_stop = no_improve >= patience
+
         # Logi na konsoli co log_freq epok
         if epoch % log_freq == 0 or epoch == max_epochs:
             ts = datetime.now().strftime("%H:%M:%S")
@@ -500,17 +512,9 @@ def main() -> None:
             _save_checkpoint(ANNOTATIONS_DIR / "last_model.pt", model, optimizer, epoch, best_val_loss)
             _cleanup_old_checkpoints(ANNOTATIONS_DIR)
 
-        # Early stopping logic - zawsze gdy jest walidacja
-        if should_validate:
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                no_improve = 0
-                _save_checkpoint(ANNOTATIONS_DIR / "best_model.pt", model, optimizer, epoch, best_val_loss)
-            else:
-                no_improve += 1
-                if no_improve >= patience:
-                    print(f"Early stopping at epoch {epoch} (patience={patience}).")
-                    break
+        if should_stop:
+            print(f"Early stopping at epoch {epoch} (patience={patience}).")
+            break
 
     # Plot curves only if skip_plots is not set
     if not skip_plots:
