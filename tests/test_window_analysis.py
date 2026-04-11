@@ -1,7 +1,10 @@
-"""Test that window placement on the 20s demo file produces different predictions.
+"""Integration test: window placement on the 20s demo file.
 
 First 10s = NORM, Last 10s = MI (front heart attack).
 The model should predict accordingly based on which window is selected.
+
+Requires local PTB-XL source records and a model checkpoint. Skipped
+automatically under pytest on fresh clones where those deps are missing.
 
 Usage:
     python tests/test_window_analysis.py
@@ -10,14 +13,20 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import numpy as np
-import wfdb
-from model.inference_api import load_checkpoint_model, predict_with_model
-from ui.theme import TARGET_CLASSES, CLASS_NAMES_PL
+import pytest
 
 DEMO_RECORD = "data/demo/norm_mi_20s"
 MODEL_PATH = "model/annotations/model-sota.pt"
 FS = 500
+
+# Skip under pytest unless data + checkpoint are available.
+wfdb = pytest.importorskip("wfdb")
+if not os.path.exists(MODEL_PATH):
+    pytest.skip(f"missing model checkpoint: {MODEL_PATH}", allow_module_level=True)
+
+import numpy as np
+from model.inference_api import load_checkpoint_model, predict_with_model
+from ui.theme import TARGET_CLASSES, CLASS_NAMES_PL
 
 
 def test_window_analysis():

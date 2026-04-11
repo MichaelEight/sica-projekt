@@ -1,5 +1,4 @@
 """Main application window orchestrating all pages."""
-import ast
 import os
 import pickle
 import threading

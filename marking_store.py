@@ -159,6 +159,11 @@ class MarkingStore:
         self._push_undo(("delete", old, None))
         return True
 
+    def clear_history(self) -> None:
+        """Drop all undo/redo state. Use after non-undoable bulk operations."""
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+
     # -- undo / redo --
 
     def _push_undo(self, entry: tuple) -> None:

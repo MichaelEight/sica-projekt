@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QStyledItemDelegate, QListView)
 
 import ui.theme as T
-from ui.widgets import section_header, info_row, make_action_btn
+from ui.widgets import section_header, info_row, set_info_row, make_action_btn
 
 
 # ── Info Panel (Patient + Measurements) ────────
@@ -84,17 +84,8 @@ class InfoPanel(QWidget):
 
     def set_measurements(self, hr="", pr="", qrs="", qt_val="", qtc="", axis=""):
         mapping = {"hr": hr, "pr": pr, "qrs": qrs, "qt": qt_val, "qtc": qtc, "axis": axis}
-        units = {"hr": "bpm", "pr": "ms", "qrs": "ms", "qt": "ms", "qtc": "ms", "axis": ""}
-        labels = {"hr": "HR", "pr": "PR", "qrs": "QRS", "qt": "QT", "qtc": "QTc", "axis": "Oś"}
         for key, val in mapping.items():
-            old_row = self._meas_labels[key]
-            parent_layout = old_row.parentWidget().layout() if old_row.parentWidget() else self.layout()
-            idx = self.layout().indexOf(old_row)
-            old_row.setParent(None)
-            old_row.deleteLater()
-            new_row = info_row(labels[key], str(val), units[key])
-            self._meas_labels[key] = new_row
-            self.layout().insertWidget(idx, new_row)
+            set_info_row(self._meas_labels[key], str(val))
 
     def apply_theme(self):
         self.setStyleSheet(f"background: {T.WHITE}; border-right: 1px solid {T.BORDER};")
