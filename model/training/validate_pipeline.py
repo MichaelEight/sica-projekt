@@ -7,6 +7,7 @@ import torch
 
 from model.models import Inception1DNet
 from model.training.dataset import ECGWFDBDataset
+from model.training.schema import infer_file_columns, infer_label_columns
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -16,12 +17,8 @@ DATA_ROOT = PROJECT_ROOT / "data" / "training"
 def main() -> None:
     meta_path = DATA_ROOT / "train" / "train_metadata.csv"
     meta = pd.read_csv(meta_path)
-    label_columns = [c for c in meta.columns if c.startswith("class_")]
-    file_columns: dict[str, str | None] = {
-        "base": "local_record_base" if "local_record_base" in meta.columns else None,
-        "dat": next((c for c in meta.columns if c.endswith("_dat_file")), None),
-        "hea": next((c for c in meta.columns if c.endswith("_hea_file")), None),
-    }
+    label_columns = infer_label_columns(meta.columns)
+    file_columns = infer_file_columns(meta.columns)
 
     ds = ECGWFDBDataset(
         split_dir=DATA_ROOT / "train",

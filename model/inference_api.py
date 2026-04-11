@@ -8,6 +8,7 @@ import torch
 import wfdb
 
 from model.models import Inception1DNet
+from model.training.schema import CANONICAL_CLASS_COLUMNS
 
 
 TARGET_FS = 500
@@ -176,7 +177,12 @@ def predict_with_model(
 
     segment_preds = (probs >= threshold).astype(np.int32)
     num_classes = probs.shape[1]
-    classes = class_names if class_names is not None else [f"class_{i}" for i in range(num_classes)]
+    if class_names is not None:
+        classes = class_names
+    elif num_classes == len(CANONICAL_CLASS_COLUMNS):
+        classes = CANONICAL_CLASS_COLUMNS
+    else:
+        classes = [f"class_{i}" for i in range(num_classes)]
 
     per_input_probs: list[np.ndarray] = []
     for i in range(len(samples)):
