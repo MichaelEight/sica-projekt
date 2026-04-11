@@ -565,9 +565,9 @@ class ViewerPage(QWidget):
         outer.addWidget(content_widget, stretch=1)
 
         # Bottom bar container (navbar + selection indicator)
-        bottom_bar = QWidget()
-        bottom_bar.setStyleSheet(f"background: {T.WHITE}; border-top: 1px solid {T.BORDER};")
-        bottom_layout = QVBoxLayout(bottom_bar)
+        self.bottom_bar = QWidget()
+        self.bottom_bar.setStyleSheet(f"background: {T.WHITE}; border-top: 1px solid {T.BORDER};")
+        bottom_layout = QVBoxLayout(self.bottom_bar)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.setSpacing(0)
 
@@ -621,19 +621,7 @@ class ViewerPage(QWidget):
         self.scrubber = QSlider(Qt.Horizontal)
         self.scrubber.setRange(0, 1000)
         self.scrubber.setValue(350)
-        self.scrubber.setStyleSheet(f"""
-            QSlider::groove:horizontal {{
-                height: 6px; background: {T.BORDER}; border-radius: 3px;
-            }}
-            QSlider::handle:horizontal {{
-                width: 14px; height: 14px; margin: -4px 0;
-                background: {T.ACCENT}; border: 2px solid {T.WHITE};
-                border-radius: 7px;
-            }}
-            QSlider::sub-page:horizontal {{
-                background: {T.ACCENT}; border-radius: 3px;
-            }}
-        """)
+        self.scrubber.setStyleSheet(self._scrubber_style())
         self.scrubber.valueChanged.connect(self._on_scrubber)
         nav.addWidget(self.scrubber, stretch=1)
 
@@ -665,14 +653,7 @@ class ViewerPage(QWidget):
         nav.addWidget(self._zoom_in_btn)
 
         self._zoom_reset_btn = QPushButton("Reset")
-        self._zoom_reset_btn.setStyleSheet(f"""
-            QPushButton {{
-                font-size: 10px; padding: 0 8px; height: 28px;
-                border: 1px solid {T.BORDER}; border-radius: 6px;
-                background: {T.WHITE}; color: {T.TEXT_MUTED};
-            }}
-            QPushButton:hover {{ background: {T.BG_SECONDARY}; color: {T.TEXT}; }}
-        """)
+        self._zoom_reset_btn.setStyleSheet(self._zoom_reset_btn_style())
         self._zoom_reset_btn.setCursor(Qt.PointingHandCursor)
         self._zoom_reset_btn.clicked.connect(self._reset_zoom)
         nav.addWidget(self._zoom_reset_btn)
@@ -686,7 +667,7 @@ class ViewerPage(QWidget):
         self._sel_indicator.setStyleSheet(f"background: {T.WHITE}; border: none; color: transparent;")
         bottom_layout.addWidget(self._sel_indicator)
 
-        outer.addWidget(bottom_bar)
+        outer.addWidget(self.bottom_bar)
         self._update_time_display()
 
     def apply_theme(self):
@@ -736,8 +717,14 @@ class ViewerPage(QWidget):
         self.monitor_sidebar.apply_theme()
         self.markings_panel.apply_theme()
 
+        # Bottom controls panel
+        self.bottom_bar.setStyleSheet(f"background: {T.WHITE}; border-top: 1px solid {T.BORDER};")
         self.scrubber.setStyleSheet(self._scrubber_style())
         self.time_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
+        self._zoom_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_MUTED};")
+        self._zoom_reset_btn.setStyleSheet(self._zoom_reset_btn_style())
+        self._sel_indicator.setStyleSheet(f"background: {T.WHITE}; border: none; color: transparent;")
+        self._apply_pause_btn_style()
 
         self.grid_12.apply_theme()
 
@@ -1698,6 +1685,31 @@ class ViewerPage(QWidget):
             return
         # Use _run_full_analysis for the new flow
         self._run_full_analysis()
+
+    def _scrubber_style(self) -> str:
+        return f"""
+            QSlider::groove:horizontal {{
+                height: 6px; background: {T.BORDER}; border-radius: 3px;
+            }}
+            QSlider::handle:horizontal {{
+                width: 14px; height: 14px; margin: -4px 0;
+                background: {T.ACCENT}; border: 2px solid {T.WHITE};
+                border-radius: 7px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {T.ACCENT}; border-radius: 3px;
+            }}
+        """
+
+    def _zoom_reset_btn_style(self) -> str:
+        return f"""
+            QPushButton {{
+                font-size: 10px; padding: 0 8px; height: 28px;
+                border: 1px solid {T.BORDER}; border-radius: 6px;
+                background: {T.WHITE}; color: {T.TEXT_MUTED};
+            }}
+            QPushButton:hover {{ background: {T.BG_SECONDARY}; color: {T.TEXT}; }}
+        """
 
     def _apply_pause_btn_style(self):
         from ui.theme import is_dark_mode
