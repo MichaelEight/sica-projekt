@@ -507,14 +507,14 @@ class EkgCellCanvas(QWidget):
                         max_tw = max(fm.horizontalAdvance(ln) for ln in label_lines)
                         pill_w = max_tw + 16
 
-                        # Anchor in the non-overlapping first half of the region
-                        # (step is half the window, so first half is unique to this region)
-                        t_anchor = ar_s + (ar_e - ar_s) * 0.25
+                        # Regions are already merged and non-overlapping —
+                        # center the label horizontally on the region.
+                        t_anchor = ar_s + (ar_e - ar_s) * 0.5
                         cx = sig_s_a + ((t_anchor - self.t_start) / duration) * sig_w_a
                         pill_x = cx - pill_w / 2
 
-                        # Always at bottom
-                        by = h - total_h - 6
+                        # Always at bottom — leave room for the time ruler
+                        by = h - total_h - 22
 
                         label_idx += 1
 

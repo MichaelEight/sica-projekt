@@ -23,7 +23,11 @@ class InfoPanel(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(4)
 
-        layout.addWidget(section_header("Pacjent"))
+        self._section_headers = []
+        self._field_labels = []
+        self._patient_header = section_header("Pacjent")
+        self._section_headers.append(self._patient_header)
+        layout.addWidget(self._patient_header)
         self._patient_fields = {}
         for key, label in [
             ("name", "Imię"),
@@ -37,7 +41,9 @@ class InfoPanel(QWidget):
 
         layout.addSpacing(10)
 
-        layout.addWidget(section_header("Pomiary"))
+        self._meas_header = section_header("Pomiary")
+        self._section_headers.append(self._meas_header)
+        layout.addWidget(self._meas_header)
         self._meas_labels = {}
         for key, label, val, unit in [
             ("hr", "HR", "", "bpm"),
@@ -58,14 +64,10 @@ class InfoPanel(QWidget):
         lay = QHBoxLayout(row)
         lay.setContentsMargins(0, 0, 0, 0)
         lbl = QLabel(label)
-        lbl.setStyleSheet(f"color: {T.TEXT_MUTED}; font-size: 12px;")
+        lbl.setStyleSheet(self._field_label_style())
+        self._field_labels.append(lbl)
         edit = QLineEdit()
-        edit.setStyleSheet(
-            f"QLineEdit {{ font-weight: 600; font-family: Menlo; font-size: 13px; "
-            f"border: 1px solid {T.BORDER}; border-radius: 3px; padding: 2px 4px; "
-            f"background: {T.WHITE}; color: {T.TEXT}; }}"
-            f"QLineEdit:focus {{ border: 1px solid {T.ACCENT}; }}"
-        )
+        edit.setStyleSheet(self._line_edit_style())
         edit.setAlignment(Qt.AlignRight)
         edit.setFixedWidth(70)
         edit.textChanged.connect(lambda _text: self.patient_changed.emit())
@@ -74,6 +76,24 @@ class InfoPanel(QWidget):
         lay.addWidget(edit)
         self._patient_fields[key] = edit
         return row
+
+    def _line_edit_style(self) -> str:
+        return (
+            f"QLineEdit {{ font-weight: 600; font-family: Menlo; font-size: 13px; "
+            f"border: 1px solid {T.BORDER}; border-radius: 3px; padding: 2px 4px; "
+            f"background: {T.WHITE}; color: {T.TEXT}; }}"
+            f"QLineEdit:focus {{ border: 1px solid {T.ACCENT}; }}"
+        )
+
+    def _field_label_style(self) -> str:
+        return f"color: {T.TEXT_MUTED}; font-size: 12px;"
+
+    def _section_header_style(self) -> str:
+        return (
+            f"font-size: 11px; font-weight: 700; color: {T.TEXT_DIM};"
+            f"text-transform: uppercase; letter-spacing: 0.5px;"
+            f"padding-bottom: 4px; border-bottom: 1px solid {T.BORDER_LIGHT};"
+        )
 
     def set_patient(self, patient_id="", age="", sex="", date="", name=""):
         self._patient_fields["id"].setText(str(patient_id))
@@ -89,6 +109,30 @@ class InfoPanel(QWidget):
 
     def apply_theme(self):
         self.setStyleSheet(f"background: {T.WHITE}; border-right: 1px solid {T.BORDER};")
+        for hdr in self._section_headers:
+            hdr.setStyleSheet(self._section_header_style())
+        for lbl in self._field_labels:
+            lbl.setStyleSheet(self._field_label_style())
+        for edit in self._patient_fields.values():
+            edit.setStyleSheet(self._line_edit_style())
+        # Re-apply measurement row label colors (value labels inherit TEXT
+        # from the global stylesheet).
+        for row in self._meas_labels.values():
+            lbl = row.layout().itemAt(0).widget()
+            if isinstance(lbl, QLabel):
+                lbl.setStyleSheet(self._field_label_style())
+            # Refresh the rich-text value so the unit color follows the theme
+            if hasattr(row, "value_label"):
+                current = row.value_label.text()
+                # Strip any previous span to re-render with current theme
+                set_info_row(row, self._extract_value(current, row.unit))
+
+    @staticmethod
+    def _extract_value(html_text: str, unit: str) -> str:
+        if not unit:
+            return html_text
+        idx = html_text.find(" <span")
+        return html_text[:idx] if idx >= 0 else html_text
 
 
 # ── Caliper Panel ──────────────────────────────

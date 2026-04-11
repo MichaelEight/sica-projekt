@@ -1466,8 +1466,73 @@ class ViewerPage(QWidget):
 
 
 
+    def _merged_autoscan_regions(self) -> list[dict]:
+        """Split overlapping scan windows into atomic segments, keep the
+        highest-priority prediction (red > yellow > none) per segment, then
+        merge neighbors that share color and top class. Healthy segments
+        are dropped.
+        """
+        raw = self._autoscan_results or []
+        if not raw:
+            return []
+
+        # Atomic boundaries from every window edge
+        bounds = sorted({r["t_start"] for r in raw} | {r["t_end"] for r in raw})
+        atoms: list[dict] = []
+        prob_tol = 0.10  # merge when top probability differs by <= 10pp
+
+        for i in range(len(bounds) - 1):
+            a, b = bounds[i], bounds[i + 1]
+            if b - a < 1e-6:
+                continue
+            mid = 0.5 * (a + b)
+            covering = [r for r in raw if r["t_start"] <= mid < r["t_end"]]
+            if not covering:
+                continue
+            max_color = max(r.get("color", 0) for r in covering)
+            if max_color == 0:
+                continue
+            candidates = [r for r in covering if r.get("color", 0) == max_color]
+
+            def _non_healthy_top(r):
+                probs = r.get("probs") or {}
+                items = [(c, p) for c, p in probs.items() if c != "class_healthy"]
+                if not items:
+                    return ("", 0.0)
+                return max(items, key=lambda x: x[1])
+
+            rep = max(candidates, key=lambda r: _non_healthy_top(r)[1])
+            top_cls, top_prob = _non_healthy_top(rep)
+            atoms.append({
+                "t_start": a,
+                "t_end": b,
+                "color": max_color,
+                "top_cls": top_cls,
+                "top_prob": top_prob,
+                "probs": rep.get("probs") or {},
+            })
+
+        merged: list[dict] = []
+        for seg in atoms:
+            if merged:
+                prev = merged[-1]
+                can_merge = (
+                    abs(prev["t_end"] - seg["t_start"]) < 1e-6
+                    and prev["color"] == seg["color"]
+                    and prev["top_cls"] == seg["top_cls"]
+                    and abs(prev["top_prob"] - seg["top_prob"]) <= prob_tol
+                )
+                if can_merge:
+                    prev["t_end"] = seg["t_end"]
+                    if seg["top_prob"] > prev["top_prob"]:
+                        prev["top_prob"] = seg["top_prob"]
+                        prev["probs"] = seg["probs"]
+                    continue
+            merged.append(dict(seg))
+        return merged
+
     def _apply_autoscan_results(self):
-        """Create Marking objects from autoscan results and add to the store."""
+        """Create Marking objects from merged autoscan regions and add to the store."""
         if not self._autoscan_results:
             return
         # Remove old scan markings before adding new ones
@@ -1475,14 +1540,14 @@ class ViewerPage(QWidget):
         for m in old_scans:
             self._marking_store.delete(m.id)
 
-        for r in self._autoscan_results:
+        for seg in self._merged_autoscan_regions():
             marking = Marking(
                 type="scan",
                 lead="all",
-                t1=r["t_start"],
-                t2=r["t_end"],
-                probs=r.get("probs"),
-                color_code=r.get("color", 0),
+                t1=seg["t_start"],
+                t2=seg["t_end"],
+                probs=seg.get("probs"),
+                color_code=seg.get("color", 0),
                 source="ai",
             )
             self._marking_store.add(marking)
@@ -1500,22 +1565,17 @@ class ViewerPage(QWidget):
         gt_lines = self._build_gt_lines(CLASS_NAMES_PL)
 
         regions = []
-        for r in self._autoscan_results:
-            code = r["color"]
-            label_lines = None
-            if code != 0 and r.get("probs"):
-                sorted_probs = sorted(r["probs"].items(), key=lambda x: x[1], reverse=True)
-                lines = []
-                for cls, prob in sorted_probs[:2]:
-                    name = CLASS_NAMES_PL.get(cls, cls)
-                    if len(name) > 22:
-                        name = name[:20] + "."
-                    lines.append(f"{name} {prob * 100:.0f}%")
-                # Mismatch detection: add ⚠ if GT says healthy or no GT
-                if lines and self._is_gt_mismatch(r["t_start"], r["t_end"]):
-                    lines[0] = "\u26a0 " + lines[0]
-                label_lines = lines
-            regions.append((r["t_start"], r["t_end"], code, label_lines))
+        for seg in self._merged_autoscan_regions():
+            code = seg["color"]
+            top_cls = seg.get("top_cls") or ""
+            top_prob = seg.get("top_prob") or 0.0
+            name = CLASS_NAMES_PL.get(top_cls, top_cls)
+            if len(name) > 22:
+                name = name[:20] + "."
+            label = f"{name} {top_prob * 100:.0f}%"
+            if self._is_gt_mismatch(seg["t_start"], seg["t_end"]):
+                label = "\u26a0 " + label
+            regions.append((seg["t_start"], seg["t_end"], code, [label]))
 
         self.grid_12.set_autoscan_regions(regions)
         self.grid_12.set_gt_annotations(gt_lines)
