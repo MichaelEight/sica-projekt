@@ -7,33 +7,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QStyledItemDelegate, QListView)
 
 import ui.theme as T
-
-
-def _section_header(text: str) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setStyleSheet(f"""
-        font-size: 11px; font-weight: 700; color: {T.TEXT_DIM};
-        text-transform: uppercase; letter-spacing: 0.5px;
-        padding-bottom: 4px; border-bottom: 1px solid {T.BORDER_LIGHT};
-    """)
-    return lbl
-
-
-def _info_row(label: str, value: str, unit: str = "") -> QWidget:
-    row = QWidget()
-    layout = QHBoxLayout(row)
-    layout.setContentsMargins(0, 0, 0, 0)
-    lbl = QLabel(label)
-    lbl.setStyleSheet(f"color: {T.TEXT_MUTED}; font-size: 12px;")
-    val_text = f'{value} <span style="font-size:10px;color:{T.TEXT_DIM};">{unit}</span>' if unit else value
-    val = QLabel(val_text)
-    val.setTextFormat(Qt.RichText)
-    val.setStyleSheet("font-weight: 600; font-family: Menlo; font-size: 13px;")
-    val.setAlignment(Qt.AlignRight)
-    layout.addWidget(lbl)
-    layout.addStretch()
-    layout.addWidget(val)
-    return row
+from ui.widgets import section_header, info_row, make_action_btn
 
 
 # ── Info Panel (Patient + Measurements) ────────
