@@ -3,7 +3,7 @@ import os
 import pickle
 import threading
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QStackedWidget, QWidget, QMessageBox, QApplication
 
@@ -15,6 +15,8 @@ _log = get_logger("main_window")
 from ui.upload_page import UploadPage, add_recent
 from ui.viewer_page import ViewerPage
 from ui.report_page import ReportPage
+from ui.batch_results_page import BatchResultsPage
+from ui.batch_overlay import BatchOverlay
 from ui.ekg_canvas import generate_demo_signal
 
 try:
@@ -127,17 +129,31 @@ class MainWindow(QMainWindow):
         self.upload_page = UploadPage()
         self.viewer_page = ViewerPage()
         self.report_page = ReportPage()
+        self.batch_results_page = BatchResultsPage()
 
-        self.stack.addWidget(self.upload_page)   # 0
-        self.stack.addWidget(self.viewer_page)   # 1
-        self.stack.addWidget(self.report_page)   # 2
+        self.stack.addWidget(self.upload_page)         # 0
+        self.stack.addWidget(self.viewer_page)         # 1
+        self.stack.addWidget(self.report_page)         # 2
+        self.stack.addWidget(self.batch_results_page)  # 3
 
         # Connect signals
         self.upload_page.file_selected.connect(self._load_file)
-        self.viewer_page.open_file.connect(self._go_upload)
+        self.upload_page.batch_selected.connect(self._start_batch)
+        self.viewer_page.open_file.connect(self._go_back_from_viewer)
         self.viewer_page.show_report.connect(self._go_report)
         self.viewer_page.toggle_dark.connect(self._toggle_dark_mode)
         self.report_page.go_back.connect(self._go_viewer)
+        self.batch_results_page.file_selected.connect(self._open_from_batch)
+        self.batch_results_page.go_back.connect(self._go_upload)
+
+        # Batch state
+        self._from_batch = False
+        self._batch_results: list[dict] = []
+        self._batch_cancel: threading.Event | None = None
+        self._batch_progress: dict = {}
+        self._batch_overlay: BatchOverlay | None = None
+        self._batch_poll: QTimer | None = None
+        self._batch_thread: threading.Thread | None = None
 
         # Show upload page
         self.stack.setCurrentIndex(0)
@@ -321,8 +337,16 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(1)
 
     def _go_upload(self):
+        self._from_batch = False
         self.upload_page.refresh()
         self.stack.setCurrentIndex(0)
+
+    def _go_back_from_viewer(self):
+        """Route viewer back button — batch results if we came from batch."""
+        if self._from_batch:
+            self.stack.setCurrentIndex(3)
+        else:
+            self._go_upload()
 
     def _go_viewer(self):
         self.stack.setCurrentIndex(1)
@@ -368,7 +392,109 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(T.STYLESHEET)
         # Re-apply all component styles
         self.viewer_page.apply_theme()
+        self.batch_results_page.apply_theme()
         # Refresh views to pick up new colors
         if self._signal is not None:
             self.viewer_page._refresh_views()
+
+    # ── Batch processing ──────────────────────────────────────
+
+    def _open_from_batch(self, base_path: str):
+        self._from_batch = True
+        self._load_file(base_path)
+
+    def _start_batch(self, base_paths: list[str]):
+        _log.info("start_batch: %d files", len(base_paths))
+        if not base_paths:
+            return
+        # Ensure model is loaded via viewer_page (it owns the combo box).
+        try:
+            model, device = self.viewer_page._ensure_model_loaded()
+        except Exception as e:
+            _log.exception("batch: model load failed")
+            QMessageBox.warning(self, "Błąd", f"Nie udało się załadować modelu:\n{e}")
+            return
+        model_path = self.viewer_page._model_path or ""
+
+        # Wait for GT cache (non-blocking short wait).
+        self._gt_ready.wait(timeout=5.0)
+        gt_lookup = self._gt_lookup or {}
+
+        # Reset state
+        self._batch_results = []
+        self._batch_cancel = threading.Event()
+        self._batch_progress = {
+            "file_idx": 0,
+            "file_total": len(base_paths),
+            "window_idx": 0,
+            "window_total": 0,
+            "current_name": "",
+            "done": False,
+        }
+        self._batch_cancelled = False
+
+        # Show overlay
+        self._batch_overlay = BatchOverlay(self)
+        self._batch_overlay.set_cancel_callback(self._cancel_batch)
+        self._batch_overlay.show_loading()
+
+        # Worker thread
+        from ui.batch import run_batch
+
+        def _worker():
+            try:
+                results = run_batch(
+                    base_paths=base_paths,
+                    model=model,
+                    device=device,
+                    model_path=model_path,
+                    gt_lookup=gt_lookup,
+                    progress=self._batch_progress,
+                    cancel_flag=self._batch_cancel,
+                )
+                self._batch_results = results
+            except Exception:
+                _log.exception("batch worker crashed")
+                self._batch_results = []
+                self._batch_progress["done"] = True
+
+        self._batch_thread = threading.Thread(target=_worker, daemon=True)
+        self._batch_thread.start()
+
+        # Progress poll
+        self._batch_poll = QTimer(self)
+        self._batch_poll.setInterval(100)
+        self._batch_poll.timeout.connect(self._batch_poll_tick)
+        self._batch_poll.start()
+
+    def _batch_poll_tick(self):
+        prog = self._batch_progress
+        if self._batch_overlay is not None:
+            self._batch_overlay.update(
+                file_idx=prog.get("file_idx", 0),
+                file_total=prog.get("file_total", 0),
+                window_idx=prog.get("window_idx", 0),
+                window_total=prog.get("window_total", 0),
+                name=prog.get("current_name", ""),
+            )
+        if prog.get("done"):
+            self._finish_batch()
+
+    def _cancel_batch(self):
+        if self._batch_cancel is not None:
+            self._batch_cancelled = True
+            self._batch_cancel.set()
+
+    def _finish_batch(self):
+        if self._batch_poll is not None:
+            self._batch_poll.stop()
+            self._batch_poll = None
+
+        cancelled = getattr(self, "_batch_cancelled", False)
+        if self._batch_overlay is not None:
+            self._batch_overlay.show_done(cancelled=cancelled)
+            self._batch_overlay = None
+
+        self.batch_results_page.set_results(self._batch_results, cancelled=cancelled)
+        self.stack.setCurrentIndex(3)
 

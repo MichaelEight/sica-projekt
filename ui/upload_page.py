@@ -41,6 +41,7 @@ class UploadPage(QWidget):
     """Welcome screen with file picker and recent files."""
 
     file_selected = Signal(str)  # emits the base path (without extension)
+    batch_selected = Signal(list)  # emits list of base paths for batch analysis
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -104,20 +105,59 @@ class UploadPage(QWidget):
         step_label.setAlignment(Qt.AlignCenter)
         dz_layout.addWidget(step_label)
 
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+        btn_row.setAlignment(Qt.AlignCenter)
+
+        dark = T.is_dark_mode()
+        accent_hover = "#047857" if dark else "#3a8eef"
+        accent_pressed = "#065f46" if dark else "#2563eb"
+        secondary_hover_bg = T.BORDER_LIGHT
+        secondary_pressed_bg = T.BORDER
+
         browse_btn = QPushButton("Wybierz plik")
         browse_btn.setCursor(Qt.PointingHandCursor)
         browse_btn.setStyleSheet(f"""
             QPushButton {{
-                background: {T.ACCENT}; color: white;
+                background: {T.ACCENT}; color: {T.ACCENT_TEXT};
                 font-size: 14px; font-weight: 600;
                 padding: 10px 32px; border-radius: 8px; border: none;
             }}
             QPushButton:hover {{
-                opacity: 0.9;
+                background: {accent_hover};
+            }}
+            QPushButton:pressed {{
+                background: {accent_pressed};
             }}
         """)
         browse_btn.clicked.connect(self._browse)
-        dz_layout.addWidget(browse_btn, alignment=Qt.AlignCenter)
+        btn_row.addWidget(browse_btn)
+
+        batch_btn = QPushButton("Wybierz wiele plików")
+        batch_btn.setCursor(Qt.PointingHandCursor)
+        batch_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {T.WHITE}; color: {T.TEXT};
+                font-size: 14px; font-weight: 600;
+                padding: 10px 28px; border-radius: 8px;
+                border: 1px solid {T.BORDER};
+            }}
+            QPushButton:hover {{
+                background: {secondary_hover_bg};
+                border: 1px solid {T.ACCENT}; color: {T.ACCENT};
+            }}
+            QPushButton:pressed {{
+                background: {secondary_pressed_bg};
+                border: 1px solid {T.ACCENT}; color: {T.ACCENT};
+            }}
+        """)
+        batch_btn.clicked.connect(self._browse_batch)
+        btn_row.addWidget(batch_btn)
+
+        btn_wrap = QWidget()
+        btn_wrap.setStyleSheet("background: transparent; border: none;")
+        btn_wrap.setLayout(btn_row)
+        dz_layout.addWidget(btn_wrap, alignment=Qt.AlignCenter)
 
         hint = QLabel("Oba pliki (.dat i .hea) muszą mieć tę samą nazwę i znajdować się w tym samym folderze")
         hint.setStyleSheet(f"color: {T.TEXT_DIM}; font-size: 12px; border: none;")
@@ -272,6 +312,39 @@ class UploadPage(QWidget):
                     "o tej samej nazwie, w tym samym folderze.")
                 return
             self.file_selected.emit(base)
+
+    def _browse_batch(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Wybierz nagrania WFDB", "",
+            "Nagłówki WFDB (*.hea)"
+        )
+        if not paths:
+            return
+        seen = set()
+        base_paths: list[str] = []
+        skipped = 0
+        for p in paths:
+            base, ext = os.path.splitext(p)
+            if ext.lower() != ".hea":
+                skipped += 1
+                continue
+            if base in seen:
+                continue
+            seen.add(base)
+            if not os.path.isfile(base + ".dat"):
+                skipped += 1
+                continue
+            base_paths.append(base)
+
+        if not base_paths:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, "Brak plików do analizy",
+                "Nie wybrano żadnych poprawnych par .hea + .dat."
+            )
+            return
+
+        self.batch_selected.emit(base_paths)
 
     def refresh(self):
         self._refresh_recent()

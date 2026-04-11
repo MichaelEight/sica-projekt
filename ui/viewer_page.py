@@ -838,6 +838,9 @@ class ViewerPage(QWidget):
 
         # Load .ann file (overrides patient info, loads markings)
         self._load_ann()
+        # If the .ann brought in scan markings (from single-file or batch
+        # analysis), rebuild the overlay so colored bands render immediately.
+        self._rebuild_autoscan_from_markings()
 
         self._refresh_views()
         self._update_time_display()
@@ -1465,6 +1468,28 @@ class ViewerPage(QWidget):
             self.analysis_badge.show()
 
 
+
+    def _rebuild_autoscan_from_markings(self):
+        """If the marking store contains scan markings (from a .ann sidecar),
+        reconstruct _autoscan_results from them so the colored overlay and
+        analysis badge render on file load without re-running the model.
+        """
+        scan_markings = [m for m in self._marking_store.get_all() if m.type == "scan"]
+        if not scan_markings:
+            return
+        synthetic = []
+        for m in scan_markings:
+            synthetic.append({
+                "t_start": m.t1,
+                "t_end": m.t2,
+                "color": int(m.color_code or 0),
+                "probs": m.probs or {},
+            })
+        # Sort by start time for predictable merge output.
+        synthetic.sort(key=lambda r: r["t_start"])
+        self._autoscan_results = synthetic
+        self._apply_autoscan_overlay()
+        self.analysis_badge.show()
 
     def _merged_autoscan_regions(self) -> list[dict]:
         """Split overlapping scan windows into atomic segments, keep the
