@@ -41,14 +41,33 @@ class FocalLoss(nn.Module):
     - reduction: 'mean', 'sum', lub 'none'
     """
     
-    def __init__(self, alpha: torch.Tensor | None = None, gamma: float = 2.0, reduction: str = "mean") -> None:
+    def __init__(
+        self,
+        alpha: torch.Tensor | None = None,
+        gamma: float = 2.0,
+        reduction: str = "mean",
+        class_weight: torch.Tensor | None = None,
+        class_prior: torch.Tensor | None = None,
+        label_smoothing: float = 0.02,
+        logit_temperature: float = 1.2,
+    ) -> None:
         super().__init__()
         self.gamma = float(gamma)
         self.reduction = reduction
+        self.label_smoothing = float(label_smoothing)
+        self.logit_temperature = max(float(logit_temperature), 1e-6)
         if alpha is not None:
             self.register_buffer("alpha", alpha)
         else:
             self.alpha = None
+        if class_weight is not None:
+            self.register_buffer("class_weight", class_weight)
+        else:
+            self.class_weight = None
+        if class_prior is not None:
+            self.register_buffer("class_prior", class_prior)
+        else:
+            self.class_prior = None
     
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
@@ -59,11 +78,19 @@ class FocalLoss(nn.Module):
         Returns:
             loss: scalar or per-element loss
         """
+        # Temperatura > 1 lagodzi nadmierna pewnosc predykcji.
+        calibrated_logits = logits / self.logit_temperature
+
+        smoothed_targets = targets
+        if self.class_prior is not None and self.label_smoothing > 0.0:
+            s = min(max(self.label_smoothing, 0.0), 0.25)
+            smoothed_targets = (1.0 - s) * targets + s * self.class_prior
+
         # Oblicz BCE loss
-        bce_loss = F.binary_cross_entropy_with_logits(logits, targets, reduction="none")
+        bce_loss = F.binary_cross_entropy_with_logits(calibrated_logits, smoothed_targets, reduction="none")
         
         # Oblicz prawd. dla focusing
-        probs = torch.sigmoid(logits)
+        probs = torch.sigmoid(calibrated_logits)
         
         # Focal loss = -alpha * (1 - p_t)^gamma * BCE
         # gdzie p_t to prawd. prawidłowej klasy
@@ -73,8 +100,12 @@ class FocalLoss(nn.Module):
         
         # Zastosuj alpha weighting jeśli dostępne
         if self.alpha is not None:
-            alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+            alpha_t = self.alpha * smoothed_targets + (1 - self.alpha) * (1 - smoothed_targets)
             focal_loss = alpha_t * focal_loss
+
+        # Dodatkowe wazenie klas wg czestosci wystapien (rzadsze klasy maja wieksza wage).
+        if self.class_weight is not None:
+            focal_loss = focal_loss * self.class_weight
         
         # Zastosuj reduction
         if self.reduction == "mean":
@@ -88,21 +119,50 @@ class FocalLoss(nn.Module):
 class TolerantImbalanceBCELoss(nn.Module):
     """BCEWithLogits z pos_weight + mniejsza kara dla błędów <= ok. 1 p.p."""
 
-    def __init__(self, pos_weight: torch.Tensor, tolerance: float = 0.01, in_tolerance_weight: float = 0.15) -> None:
+    def __init__(
+        self,
+        pos_weight: torch.Tensor,
+        tolerance: float = 0.01,
+        in_tolerance_weight: float = 0.15,
+        class_weight: torch.Tensor | None = None,
+        class_prior: torch.Tensor | None = None,
+        label_smoothing: float = 0.02,
+        logit_temperature: float = 1.2,
+    ) -> None:
         super().__init__()
         self.register_buffer("pos_weight", pos_weight)
         self.tolerance = float(tolerance)
         self.in_tolerance_weight = float(in_tolerance_weight)
+        self.label_smoothing = float(label_smoothing)
+        self.logit_temperature = max(float(logit_temperature), 1e-6)
+        if class_weight is not None:
+            self.register_buffer("class_weight", class_weight)
+        else:
+            self.class_weight = None
+        if class_prior is not None:
+            self.register_buffer("class_prior", class_prior)
+        else:
+            self.class_prior = None
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        calibrated_logits = logits / self.logit_temperature
+
+        smoothed_targets = targets
+        if self.class_prior is not None and self.label_smoothing > 0.0:
+            s = min(max(self.label_smoothing, 0.0), 0.25)
+            smoothed_targets = (1.0 - s) * targets + s * self.class_prior
+
         base_loss = F.binary_cross_entropy_with_logits(
-            logits,
-            targets,
+            calibrated_logits,
+            smoothed_targets,
             pos_weight=self.pos_weight,
             reduction="none",
         )
 
-        probs = torch.sigmoid(logits).detach()
+        if self.class_weight is not None:
+            base_loss = base_loss * self.class_weight
+
+        probs = torch.sigmoid(calibrated_logits).detach()
         abs_err = torch.abs(probs - targets)
 
         # Dla błędów w okolicy 1 p.p. waga jest wyraźnie mniejsza, ale niezerowa.
@@ -111,6 +171,26 @@ class TolerantImbalanceBCELoss(nn.Module):
         scale = self.in_tolerance_weight + (1.0 - self.in_tolerance_weight) * (ramp**2)
 
         return (base_loss * scale).mean()
+
+
+def _build_class_frequency_tensors(
+    label_stats: dict[str, dict[str, float]],
+    label_columns: list[str],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ratios = torch.tensor(
+        [label_stats[col]["positive_ratio"] for col in label_columns],
+        dtype=torch.float32,
+    ).clamp(min=1e-6, max=1.0 - 1e-6)
+
+    # Focal alpha: prawdopodobienstwo klasy negatywnej (dla klasy pozytywnej wyzsze przy rzadkich klasach).
+    focal_alpha = (1.0 - ratios).clamp(min=0.05, max=0.95)
+
+    # Wspolna waga klas: odwrotnie proporcjonalna do pierwiastka czestosci, z normalizacja do sredniej 1.
+    class_weight = torch.rsqrt(ratios)
+    class_weight = class_weight / class_weight.mean().clamp(min=1e-6)
+    class_weight = class_weight.clamp(min=0.5, max=3.0)
+
+    return ratios, focal_alpha, class_weight
 
 
 def _parse_args() -> argparse.Namespace:
@@ -362,6 +442,7 @@ def main() -> None:
     # CrossEntropyLoss/Softmax assume exactly one true class per sample, which is wrong here.
     pos_weight = compute_pos_weight_tensor(train_ds)
     label_stats = compute_label_stats(train_ds)
+    class_prior_cpu, focal_alpha_cpu, class_weight_cpu = _build_class_frequency_tensors(label_stats, label_columns)
 
     save_json(ANNOTATIONS_DIR / "class_names.json", label_columns)
 
@@ -370,22 +451,31 @@ def main() -> None:
     # Select loss function based on argument
     loss_type = args.loss
     if loss_type == "focal":
-        pos_ratio = torch.tensor(
-            [s["positive_ratio"] for s in label_stats.values()],
-            dtype=torch.float32,
-        ).clamp(min=1e-6)
-        alpha = (1.0 / pos_ratio).to(device)
-        alpha = alpha / alpha.sum() * len(pos_ratio)
-        criterion = FocalLoss(alpha=alpha, gamma=2.0, reduction="mean")
-        print(f"[LOSS] Using Focal Loss (γ=2.0) with alpha weighting")
+        criterion = FocalLoss(
+            alpha=focal_alpha_cpu.to(device),
+            gamma=2.0,
+            reduction="mean",
+            class_weight=class_weight_cpu.to(device),
+            class_prior=class_prior_cpu.to(device),
+            label_smoothing=0.02,
+            logit_temperature=1.2,
+        )
+        print(
+            "[LOSS] Using Focal Loss (γ=2.0) with auto class-frequency weighting "
+            "(alpha/prior/class_weight)"
+        )
     else:
         # TolerantImbalanceBCELoss
         criterion = TolerantImbalanceBCELoss(
             pos_weight=pos_weight.to(device),
             tolerance=0.01,
             in_tolerance_weight=0.15,
+            class_weight=class_weight_cpu.to(device),
+            class_prior=class_prior_cpu.to(device),
+            label_smoothing=0.02,
+            logit_temperature=1.2,
         )
-        print(f"[LOSS] Using TolerantImbalanceBCELoss")
+        print("[LOSS] Using TolerantImbalanceBCELoss with auto class-frequency weighting")
     
     optimizer = AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
 
