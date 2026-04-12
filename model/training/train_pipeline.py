@@ -271,8 +271,8 @@ def _save_checkpoint(path: Path, model: nn.Module, optimizer: torch.optim.Optimi
 
 
 def _cleanup_old_checkpoints(checkpoint_dir: Path) -> None:
-    """Keep only best_model.pt and last_model.pt. Delete any other .pt files."""
-    protected = {"best_model.pt", "last_model.pt"}
+    """Keep only protected checkpoints and delete any other .pt files."""
+    protected = {"best_model.pt", "last_model.pt", "model-sota.pt"}
     for pt_file in checkpoint_dir.glob("*.pt"):
         if pt_file.name not in protected:
             try:
