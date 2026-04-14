@@ -9,8 +9,16 @@ import pandas as pd
 import wfdb
 from sklearn.model_selection import train_test_split
 
+import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+def get_base_path():
+    if getattr(sys, 'frozen', False):
+        # Ścieżka do FOLDERU, w którym leży plik .exe
+        return os.path.dirname(sys.executable)
+    # Ścieżka do FOLDERU, w którym leży skrypt .py
+    return os.path.dirname(os.path.abspath(__file__))
+
+BASE_DIR = get_base_path()
 DATASET_DIR = os.path.join(BASE_DIR, "ptb-xl")
 PTBXL_DATABASE_PATH = os.path.join(DATASET_DIR, "ptbxl_database.csv")
 TRAINING_PATH = os.path.join(BASE_DIR, "training")

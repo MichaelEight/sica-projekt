@@ -6,6 +6,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,9 +25,16 @@ from model.training.metrics import safe_macro_auc
 from model.training.schema import infer_file_columns, infer_label_columns
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+def get_resource_root():
+    if getattr(sys, 'frozen', False):
+        # Jeśli uruchomione jako .exe, PROJECT_ROOT to folder z plikiem .exe
+        return Path(sys.executable).parent
+    # Jeśli jako .py, PROJECT_ROOT to 3 poziomy wyżej (z model/training/skrypt.py do MojProjekt)
+    return Path(__file__).resolve().parents[3]
+
+PROJECT_ROOT = get_resource_root()
 DATA_ROOT = PROJECT_ROOT / "data" / "training"
-ANNOTATIONS_DIR = PROJECT_ROOT / "model" / "annotations"
+ANNOTATIONS_DIR = PROJECT_ROOT / "annotations"
 
 
 class FocalLoss(nn.Module):
@@ -213,6 +221,9 @@ def _parse_args() -> argparse.Namespace:
 
 def _derive_columns_fast() -> tuple[list[str], dict[str, str | None]]:
     train_meta_path = DATA_ROOT / "train" / "train_metadata.csv"
+    if not train_meta_path.exists():
+        print(f"BŁĄD: Nie znaleziono pliku metadanych w: {train_meta_path}")
+        sys.exit(1)
     meta = pd.read_csv(train_meta_path, nrows=0)
     cols = list(meta.columns)
     label_columns = infer_label_columns(cols)

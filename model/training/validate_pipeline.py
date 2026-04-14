@@ -9,8 +9,17 @@ from model.models import Inception1DNet
 from model.training.dataset import ECGWFDBDataset
 from model.training.schema import infer_file_columns, infer_label_columns
 
+import sys
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+def get_root():
+    if getattr(sys, 'frozen', False):
+        # Folder, w którym leży gotowy plik .exe
+        return Path(sys.executable).parent
+    # Jeśli uruchamiasz jako .py: MojProjekt/model/training/skrypt.py -> 3 poziomy w górę do MojProjekt
+    return Path(__file__).resolve().parents[3]
+
+PROJECT_ROOT = get_root()
+# Dane powinny być w dist/data/training/...
 DATA_ROOT = PROJECT_ROOT / "data" / "training"
 
 
