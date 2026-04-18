@@ -190,7 +190,7 @@ def save_split(
 
     for _, row in split_df.iterrows():
         source_base = os.path.join(dataset_root, row["signal_path"])
-        local_record_base = f"{int(row['ecg_id']):05d}_{os.path.basename(row['signal_path'])}"
+        local_record_base = os.path.basename(row['signal_path'])
 
         try:
             header = wfdb.rdheader(source_base)
@@ -258,6 +258,44 @@ def save_split(
         f"skopiowane_pliki={copied_files}; csv={csv_path}; lista={file_list_path}"
     )
 
+def save_by_class_folders(
+        df_all: pd.DataFrame,
+        dataset_root: str,
+        output_root: str,
+        dry_run: bool,
+) -> None:
+    """
+    Kopiuje wszystkie przefiltrowane rekordy do folderów podzielonych po głównej klasie (primary_class_8).
+    """
+    classified_dir = os.path.join(output_root, "by_class")
+    reset_split_dir(classified_dir)
+
+    # Inicjalizuj podfoldery dla wszystkich zdefiniowanych klas
+    for class_name in CLASS_RULES.keys():
+        os.makedirs(os.path.join(classified_dir, class_name), exist_ok=True)
+
+    copied_files = 0
+
+    for _, row in df_all.iterrows():
+        primary_class = row["primary_class_8"]
+        class_dir = os.path.join(classified_dir, primary_class)
+
+        source_base = os.path.join(dataset_root, row["signal_path"])
+        local_record_base = os.path.basename(row['signal_path'])
+
+        for ext in [".dat", ".hea"]:
+            src = source_base + ext
+            dst = os.path.join(class_dir, local_record_base + ext)
+
+            if os.path.exists(src):
+                if not dry_run:
+                    shutil.copy2(src, dst)
+                copied_files += 1
+            else:
+                raise FileNotFoundError(f"Brak pliku zrodlowego: {src}")
+
+    print(f"[by_class] podzial na foldery gotowy, skopiowane_pliki={copied_files}")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -300,6 +338,9 @@ def main() -> None:
     save_split(train_df, "train", args.dataset_dir, args.output_dir, dry_run=args.dry_run)
     save_split(val_df, "val", args.dataset_dir, args.output_dir, dry_run=args.dry_run)
     save_split(test_df, "test", args.dataset_dir, args.output_dir, dry_run=args.dry_run)
+
+    print("\nTrwa generowanie folderu 'by_class' podzielonego według chorób...")
+    save_by_class_folders(df_all, args.dataset_dir, args.output_dir, dry_run=args.dry_run)
 
     print("Gotowe.")
 
