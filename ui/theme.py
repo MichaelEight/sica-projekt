@@ -254,9 +254,9 @@ TARGET_CLASSES = [
 CLASS_NAMES_PL = {
     "class_healthy": "Zdrowy (NORM)",
     "class_front_heart_attack": "Zawał przedniej ściany",
-    "class_first_degree_av_block": "Blok AV I stopnia (1AVB)",
+    "class_first_degree_av_block": "Blok I stopnia AVB",
     "class_bottom_heart_attack": "Zawał ściany dolnej",
-    "class_atrial_fibrillation": "Migotanie przedsionków (AFIB)",
+    "class_atrial_fibrillation": "Migotanie przedsionków",
     "class_complete_right_conduction_disorder": "Całkowity blok prawej odnogi (CRBBB)",
     "class_incomplete_right_conduction_disorder": "Niepełny blok prawej odnogi (IRBBB)",
     "class_complete_left_conduction_disorder": "Całkowity blok lewej odnogi (CLBBB)",

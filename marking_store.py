@@ -21,7 +21,7 @@ def auto_label(type: str, value_ms: float | None = None, t1: float = 0.0, t2: fl
         elif type == "scan" and probs:
             _CLASS_NAMES_PL = {
                 "class_front_heart_attack": "Zawał przedniej ściany",
-                "class_first_degree_av_block": "Blok AV I stopnia",
+                "class_first_degree_av_block": "Blok I stopnia AVB",
                 "class_bottom_heart_attack": "Zawał ściany dolnej",
                 "class_atrial_fibrillation": "Migotanie przedsionków",
                 "class_complete_right_conduction_disorder": "CRBBB",
