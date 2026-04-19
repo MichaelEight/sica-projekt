@@ -162,8 +162,8 @@ class ReportPage(QWidget):
         tb.setSpacing(8)
 
         logo = QLabel()
-        logo.setText('<span style="color:#4a9eff;font-weight:600;">EKG</span>'
-                     ' <span style="color:white;font-weight:600;">Assistant</span>')
+        logo.setText('<span style="color:#4a9eff;font-weight:700;">Kardio</span>'
+                     '<span style="color:white;font-weight:700;">skop</span>')
         logo.setFont(QFont(".AppleSystemUIFont", 14))
         logo.setTextFormat(Qt.RichText)
         tb.addWidget(logo)
@@ -204,10 +204,12 @@ class ReportPage(QWidget):
         scroll.setAlignment(Qt.AlignCenter)
 
         self.report = QWidget()
+        self.report.setObjectName("reportPaper")
         self.report.setFixedWidth(780)
         self.report.setStyleSheet(f"""
-            QWidget {{
-                background: {T.WHITE}; border: 1px solid {T.BORDER};
+            QWidget#reportPaper {{
+                background: {T.WHITE};
+                border: 1px solid {T.BORDER};
                 border-radius: 8px;
             }}
         """)
@@ -216,7 +218,7 @@ class ReportPage(QWidget):
         r_layout.setSpacing(8)
 
         # Title
-        title = QLabel("EKG Assistant \u2014 Raport badania")
+        title = QLabel("Kardioskop \u2014 Raport badania")
         title.setFont(QFont(".AppleSystemUIFont", 16, QFont.DemiBold))
         title.setAlignment(Qt.AlignCenter)
         r_layout.addWidget(title)
@@ -313,24 +315,46 @@ class ReportPage(QWidget):
         r_layout.addWidget(sec_ai)
 
         ai_box = QFrame()
+        ai_box.setObjectName("aiBox")
         ai_box.setStyleSheet(f"""
-            QFrame {{
-                background: {T.AMBER_BG}; border: 1px solid {T.AMBER_BORDER};
-                border-radius: 8px; padding: 12px;
+            QFrame#aiBox {{
+                background: {T.AMBER_BG};
+                border: 1px solid {T.AMBER_BORDER};
+                border-radius: 8px;
             }}
         """)
         ai_layout = QVBoxLayout(ai_box)
-        ai_layout.setContentsMargins(12, 12, 12, 12)
+        ai_layout.setContentsMargins(16, 14, 16, 14)
+        ai_layout.setSpacing(10)
         self._ai_diag = QLabel("Brak analizy")
-        self._ai_diag.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {T.AMBER_TEXT};")
+        self._ai_diag.setStyleSheet(
+            f"font-size: 14px; font-weight: 600; color: {T.AMBER_TEXT}; background: transparent;"
+        )
+        self._ai_diag.setWordWrap(True)
         ai_layout.addWidget(self._ai_diag)
-        self._ai_conf = QLabel("")
-        self._ai_conf.setStyleSheet(f"font-size: 12px; color: {T.AMBER_SUB};")
-        self._ai_conf.setWordWrap(True)
-        ai_layout.addWidget(self._ai_conf)
         self._ai_model = QLabel("")
-        self._ai_model.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
+        self._ai_model.setStyleSheet(
+            f"font-size: 11px; color: {T.TEXT_MUTED}; background: transparent;"
+        )
         ai_layout.addWidget(self._ai_model)
+
+        # Per-illness summary table
+        self._ai_per_class = QWidget()
+        self._ai_per_class.setStyleSheet("background: transparent;")
+        self._ai_per_class_layout = QVBoxLayout(self._ai_per_class)
+        self._ai_per_class_layout.setContentsMargins(0, 4, 0, 4)
+        self._ai_per_class_layout.setSpacing(0)
+        ai_layout.addWidget(self._ai_per_class)
+
+        # Healthy stats
+        self._ai_healthy = QLabel("")
+        self._ai_healthy.setStyleSheet(
+            f"font-size: 11px; color: {T.AMBER_SUB}; font-family: Menlo;"
+            f" padding-top: 8px; background: transparent;"
+            f" border-top: 1px solid {T.AMBER_BORDER};"
+        )
+        self._ai_healthy.setWordWrap(True)
+        ai_layout.addWidget(self._ai_healthy)
         r_layout.addWidget(ai_box)
 
         # Annotations
@@ -495,21 +519,42 @@ class ReportPage(QWidget):
         def _fmt_val(val, unit):
             if val == "N/A" or val is None or val == "":
                 return "—"
+            # Some upstream functions already format with the unit appended
+            if isinstance(val, str):
+                stripped = val.strip()
+                if stripped.endswith(unit):
+                    return stripped
+                # Try to parse leading numeric portion, otherwise return as-is
+                try:
+                    v = float(stripped.split()[0])
+                except (ValueError, IndexError):
+                    return stripped
+            else:
+                try:
+                    v = float(val)
+                except (ValueError, TypeError):
+                    return f"{val} {unit}"
+            if v == int(v):
+                return f"{int(v)} {unit}"
+            return f"{v:.1f} {unit}"
+
+        def _to_num(val):
+            if val == "N/A" or val is None or val == "":
+                return None
+            if isinstance(val, str):
+                try:
+                    return float(val.strip().split()[0])
+                except (ValueError, IndexError):
+                    return None
             try:
-                v = float(val)
-                if v == int(v):
-                    return f"{int(v)} {unit}"
-                return f"{v:.0f} {unit}"
+                return float(val)
             except (ValueError, TypeError):
-                return f"{val} {unit}"
+                return None
 
         def _status(val, lo, hi):
             """Return status string given value and normal range bounds."""
-            if val == "N/A" or val is None or val == "":
-                return "—"
-            try:
-                v = float(val)
-            except (ValueError, TypeError):
+            v = _to_num(val)
+            if v is None:
                 return "—"
             if lo is not None and v < lo:
                 return "Skrócony"
@@ -518,11 +563,8 @@ class ReportPage(QWidget):
             return "Norma"
 
         def _axis_status(val):
-            if val == "N/A" or val is None or val == "":
-                return "—"
-            try:
-                v = float(val)
-            except (ValueError, TypeError):
+            v = _to_num(val)
+            if v is None:
                 return "—"
             if -30 <= v <= 90:
                 return "Norma"
@@ -595,14 +637,125 @@ class ReportPage(QWidget):
             self._ann_layout.addWidget(item)
 
     def set_results(self, probabilities: dict, model_name: str = "", elapsed: float = 0.0):
-        """Update AI analysis section with real results."""
+        """Update AI analysis section with single-window results (legacy)."""
         from ui.theme import CLASS_NAMES_PL
         sorted_items = sorted(probabilities.items(), key=lambda x: x[1], reverse=True)
         top_cls, top_prob = sorted_items[0]
         self._ai_diag.setText(f"{CLASS_NAMES_PL.get(top_cls, top_cls)} — {top_prob * 100:.1f}%")
-        others = [f"{CLASS_NAMES_PL.get(c, c)}: {p * 100:.1f}%" for c, p in sorted_items[1:]]
-        self._ai_conf.setText(" | ".join(others))
         self._ai_model.setText(f"Model: {model_name} | Czas: {elapsed:.1f} s")
+
+    def set_scan_summary(self, scan_results: list, model_name: str = ""):
+        """Display per-illness highest %, location, and healthy stats from full scan.
+
+        scan_results: list of dicts with t_start, t_end, probs.
+        """
+        from ui.theme import CLASS_NAMES_PL, TARGET_CLASSES
+
+        # Clear previous per-class rows
+        while self._ai_per_class_layout.count():
+            item = self._ai_per_class_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not scan_results:
+            self._ai_diag.setText("Brak wyników skanowania")
+            self._ai_healthy.setText("")
+            self._ai_model.setText(f"Model: {model_name}" if model_name else "")
+            return
+
+        # Per-class highest with location — only known target classes (skip stale cache keys)
+        per_class_max: dict[str, tuple[float, float, float]] = {}
+        valid_classes = set(TARGET_CLASSES) - {"class_healthy"}
+        for r in scan_results:
+            probs = r.get("probs") or {}
+            for cls, p in probs.items():
+                if cls not in valid_classes:
+                    continue
+                cur = per_class_max.get(cls)
+                if cur is None or p > cur[0]:
+                    per_class_max[cls] = (float(p), float(r.get("t_start", 0)), float(r.get("t_end", 0)))
+
+        # Top finding overall
+        if per_class_max:
+            top_cls, (top_p, top_s, top_e) = max(per_class_max.items(), key=lambda kv: kv[1][0])
+            self._ai_diag.setText(
+                f"Najwyższe: {CLASS_NAMES_PL.get(top_cls, top_cls)} — {top_p * 100:.1f}% "
+                f"({top_s:.1f}–{top_e:.1f} s)"
+            )
+
+        # Header row
+        hdr = QWidget()
+        hdr.setStyleSheet("background: transparent;")
+        hl = QHBoxLayout(hdr)
+        hl.setContentsMargins(0, 0, 0, 6)
+        hl.setSpacing(8)
+        for text, w in [("Jednostka chorobowa", 240), ("Maks. %", 70), ("Czas", 100)]:
+            lbl = QLabel(text)
+            lbl.setStyleSheet(
+                f"font-size: 10px; font-weight: 700; color: {T.TEXT_DIM};"
+                f" letter-spacing: 0.5px; background: transparent;"
+            )
+            lbl.setFixedWidth(w)
+            hl.addWidget(lbl)
+        hl.addStretch()
+        self._ai_per_class_layout.addWidget(hdr)
+
+        sorted_classes = sorted(per_class_max.items(), key=lambda kv: kv[1][0], reverse=True)
+        for i, (cls, (p, s, e)) in enumerate(sorted_classes):
+            row = QWidget()
+            border_top = "" if i == 0 else f"border-top: 1px solid {T.AMBER_BORDER};"
+            row.setStyleSheet(f"background: transparent; {border_top}")
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 6, 0, 6)
+            rl.setSpacing(8)
+            name_lbl = QLabel(CLASS_NAMES_PL.get(cls, cls))
+            name_lbl.setStyleSheet(f"font-size: 12px; color: {T.TEXT}; background: transparent;")
+            name_lbl.setFixedWidth(240)
+            rl.addWidget(name_lbl)
+            pct_lbl = QLabel(f"{p * 100:.1f}%")
+            pct_lbl.setStyleSheet(
+                f"font-size: 12px; font-family: Menlo; font-weight: 600;"
+                f" background: transparent;"
+                f" color: {T.RED if p >= 0.5 else T.TEXT_MUTED};"
+            )
+            pct_lbl.setFixedWidth(70)
+            rl.addWidget(pct_lbl)
+            time_lbl = QLabel(f"{s:.1f}–{e:.1f} s")
+            time_lbl.setStyleSheet(
+                f"font-size: 11px; font-family: Menlo; color: {T.TEXT_MUTED};"
+                f" background: transparent;"
+            )
+            time_lbl.setFixedWidth(100)
+            rl.addWidget(time_lbl)
+            rl.addStretch()
+            self._ai_per_class_layout.addWidget(row)
+
+        # Healthy stats — only across windows where healthy is the actual top class
+        healthy_dominant_probs = []
+        for r in scan_results:
+            probs = r.get("probs") or {}
+            if not probs:
+                continue
+            top = max(probs, key=probs.get)
+            if top == "class_healthy":
+                healthy_dominant_probs.append(float(probs[top]))
+
+        if healthy_dominant_probs:
+            avg = sum(healthy_dominant_probs) / len(healthy_dominant_probs) * 100
+            mn = min(healthy_dominant_probs) * 100
+            self._ai_healthy.setText(
+                f"Zdrowy (gdy dominuje): średnia {avg:.1f}% · minimum {mn:.1f}% "
+                f"· {len(healthy_dominant_probs)}/{len(scan_results)} okien"
+            )
+        else:
+            self._ai_healthy.setText(
+                f"Zdrowy nie był dominującą klasą w żadnym z {len(scan_results)} okien"
+            )
+
+        self._ai_model.setText(
+            f"Model: {model_name} · {len(scan_results)} okien skanowania" if model_name
+            else f"{len(scan_results)} okien skanowania"
+        )
 
     def _export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(self, "Eksportuj PDF", "raport_ekg.pdf", "PDF (*.pdf)")

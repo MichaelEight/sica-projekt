@@ -1063,6 +1063,16 @@ class MonitorSidebar(QWidget):
         active_leads = [l for l, b in self.lead_btns.items() if b.property("active")]
         self.leads_changed.emit(active_leads)
 
+    def ensure_lead_active(self, lead: str):
+        """Activate given lead if not already — keeps sync with 1-lead selection."""
+        btn = self.lead_btns.get(lead)
+        if btn is None or btn.property("active"):
+            return
+        btn.setProperty("active", True)
+        btn.setStyleSheet(self._lead_btn_style(True))
+        active_leads = [l for l, b in self.lead_btns.items() if b.property("active")]
+        self.leads_changed.emit(active_leads)
+
     def _pill_style(self, active):
         if active:
             return f"""

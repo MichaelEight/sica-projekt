@@ -229,3 +229,172 @@ def predict_from_checkpoint(
     )
 
 
+def explain_prediction(
+        model: Inception1DNet,
+        data: np.ndarray | torch.Tensor | str | Path,
+        target_classes: list[int] | list[str] | None = None,
+        threshold: float = 0.5,
+        class_names: list[str] | None = None,
+        device: str | torch.device | None = None,
+) -> dict[str, Any]:
+    """
+    Generuje wyjaśnienia XAI (Grad-CAM + Saliency) dla pojedynczego zapisu EKG.
+    Funkcja zaprojektowana pod kątem łatwej integracji z frontendem (UI).
+
+    Dla programisty UI:
+    -------------------
+    Zwraca słownik (łatwy do zamiany na JSON) o strukturze:
+    {
+        "source_id": "input_0",
+        "explanations": [
+            {
+                "class_idx": 1,
+                "class_name": "class_front_heart_attack",
+                "probability": 0.95,
+
+                # time_heatmap: tablica 5000 floatów [0.0 - 1.0].
+                # UI powinno nałożyć cień na wykres EKG tam, gdzie wartości są > 0.1
+                "time_heatmap": [0.0, 0.0, 0.12, 0.45, 0.8, 0.9, ...],
+
+                # lead_importance_percent: słownik ważności poszczególnych odprowadzeń.
+                # UI może z tego zbudować wykres słupkowy (suma zawsze = 100%).
+                "lead_importance_percent": {
+                    "I": 2.5, "II": 1.2, "III": 0.8, "aVR": 0.5,
+                    "aVL": 1.0, "aVF": 1.5, "V1": 5.0, "V2": 45.0,
+                    "V3": 35.0, "V4": 5.0, "V5": 1.5, "V6": 1.0
+                },
+
+                "top_lead": "V2" # Odprowadzenie z największym wpływem na decyzję
+            },
+            ...
+        ]
+    }
+    """
+    # 1. Przygotowanie danych (bierzemy tylko pierwsze 10 sekund dla spójności XAI)
+    samples, sources = _load_samples(data)
+    if not samples:
+        raise ValueError("No valid data provided.")
+
+    sample = samples[0]  # Operujemy na pierwszej dostarczonej próbce
+    windows, _ = _split_sample_windows(sample, target_length=TARGET_LENGTH)
+    x_numpy = windows[0]  # XAI liczymy dla pierwszego okna 5000 próbek
+
+    # Obsługa nazw klas
+    if class_names is None:
+        class_names = CANONICAL_CLASS_COLUMNS
+
+    # Obsługa urządzenia
+    if device is None or str(device) == "auto":
+        resolved_device = next(model.parameters()).device
+    else:
+        resolved_device = _resolve_device(device)
+        model = model.to(resolved_device)
+
+    x_tensor = torch.from_numpy(x_numpy).unsqueeze(0).to(resolved_device)
+
+    # 2. Inicjalizacja Hooków (przechwytywanie wiedzy z wnętrza sieci)
+    activations = []
+    gradients = []
+
+    def forward_hook(module, input, output):
+        activations.append(output)
+
+    def backward_hook(module, grad_in, grad_out):
+        gradients.append(grad_out[0])
+
+    # Podpinamy się pod ostatni blok konwolucyjny przed uśrednianiem (zdefiniowany w Inception1DNet)
+    target_layer = model.block6
+    hook_f = target_layer.register_forward_hook(forward_hook)
+    hook_b = target_layer.register_full_backward_hook(backward_hook)
+
+    try:
+        # 3. Wykonanie Forward Pass (Musi wymagać gradientu na wejściu dla Lead Importance!)
+        model.eval()
+        x_tensor.requires_grad_(True)
+
+        logits = model(x_tensor)
+        probs = torch.sigmoid(logits)[0].detach().cpu().numpy()
+
+        # 4. Ustalenie klas do wyjaśnienia (jeśli UI nie podało, bierzemy te powyżej threshold)
+        if target_classes is None:
+            active_indices = [i for i, p in enumerate(probs) if p >= threshold]
+            # Jeśli brak patologii, wyjaśniamy klasę z największym prawdopodobieństwem
+            if not active_indices:
+                active_indices = [int(np.argmax(probs))]
+        else:
+            # Konwersja nazw klas na indeksy, jeśli UI wysłało stringi
+            active_indices = []
+            for c in target_classes:
+                if isinstance(c, str):
+                    if c in class_names:
+                        active_indices.append(class_names.index(c))
+                else:
+                    active_indices.append(int(c))
+
+        lead_names = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
+        explanations = []
+
+        # 5. Obliczanie XAI dla każdej wybranej klasy
+        for class_idx in active_indices:
+            model.zero_grad()
+            if x_tensor.grad is not None:
+                x_tensor.grad.zero_()
+            activations.clear()
+            gradients.clear()
+
+            # Puszczamy sygnał od nowa w trybie wymagającym gradientu
+            out = model(x_tensor)
+
+            # Wsteczna propagacja DLA KONKRETNEJ KLASY
+            out[0, class_idx].backward(retain_graph=True)
+
+            # --- A. GRAD-CAM (Kiedy sieć patrzyła?) ---
+            acts = activations[0]
+            grads = gradients[0]
+
+            weights = torch.mean(grads, dim=2, keepdim=True)
+            cam = torch.sum(weights * acts, dim=1).squeeze(0)
+            cam = torch.relu(cam)
+
+            cam_min, cam_max = cam.min(), cam.max()
+            if cam_max - cam_min > 1e-8:
+                cam = (cam - cam_min) / (cam_max - cam_min)
+            else:
+                cam = torch.zeros_like(cam)
+
+            time_heatmap = cam.detach().cpu().numpy().round(4).tolist()
+
+            # --- B. LEAD IMPORTANCE (Gdzie sieć patrzyła?) ---
+            input_grads = x_tensor.grad[0]  # kształt (12, 5000)
+            lead_imp_raw = torch.sum(torch.abs(input_grads), dim=1)  # kształt (12,)
+
+            lead_imp_sum = torch.sum(lead_imp_raw)
+            if lead_imp_sum > 1e-8:
+                lead_imp_pct = (lead_imp_raw / lead_imp_sum) * 100
+            else:
+                lead_imp_pct = torch.zeros_like(lead_imp_raw)
+
+            lead_imp_pct = lead_imp_pct.detach().cpu().numpy().round(2)
+
+            # Pakowanie wyników dla UI
+            importance_dict = {lead_names[i]: float(lead_imp_pct[i]) for i in range(12)}
+            top_lead_idx = int(np.argmax(lead_imp_pct))
+
+            explanations.append({
+                "class_idx": int(class_idx),
+                "class_name": class_names[class_idx] if class_idx < len(class_names) else f"class_{class_idx}",
+                "probability": float(round(probs[class_idx], 4)),
+                "time_heatmap": time_heatmap,
+                "lead_importance_percent": importance_dict,
+                "top_lead": lead_names[top_lead_idx]
+            })
+
+        return {
+            "source_id": sources[0],
+            "explanations": explanations
+        }
+
+    finally:
+        # 6. Zawsze usuwamy hooki, by nie wyciekała pamięć i nie psuło to zwykłej inferencji!
+        hook_f.remove()
+        hook_b.remove()

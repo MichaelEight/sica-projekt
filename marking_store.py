@@ -19,21 +19,25 @@ def auto_label(type: str, value_ms: float | None = None, t1: float = 0.0, t2: fl
         elif type == "annotation":
             return category if category else "Annotation"
         elif type == "scan" and probs:
-            top_class = max(probs, key=probs.get)
-            pct = probs[top_class] * 100
-            # Use Polish class names if available
             _CLASS_NAMES_PL = {
-                "class_healthy": "Zdrowy (NORM)",
                 "class_front_heart_attack": "Zawał przedniej ściany",
-                "class_side_heart_attack": "Zawał ściany bocznej",
+                "class_first_degree_av_block": "Blok AV I stopnia",
                 "class_bottom_heart_attack": "Zawał ściany dolnej",
-                "class_back_heart_attack": "Zawał ściany tylnej",
+                "class_atrial_fibrillation": "Migotanie przedsionków",
                 "class_complete_right_conduction_disorder": "CRBBB",
                 "class_incomplete_right_conduction_disorder": "IRBBB",
                 "class_complete_left_conduction_disorder": "CLBBB",
             }
-            name = _CLASS_NAMES_PL.get(top_class, top_class)
-            return f"{name}: {pct:.0f}%"
+            # Healthy never shown as a finding — pick top non-healthy class
+            non_healthy = {c: p for c, p in probs.items() if c != "class_healthy"}
+            if not non_healthy:
+                return "Niepewne"
+            top_class = max(non_healthy, key=non_healthy.get)
+            pct = non_healthy[top_class] * 100
+            # Below confidence floor → model doesn't recognize anything trained
+            if pct < 50:
+                return f"Niepewne (top: {_CLASS_NAMES_PL.get(top_class, top_class)} {pct:.0f}%)"
+            return f"{_CLASS_NAMES_PL.get(top_class, top_class)}: {pct:.0f}%"
         elif type == "custom":
             return label if label else "Custom"
         else:
@@ -66,6 +70,7 @@ class Marking:
     probs: dict | None = None
     color_code: int = 0
     source: str = "user"
+    lead_importance: dict | None = None  # {lead_name: pct} from explainable AI
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
@@ -95,6 +100,7 @@ class Marking:
             "probs": self.probs,
             "color_code": self.color_code,
             "source": self.source,
+            "lead_importance": self.lead_importance,
             "created_at": self.created_at,
         }
 
@@ -113,6 +119,7 @@ class Marking:
                 probs=d.get("probs"),
                 color_code=int(d.get("color_code", 0)),
                 source=d.get("source", "user"),
+                lead_importance=d.get("lead_importance"),
             )
             if "id" in d:
                 m.id = d["id"]

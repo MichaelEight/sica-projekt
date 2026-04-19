@@ -41,7 +41,6 @@ class UploadPage(QWidget):
     """Welcome screen with file picker and recent files."""
 
     file_selected = Signal(str)  # emits the base path (without extension)
-    batch_selected = Signal(list)  # emits list of base paths for batch analysis
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -60,8 +59,8 @@ class UploadPage(QWidget):
         tb_layout = QHBoxLayout(topbar)
         tb_layout.setContentsMargins(20, 0, 20, 0)
         logo = QLabel()
-        logo.setText('<span style="color:#4a9eff; font-weight:600;">EKG</span>'
-                     ' <span style="color:white; font-weight:600;">Assistant</span>')
+        logo.setText('<span style="color:#4a9eff; font-weight:700;">Kardio</span>'
+                     '<span style="color:white; font-weight:700;">skop</span>')
         logo.setFont(QFont(".AppleSystemUIFont", 15))
         logo.setTextFormat(Qt.RichText)
         tb_layout.addWidget(logo)
@@ -76,7 +75,7 @@ class UploadPage(QWidget):
         main.setSpacing(24)
 
         # Title
-        title = QLabel("Wczytaj sygna\u0142 EKG")
+        title = QLabel("Kardioskop — wczytaj sygna\u0142 EKG")
         title.setFont(QFont(".AppleSystemUIFont", 22, QFont.DemiBold))
         title.setAlignment(Qt.AlignCenter)
         main.addWidget(title)
@@ -100,7 +99,7 @@ class UploadPage(QWidget):
         dz_layout.setAlignment(Qt.AlignCenter)
         dz_layout.setSpacing(12)
 
-        step_label = QLabel("Wskaż plik .dat lub .hea z nagrania EKG")
+        step_label = QLabel("Wskaż plik .dat z nagrania EKG")
         step_label.setStyleSheet("font-size: 14px; font-weight: 500; border: none;")
         step_label.setAlignment(Qt.AlignCenter)
         dz_layout.addWidget(step_label)
@@ -133,33 +132,14 @@ class UploadPage(QWidget):
         browse_btn.clicked.connect(self._browse)
         btn_row.addWidget(browse_btn)
 
-        batch_btn = QPushButton("Wybierz wiele plików")
-        batch_btn.setCursor(Qt.PointingHandCursor)
-        batch_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {T.WHITE}; color: {T.TEXT};
-                font-size: 14px; font-weight: 600;
-                padding: 10px 28px; border-radius: 8px;
-                border: 1px solid {T.BORDER};
-            }}
-            QPushButton:hover {{
-                background: {secondary_hover_bg};
-                border: 1px solid {T.ACCENT}; color: {T.ACCENT};
-            }}
-            QPushButton:pressed {{
-                background: {secondary_pressed_bg};
-                border: 1px solid {T.ACCENT}; color: {T.ACCENT};
-            }}
-        """)
-        batch_btn.clicked.connect(self._browse_batch)
-        btn_row.addWidget(batch_btn)
+        # Batch processing hidden — single-file flow only for now
 
         btn_wrap = QWidget()
         btn_wrap.setStyleSheet("background: transparent; border: none;")
         btn_wrap.setLayout(btn_row)
         dz_layout.addWidget(btn_wrap, alignment=Qt.AlignCenter)
 
-        hint = QLabel("Oba pliki (.dat i .hea) muszą mieć tę samą nazwę i znajdować się w tym samym folderze")
+        hint = QLabel("Plik .hea o tej samej nazwie musi znajdować się w tym samym folderze")
         hint.setStyleSheet(f"color: {T.TEXT_DIM}; font-size: 12px; border: none;")
         hint.setAlignment(Qt.AlignCenter)
         dz_layout.addWidget(hint)
@@ -284,67 +264,20 @@ class UploadPage(QWidget):
     def _browse(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Wybierz plik EKG", "",
-            "Pliki WFDB (*.dat *.hea);;Wszystkie pliki (*)"
+            "Pliki WFDB (*.dat)"
         )
         if path:
-            ext = os.path.splitext(path)[1].lower()
-            if ext not in ('.dat', '.hea'):
-                from PySide6.QtWidgets import QMessageBox
-                QMessageBox.warning(
-                    self, "Nieobsługiwany format",
-                    f"Plik \"{os.path.basename(path)}\" nie jest w formacie WFDB.\n"
-                    "Wybierz plik z rozszerzeniem .dat lub .hea.")
-                return
             base, _ = os.path.splitext(path)
-            dat_path = base + ".dat"
             hea_path = base + ".hea"
-            missing = []
-            if not os.path.isfile(dat_path):
-                missing.append(".dat")
             if not os.path.isfile(hea_path):
-                missing.append(".hea")
-            if missing:
                 from PySide6.QtWidgets import QMessageBox
                 QMessageBox.warning(
-                    self, "Brak pliku",
-                    f"Nie znaleziono pliku {', '.join(missing)} w tym samym folderze.\n\n"
-                    "Format WFDB wymaga obu plików (.dat i .hea)\n"
-                    "o tej samej nazwie, w tym samym folderze.")
+                    self, "Brak pliku nagłówka",
+                    f"Nie znaleziono pliku .hea dla \"{os.path.basename(path)}\".\n\n"
+                    "Format WFDB wymaga pliku nagłówkowego o tej samej nazwie\n"
+                    "w tym samym folderze.")
                 return
             self.file_selected.emit(base)
-
-    def _browse_batch(self):
-        paths, _ = QFileDialog.getOpenFileNames(
-            self, "Wybierz nagrania WFDB", "",
-            "Nagłówki WFDB (*.hea)"
-        )
-        if not paths:
-            return
-        seen = set()
-        base_paths: list[str] = []
-        skipped = 0
-        for p in paths:
-            base, ext = os.path.splitext(p)
-            if ext.lower() != ".hea":
-                skipped += 1
-                continue
-            if base in seen:
-                continue
-            seen.add(base)
-            if not os.path.isfile(base + ".dat"):
-                skipped += 1
-                continue
-            base_paths.append(base)
-
-        if not base_paths:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(
-                self, "Brak plików do analizy",
-                "Nie wybrano żadnych poprawnych par .hea + .dat."
-            )
-            return
-
-        self.batch_selected.emit(base_paths)
 
     def refresh(self):
         self._refresh_recent()

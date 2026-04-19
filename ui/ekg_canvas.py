@@ -870,6 +870,24 @@ class TwelveLeadGrid(QWidget):
         self.set_autoscan_regions([])
         self.rhythm.gt_annotations = []
 
+    def set_markings(self, markings: list, hovered: str | None = None, selected: str | None = None):
+        """Distribute markings to each lead cell so annotations render on 12-lead."""
+        by_lead: dict[str, list[dict]] = {l: [] for l in self.cells}
+        for m in markings:
+            lead = m.get("lead")
+            if lead in by_lead:
+                by_lead[lead].append(m)
+        for lead, cell in self.cells.items():
+            cell.markings = by_lead.get(lead, [])
+            cell.hovered_marking = hovered
+            cell.selected_marking = selected
+            cell.update()
+        # Rhythm strip mirrors lead II markings
+        self.rhythm.markings = by_lead.get("II", [])
+        self.rhythm.hovered_marking = hovered
+        self.rhythm.selected_marking = selected
+        self.rhythm.update()
+
     def clear(self):
         """Clear all cells."""
         for cell in self.cells.values():
