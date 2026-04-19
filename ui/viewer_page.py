@@ -644,13 +644,13 @@ class ViewerPage(QWidget):
         # Row 1b: Timeline overview — full signal with window rectangle
         self.timeline_overview = TimelineOverview()
         self.timeline_overview.seek_requested.connect(self._on_overview_seek)
-        overview_row = QWidget()
-        overview_row.setStyleSheet(f"background: {T.WHITE};")
-        orl = QHBoxLayout(overview_row)
+        self._overview_row = QWidget()
+        self._overview_row.setStyleSheet(f"background: {T.WHITE};")
+        orl = QHBoxLayout(self._overview_row)
         orl.setContentsMargins(12, 2, 12, 6)
         orl.setSpacing(0)
         orl.addWidget(self.timeline_overview)
-        bottom_layout.addWidget(overview_row)
+        bottom_layout.addWidget(self._overview_row)
 
         # Row 2: Selection indicator bar — always present, fixed height
         self._sel_indicator = QLabel()
@@ -1235,35 +1235,45 @@ class ViewerPage(QWidget):
 
     _ZOOM_STEPS = [0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 15.0, 20.0, 30.0]
 
+    def _current_window(self) -> float:
+        return self._window_12 if self._view_mode == 0 else self._window_1
+
+    def _set_current_window(self, value: float):
+        if self._view_mode == 0:
+            self._window_12 = value
+        else:
+            self._window_1 = value
+
     def _zoom_in(self):
         """Decrease the time window — snap to nearest smaller step."""
-        current = self._window_1
-        # Find the largest step that's strictly less than current
+        current = self._current_window()
         target = self._ZOOM_STEPS[0]
         for step in self._ZOOM_STEPS:
             if step < current - 0.01:
                 target = step
             else:
                 break
-        self._window_1 = max(target, self._ZOOM_STEPS[0])
+        self._set_current_window(max(target, self._ZOOM_STEPS[0]))
         self._apply_zoom()
 
     def _zoom_out(self):
         """Increase the time window — snap to nearest larger step."""
-        current = self._window_1
+        current = self._current_window()
         max_window = min(self.duration, self._ZOOM_STEPS[-1])
-        # Find the smallest step that's strictly greater than current
         target = max_window
         for step in self._ZOOM_STEPS:
             if step > current + 0.01:
                 target = min(step, max_window)
                 break
-        self._window_1 = target
+        self._set_current_window(target)
         self._apply_zoom()
 
     def _reset_zoom(self):
-        """Reset 1-lead view to default 3-second window."""
-        self._window_1 = min(3.0, self.duration)
+        """Reset current view to default window size."""
+        if self._view_mode == 0:
+            self._window_12 = min(2.5, self.duration)
+        else:
+            self._window_1 = min(3.0, self.duration)
         self._apply_zoom()
 
     def _on_pinch_zoom(self, direction: int):
@@ -1306,17 +1316,21 @@ class ViewerPage(QWidget):
 
     def _apply_zoom(self):
         """Common zoom update: label, scrubber, view, time display."""
-        # Clamp time_pos so window doesn't go past end
-        if self.time_pos + self._window_1 > self.duration:
-            self.time_pos = max(0, self.duration - self._window_1)
+        win = self._current_window()
+        if self.time_pos + win > self.duration:
+            self.time_pos = max(0, self.duration - win)
         self._update_zoom_label()
         self._restore_scrubber_range()
-        self._refresh_single_lead()
+        if self._view_mode == 0:
+            self.grid_12.set_signal(self.signal, self.leads, self.fs, self.time_pos,
+                                    self._window_12, self._v_min, self._v_max)
+        else:
+            self._refresh_single_lead()
         self._update_time_display()
 
     def _update_zoom_label(self):
         if hasattr(self, '_zoom_label'):
-            self._zoom_label.setText(f"{self._window_1:.1f} s")
+            self._zoom_label.setText(f"{self._current_window():.1f} s")
 
     def _on_selection_live(self, t1, t2):
         """Update the selection indicator in the status bar during live selection."""
