@@ -130,6 +130,7 @@ class _MarkingCard(QFrame):
         t2 = getattr(marking, "t2", 0.0) or 0.0
         lead = getattr(marking, "lead", "") or ""
         self._meta_label = QLabel(f"{lead}: {t1:.2f} \u2014 {t2:.2f} s")
+        self._meta_label.setWordWrap(True)
         row1.addWidget(self._meta_label, 1)
 
         self._del_btn = QPushButton("\u2715")
@@ -146,6 +147,8 @@ class _MarkingCard(QFrame):
 
         label_text = getattr(marking, "label", "") or marking.type
         self._label = QLabel(label_text)
+        self._label.setWordWrap(True)
+        self._label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         row2.addWidget(self._label, 1)
 
         source = getattr(marking, "source", "") or ""
@@ -307,7 +310,7 @@ class MarkingsPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(300)
+        self.setFixedWidth(340)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
 
         self._markings: list = []
@@ -408,6 +411,12 @@ class MarkingsPanel(QWidget):
         self._card_layout.addStretch()
         self._scroll.setWidget(self._card_container)
         list_lay.addWidget(self._scroll, 1)
+
+        # Lead-importance explanation panel (visible when scan marking selected)
+        from ui.widgets import LeadImportanceBar
+        self._lead_importance_panel = LeadImportanceBar()
+        self._lead_importance_panel.hide()
+        list_lay.addWidget(self._lead_importance_panel)
 
         self._stack.addWidget(list_page)  # index 0
 
@@ -746,10 +755,19 @@ class MarkingsPanel(QWidget):
             card.set_selected(card.marking.id == marking_id)
         self.marking_selected.emit(marking_id)
 
-        # Open edit form for the clicked marking
+        # Update lead-importance panel for scan markings with XAI data
+        selected = next((m for m in self._markings if m.id == marking_id), None)
+        if selected and selected.type == "scan":
+            title = f"{selected.t1:.1f}–{selected.t2:.1f} s · {selected.label}"
+            self._lead_importance_panel.set_data(selected.lead_importance, title=title)
+        else:
+            self._lead_importance_panel.set_data(None)
+
+        # Open edit form for non-scan markings
         for m in self._markings:
             if m.id == marking_id:
-                self.show_edit_form(m)
+                if m.type != "scan":
+                    self.show_edit_form(m)
                 break
 
     # --- form handlers ---

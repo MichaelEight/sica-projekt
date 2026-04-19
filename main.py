@@ -1,4 +1,4 @@
-"""EKG Assistant — Desktop Application.
+"""Kardioskop — desktop EKG analysis application.
 
 Usage:
     python main.py
@@ -13,11 +13,11 @@ from ui.main_window import MainWindow
 
 def main():
     log = get_logger("main")
-    log.info("starting EKG Assistant")
+    log.info("starting Kardioskop")
 
     app = QApplication(sys.argv)
-    app.setApplicationName("EKG Assistant")
-    app.setOrganizationName("EKG Assistant")
+    app.setApplicationName("Kardioskop")
+    app.setOrganizationName("Kardioskop")
     app.setFont(QFont(".AppleSystemUIFont", 13))
 
     # Restore persisted theme before constructing widgets

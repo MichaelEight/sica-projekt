@@ -11,12 +11,12 @@ from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve,
 from PySide6.QtGui import QFont, QPainter, QPen, QColor, QBrush
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QPushButton, QFrame, QStackedWidget, QSlider,
-                                QSizePolicy, QComboBox, QApplication, QDialog,
+                                QSizePolicy, QApplication, QDialog,
                                 QGraphicsOpacityEffect)
 
 import ui.theme as T
 from ui.theme import STANDARD_LEADS, TARGET_CLASSES
-from ui.widgets import make_logo, make_separator
+from ui.widgets import make_logo, make_separator, TimelineOverview
 from ui.ekg_canvas import (EkgCellCanvas, TwelveLeadGrid, SingleLeadCanvas,
                             generate_demo_signal, synth_ekg, LEAD_SEEDS, LEAD_AMPS)
 from ui.panels import InfoPanel, MonitorSidebar
@@ -214,7 +214,7 @@ class SegmentedControl(QWidget):
                 btn.setStyleSheet(f"""
                     QPushButton {{
                         background: {T.ACCENT}; color: {T.ACCENT_TEXT}; border: none;
-                        padding: 6px 12px; font-size: 12px; font-weight: 500;
+                        padding: 8px 22px; font-size: 13px; font-weight: 600;
                     }}
                     QPushButton:hover {{ background: {T.ACCENT}; opacity: 0.85; }}
                 """)
@@ -222,7 +222,7 @@ class SegmentedControl(QWidget):
                 btn.setStyleSheet(f"""
                     QPushButton {{
                         background: {T.BTN_DARK}; color: {T.TEXT_MUTED}; border: none;
-                        padding: 6px 12px; font-size: 12px; font-weight: 500;
+                        padding: 8px 22px; font-size: 13px; font-weight: 600;
                     }}
                     QPushButton:hover {{ background: {T.SEPARATOR}; color: {T.BTN_TEXT}; }}
                 """)
@@ -431,31 +431,12 @@ class ViewerPage(QWidget):
         tb2.setContentsMargins(10, 0, 10, 0)
         tb2.setSpacing(6)
 
-        self.view_seg = SegmentedControl(["12-Lead", "1-Lead", "Monitor"])
+        # Center view-mode buttons for visibility
+        tb2.addStretch()
+        self.view_seg = SegmentedControl(["12-odprowadzeń", "1 odprowadzenie", "Podgląd ciągły"])
         self.view_seg.changed.connect(self._on_view_mode)
         tb2.addWidget(self.view_seg)
-        tb2.addWidget(make_separator())
         tb2.addStretch()
-
-        # Model selector
-        self.model_combo = QComboBox()
-        self.model_combo.setFixedWidth(140)
-        self.model_combo.setStyleSheet(f"""
-            QComboBox {{
-                color: {T.BTN_TEXT}; background: {T.BTN_DARK};
-                border: 1px solid {T.SEPARATOR}; border-radius: 5px;
-                padding: 3px 6px; font-size: 11px;
-            }}
-            QComboBox::drop-down {{ border: none; }}
-            QComboBox QAbstractItemView {{
-                color: {T.TEXT}; background: {T.WHITE};
-                selection-background-color: {T.ACCENT};
-                selection-color: {T.ACCENT_TEXT};
-            }}
-        """)
-        self._populate_model_combo()
-        self.model_combo.currentIndexChanged.connect(self._on_model_changed)
-        tb2.addWidget(self.model_combo)
 
         # Full analysis button (replaces Autoskan + Zaznacz do analizy + Analizuj)
         from ui.theme import is_dark_mode as _idm
@@ -660,12 +641,44 @@ class ViewerPage(QWidget):
 
         bottom_layout.addWidget(self.navbar)
 
+        # Row 1b: Timeline overview — full signal with window rectangle
+        self.timeline_overview = TimelineOverview()
+        self.timeline_overview.seek_requested.connect(self._on_overview_seek)
+        self._overview_row = QWidget()
+        self._overview_row.setStyleSheet(f"background: {T.WHITE};")
+        orl = QHBoxLayout(self._overview_row)
+        orl.setContentsMargins(12, 2, 12, 6)
+        orl.setSpacing(0)
+        orl.addWidget(self.timeline_overview)
+        bottom_layout.addWidget(self._overview_row)
+
         # Row 2: Selection indicator bar — always present, fixed height
         self._sel_indicator = QLabel()
         self._sel_indicator.setAlignment(Qt.AlignCenter)
         self._sel_indicator.setFixedHeight(24)
         self._sel_indicator.setStyleSheet(f"background: {T.WHITE}; border: none; color: transparent;")
         bottom_layout.addWidget(self._sel_indicator)
+
+        # Row 3: Persistent status strip — always visible across modes
+        self.status_strip = QWidget()
+        self.status_strip.setFixedHeight(26)
+        self.status_strip.setStyleSheet(
+            f"background: {T.BG_SECONDARY}; border-top: 1px solid {T.BORDER};"
+        )
+        ss = QHBoxLayout(self.status_strip)
+        ss.setContentsMargins(14, 0, 14, 0)
+        ss.setSpacing(16)
+        self.status_file = QLabel("Brak wczytanego pliku")
+        self.status_file.setStyleSheet(f"font-size:11px; color:{T.TEXT_SECONDARY}; font-family:Menlo;")
+        self.status_meta = QLabel("")
+        self.status_meta.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM}; font-family:Menlo;")
+        self.status_pos = QLabel("")
+        self.status_pos.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM}; font-family:Menlo;")
+        ss.addWidget(self.status_file)
+        ss.addWidget(self.status_meta)
+        ss.addStretch()
+        ss.addWidget(self.status_pos)
+        bottom_layout.addWidget(self.status_strip)
 
         outer.addWidget(self.bottom_bar)
         self._update_time_display()
@@ -690,20 +703,6 @@ class ViewerPage(QWidget):
                 padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px; }}
             QPushButton:hover {{ background:{_ah}; }}
         """)
-        self.model_combo.setStyleSheet(f"""
-            QComboBox {{
-                color: {T.BTN_TEXT}; background: {T.BTN_DARK};
-                border: 1px solid {T.SEPARATOR}; border-radius: 5px;
-                padding: 4px 8px; font-size: 11px;
-            }}
-            QComboBox::drop-down {{ border: none; }}
-            QComboBox QAbstractItemView {{
-                color: {T.TEXT}; background: {T.WHITE};
-                selection-background-color: {T.ACCENT};
-                selection-color: {T.ACCENT_TEXT};
-            }}
-        """)
-
         from ui.theme import is_dark_mode
         self.btn_dark.setText("Tryb jasny" if is_dark_mode() else "Tryb ciemny")
         # Lead sidebar
@@ -724,6 +723,13 @@ class ViewerPage(QWidget):
         self._zoom_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_MUTED};")
         self._zoom_reset_btn.setStyleSheet(self._zoom_reset_btn_style())
         self._sel_indicator.setStyleSheet(f"background: {T.WHITE}; border: none; color: transparent;")
+        self.status_strip.setStyleSheet(
+            f"background: {T.BG_SECONDARY}; border-top: 1px solid {T.BORDER};"
+        )
+        self.status_file.setStyleSheet(f"font-size:11px; color:{T.TEXT_SECONDARY}; font-family:Menlo;")
+        self.status_meta.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM}; font-family:Menlo;")
+        self.status_pos.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM}; font-family:Menlo;")
+        self.timeline_overview.update()
         self._apply_pause_btn_style()
 
         self.grid_12.apply_theme()
@@ -760,6 +766,8 @@ class ViewerPage(QWidget):
         self.time_pos = 0.0
         self._monitor_t = 0.0
         self._monitor_playing = False
+        # Reset to 12-lead on every file load — Monitor must not be the default entry point
+        self.view_seg.set_active(0)
         self._monitor_timer.stop()
 
         # ── Analyze signal ranges once ──
@@ -808,6 +816,13 @@ class ViewerPage(QWidget):
         self.scrubber.setRange(0, int(self._scrubber_max * 100))
         self.scrubber.setValue(0)
 
+        # Timeline overview for window-rect visualization
+        self.timeline_overview.set_signal(signal, self.duration)
+
+        # Persistent status strip
+        self.status_file.setText(f"Plik: {filename}" if filename else "Brak wczytanego pliku")
+        self.status_meta.setText(f"{self.duration:.1f} s")
+
         # Load patient info
         if patient_info:
             self.info_panel.set_patient(
@@ -838,11 +853,18 @@ class ViewerPage(QWidget):
 
         # Load .ann file (overrides patient info, loads markings)
         self._load_ann()
-        # If the .ann brought in scan markings (from single-file or batch
-        # analysis), rebuild the overlay so colored bands render immediately.
-        self._rebuild_autoscan_from_markings()
+        # Prefer the raw window-level autoscan cache (full per-window probs)
+        # over rebuilding from merged markings — markings collapse into 1 region.
+        cached_raw = self._load_autoscan_cache()
+        if cached_raw:
+            self._autoscan_results = cached_raw
+            self._apply_autoscan_overlay()
+            self.analysis_badge.show()
+        else:
+            self._rebuild_autoscan_from_markings()
 
         self._refresh_views()
+        self._refresh_markings()
         self._update_time_display()
 
 
@@ -901,11 +923,15 @@ class ViewerPage(QWidget):
 
     # ── View mode switching ──
     def _on_view_mode(self, idx: int):
+        prev_mode = self._view_mode
         self._view_mode = idx
         # Stop monitor if leaving monitor mode
         if idx != 2:
             self._monitor_timer.stop()
             self._monitor_playing = False
+            # Monitor overrode scrubber range — restore it for 12-lead / 1-lead
+            if prev_mode == 2 and self.signal is not None:
+                self._restore_scrubber_range()
 
         # Show pause button only in monitor mode
         self.pause_btn.setVisible(idx == 2)
@@ -941,29 +967,20 @@ class ViewerPage(QWidget):
     def _on_lead_selected(self, lead: str):
         self._refresh_single_lead()
         self._refresh_markings()
+        # Sync monitor: ensure selected lead is visible there too
+        self.monitor_sidebar.ensure_lead_active(lead)
 
-    def _populate_model_combo(self):
+    def _default_model_path(self) -> str:
+        """First discovered checkpoint (model-sota prioritised by discover_models)."""
         models = discover_models()
-        self.model_combo.clear()
-        if models:
-            for path in models:
-                self.model_combo.addItem(os.path.basename(path), path)
-        else:
-            self.model_combo.addItem("(brak modeli)", "")
-
-    def _on_model_changed(self, idx: int):
-        new_path = self.model_combo.currentData()
-        if new_path != self._model_path:
-            self._model = None
-            self._model_device = None
-            self._model_path = None
+        return models[0] if models else ""
 
     def _ensure_model_loaded(self):
         """Load model if not cached. Returns (model, device) or raises."""
         from model.inference_api import load_checkpoint_model
-        path = self.model_combo.currentData()
+        path = self._default_model_path()
         if not path or not os.path.exists(path):
-            raise FileNotFoundError(f"Nie znaleziono modelu: {path}")
+            raise FileNotFoundError(f"Nie znaleziono żadnego modelu w katalogach model/annotations lub models/")
         if self._model is not None and self._model_path == path:
             return self._model, self._model_device
         model, device = load_checkpoint_model(path, num_classes=len(TARGET_CLASSES))
@@ -1043,6 +1060,13 @@ class ViewerPage(QWidget):
         ]
         self.single_lead.update()
 
+        # 12-lead grid: distribute all markings to each lead cell
+        all_markings = [
+            {"id": m.id, "t1": m.t1, "t2": m.t2, "type": m.type, "label": m.label, "lead": m.lead}
+            for m in self._marking_store.get_all()
+        ]
+        self.grid_12.set_markings(all_markings)
+
         # Panel: show all markings + set current lead for filtering
         self.markings_panel.set_current_lead(lead)
         self.markings_panel.set_markings(self._marking_store.get_all())
@@ -1063,6 +1087,71 @@ class ViewerPage(QWidget):
         if hasattr(self.single_lead, 'selected_marking'):
             self.single_lead.selected_marking = marking_id
             self.single_lead.update()
+        # Compute lead importance on demand for scan markings without cached XAI
+        m = self._marking_store.get_by_id(marking_id)
+        if m and m.type == "scan":
+            if not m.lead_importance and self.signal is not None:
+                self._compute_lead_importance_for_marking(m)
+            else:
+                self._apply_explain_heatmap(m)
+        else:
+            self._apply_explain_heatmap(None)
+
+    def _apply_explain_heatmap(self, marking):
+        """Set/clear attention overlay on all canvases."""
+        if marking is None or not marking.time_heatmap:
+            self.single_lead.attention_overlay = None
+            for cell in self.grid_12.cells.values():
+                cell.attention_overlay = None
+            self.grid_12.rhythm.attention_overlay = None
+        else:
+            ov = (marking.t1, marking.t2, marking.time_heatmap)
+            self.single_lead.attention_overlay = ov
+            for cell in self.grid_12.cells.values():
+                cell.attention_overlay = ov
+            self.grid_12.rhythm.attention_overlay = ov
+        self.single_lead.update()
+        for cell in self.grid_12.cells.values():
+            cell.update()
+        self.grid_12.rhythm.update()
+
+    def _compute_lead_importance_for_marking(self, marking):
+        """Run explain_prediction on a scan marking's window and update panel."""
+        try:
+            model, device = self._ensure_model_loaded()
+        except Exception:
+            return
+        from model.inference_api import explain_prediction
+        s = max(0, int(marking.t1 * self.fs))
+        e = min(self.signal.shape[0], int(marking.t2 * self.fs))
+        if e - s < 100:
+            return
+        window = self.signal[s:e]
+        # Pick non-healthy top class to explain
+        probs = marking.probs or {}
+        non_healthy = [(c, p) for c, p in probs.items() if c != "class_healthy"]
+        if not non_healthy:
+            return
+        target_cls = max(non_healthy, key=lambda x: x[1])[0]
+        try:
+            exp = explain_prediction(
+                model=model, data=window,
+                target_classes=[target_cls],
+                class_names=TARGET_CLASSES, device=device,
+            )
+            if exp.get("explanations"):
+                imp = exp["explanations"][0].get("lead_importance_percent")
+                heat = exp["explanations"][0].get("time_heatmap")
+                if imp:
+                    self._marking_store.edit(
+                        marking.id, lead_importance=imp, time_heatmap=heat,
+                    )
+                    title = f"{marking.t1:.1f}\u2013{marking.t2:.1f} s \u00b7 {marking.label}"
+                    self.markings_panel._lead_importance_panel.set_data(imp, title=title)
+                    self._apply_explain_heatmap(marking)
+                    self._save_ann()
+        except Exception:
+            pass
 
     def _on_marking_deleted(self, marking_id: str):
         self._marking_store.delete(marking_id)
@@ -1146,35 +1235,45 @@ class ViewerPage(QWidget):
 
     _ZOOM_STEPS = [0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 15.0, 20.0, 30.0]
 
+    def _current_window(self) -> float:
+        return self._window_12 if self._view_mode == 0 else self._window_1
+
+    def _set_current_window(self, value: float):
+        if self._view_mode == 0:
+            self._window_12 = value
+        else:
+            self._window_1 = value
+
     def _zoom_in(self):
         """Decrease the time window — snap to nearest smaller step."""
-        current = self._window_1
-        # Find the largest step that's strictly less than current
+        current = self._current_window()
         target = self._ZOOM_STEPS[0]
         for step in self._ZOOM_STEPS:
             if step < current - 0.01:
                 target = step
             else:
                 break
-        self._window_1 = max(target, self._ZOOM_STEPS[0])
+        self._set_current_window(max(target, self._ZOOM_STEPS[0]))
         self._apply_zoom()
 
     def _zoom_out(self):
         """Increase the time window — snap to nearest larger step."""
-        current = self._window_1
+        current = self._current_window()
         max_window = min(self.duration, self._ZOOM_STEPS[-1])
-        # Find the smallest step that's strictly greater than current
         target = max_window
         for step in self._ZOOM_STEPS:
             if step > current + 0.01:
                 target = min(step, max_window)
                 break
-        self._window_1 = target
+        self._set_current_window(target)
         self._apply_zoom()
 
     def _reset_zoom(self):
-        """Reset 1-lead view to default 3-second window."""
-        self._window_1 = min(3.0, self.duration)
+        """Reset current view to default window size."""
+        if self._view_mode == 0:
+            self._window_12 = min(2.5, self.duration)
+        else:
+            self._window_1 = min(3.0, self.duration)
         self._apply_zoom()
 
     def _on_pinch_zoom(self, direction: int):
@@ -1217,17 +1316,21 @@ class ViewerPage(QWidget):
 
     def _apply_zoom(self):
         """Common zoom update: label, scrubber, view, time display."""
-        # Clamp time_pos so window doesn't go past end
-        if self.time_pos + self._window_1 > self.duration:
-            self.time_pos = max(0, self.duration - self._window_1)
+        win = self._current_window()
+        if self.time_pos + win > self.duration:
+            self.time_pos = max(0, self.duration - win)
         self._update_zoom_label()
         self._restore_scrubber_range()
-        self._refresh_single_lead()
+        if self._view_mode == 0:
+            self.grid_12.set_signal(self.signal, self.leads, self.fs, self.time_pos,
+                                    self._window_12, self._v_min, self._v_max)
+        else:
+            self._refresh_single_lead()
         self._update_time_display()
 
     def _update_zoom_label(self):
         if hasattr(self, '_zoom_label'):
-            self._zoom_label.setText(f"{self._window_1:.1f} s")
+            self._zoom_label.setText(f"{self._current_window():.1f} s")
 
     def _on_selection_live(self, t1, t2):
         """Update the selection indicator in the status bar during live selection."""
@@ -1276,7 +1379,7 @@ class ViewerPage(QWidget):
 
     def _autoscan_cache_path(self) -> str:
         file_key = self._base_path or self.filename or ""
-        model_key = self.model_combo.currentData() or self._model_path or ""
+        model_key = self._model_path or self._default_model_path() or ""
         key = f"{file_key}:{model_key}"
         h = hashlib.md5(key.encode()).hexdigest()
         return os.path.join(".cache", "autoscan", f"{h}.json")
@@ -1350,6 +1453,7 @@ class ViewerPage(QWidget):
         cached = self._load_autoscan_cache()
         if cached:
             self._autoscan_results = cached
+            self._log_autoscan_results(cached)
             self._apply_autoscan_results()
             self._apply_autoscan_overlay()
         else:
@@ -1392,6 +1496,7 @@ class ViewerPage(QWidget):
 
         def _worker():
             """Run inference in background thread."""
+            from model.inference_api import explain_prediction
             results = []
             for i, s in enumerate(starts):
                 self._autoscan_thread_progress[0] = i + 1
@@ -1409,18 +1514,55 @@ class ViewerPage(QWidget):
                 except Exception:
                     prob_dict = {cls: 0.0 for cls in TARGET_CLASSES}
 
-                top_cls = max(prob_dict, key=prob_dict.get)
-                top_prob = prob_dict[top_cls]
-                if top_cls == "class_healthy" and top_prob >= 0.5:
-                    color = 0
-                elif top_cls != "class_healthy" and top_prob >= 0.5:
+                # Thresholds (per user 2026-04-19):
+                #   top illness >= 0.7              → red (illness label)
+                #   top illness in [0.4, 0.7)       → yellow (illness label)
+                #   true top is healthy and < 0.5   → yellow (Niepewne label)
+                #   else                            → drop
+                ILLNESS_HIGH = 0.7
+                ILLNESS_FLOOR = 0.4
+                HEALTHY_FLOOR = 0.5
+
+                p_hlt = prob_dict.get("class_healthy", 0.0)
+                non_healthy = [(c, p) for c, p in prob_dict.items() if c != "class_healthy"]
+                top_ill_cls, p_ill = max(non_healthy, key=lambda x: x[1]) if non_healthy else ("", 0.0)
+                true_top_cls = max(prob_dict, key=prob_dict.get) if prob_dict else ""
+
+                if p_ill >= ILLNESS_HIGH:
                     color = 2
-                else:
+                elif p_ill >= ILLNESS_FLOOR:
                     color = 1
+                elif true_top_cls == "class_healthy" and p_hlt < HEALTHY_FLOOR:
+                    color = 1  # model thinks healthy but uncertain → flag as Niepewne
+                else:
+                    color = 0
+
+                # XAI: lead importance + time heatmap. Only run for actionable windows.
+                lead_importance = None
+                time_heatmap = None
+                non_healthy_top = max(
+                    ((c, p) for c, p in prob_dict.items() if c != "class_healthy"),
+                    key=lambda x: x[1], default=(None, 0.0),
+                )
+                if color != 0 and non_healthy_top[0]:
+                    try:
+                        exp = explain_prediction(
+                            model=model, data=window,
+                            target_classes=[non_healthy_top[0]],
+                            class_names=TARGET_CLASSES, device=device,
+                        )
+                        if exp.get("explanations"):
+                            lead_importance = exp["explanations"][0].get("lead_importance_percent")
+                            time_heatmap = exp["explanations"][0].get("time_heatmap")
+                    except Exception:
+                        lead_importance = None
+                        time_heatmap = None
 
                 results.append({
                     "t_start": t_start, "t_end": t_end,
                     "color": color, "probs": prob_dict,
+                    "lead_importance": lead_importance,
+                    "time_heatmap": time_heatmap,
                 })
             self._autoscan_thread_results = results
 
@@ -1433,6 +1575,7 @@ class ViewerPage(QWidget):
                 self._autoscan_poll.stop()
                 self._autoscan_results = self._autoscan_thread_results
                 self._save_autoscan_cache(self._autoscan_thread_results)
+                self._log_autoscan_results(self._autoscan_thread_results)
                 self._autoscan_thread_results = None
                 # Show done animation
                 if hasattr(self, '_autoscan_overlay') and self._autoscan_overlay:
@@ -1446,6 +1589,37 @@ class ViewerPage(QWidget):
 
         thread = threading.Thread(target=_worker, daemon=True)
         thread.start()
+
+    def _log_autoscan_results(self, results: list):
+        """Append full per-window probability dump to logs/autoscan.log."""
+        try:
+            from datetime import datetime
+            os.makedirs("logs", exist_ok=True)
+            path = os.path.join("logs", "autoscan.log")
+            with open(path, "a", encoding="utf-8") as f:
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"----- [{ts}] -----\n")
+                f.write(f"file: {self.filename}  duration: {self.duration:.1f}s  fs: {self.fs}Hz\n")
+                f.write(f"model: {self._model_path or '(unknown)'}\n")
+                f.write(f"windows: {len(results)}\n\n")
+                # Header listing class order for clarity
+                cls_names = list(TARGET_CLASSES)
+                f.write("window".ljust(18))
+                for c in cls_names:
+                    short = c.replace("class_", "")
+                    f.write(f"  {short[:22]:>22}")
+                f.write("\n")
+                for r in results:
+                    rng = f"{r['t_start']:6.1f}-{r['t_end']:6.1f}s"
+                    f.write(rng.ljust(18))
+                    probs = r.get("probs") or {}
+                    for c in cls_names:
+                        v = probs.get(c, 0.0) * 100
+                        f.write(f"  {v:21.2f}%")
+                    f.write("\n")
+                f.write("\n")
+        except Exception:
+            pass
 
     def _autoscan_finish(self):
         """Apply results after overlay closes."""
@@ -1484,6 +1658,8 @@ class ViewerPage(QWidget):
                 "t_end": m.t2,
                 "color": int(m.color_code or 0),
                 "probs": m.probs or {},
+                "lead_importance": m.lead_importance,
+                "time_heatmap": m.time_heatmap,
             })
         # Sort by start time for predictable merge output.
         synthetic.sort(key=lambda r: r["t_start"])
@@ -1535,10 +1711,32 @@ class ViewerPage(QWidget):
                 "top_cls": top_cls,
                 "top_prob": top_prob,
                 "probs": rep.get("probs") or {},
+                "lead_importance": rep.get("lead_importance"),
+                "time_heatmap": rep.get("time_heatmap"),
             })
 
+        # Drop "Niepewne" atoms whose top class matches a touching strong atom
+        # (avoids Y-R-R-Y noise where Y predicts same illness weakly).
+        cleaned: list[dict] = []
+        for i, seg in enumerate(atoms):
+            if seg["color"] == 1 and seg["top_cls"]:
+                neighbours = []
+                if i > 0:
+                    neighbours.append(atoms[i - 1])
+                if i + 1 < len(atoms):
+                    neighbours.append(atoms[i + 1])
+                if any(
+                    n["color"] == 2 and n["top_cls"] == seg["top_cls"]
+                    and abs(n["t_end"] - seg["t_start"]) < 1e-6
+                    or n["color"] == 2 and n["top_cls"] == seg["top_cls"]
+                    and abs(seg["t_end"] - n["t_start"]) < 1e-6
+                    for n in neighbours
+                ):
+                    continue
+            cleaned.append(seg)
+
         merged: list[dict] = []
-        for seg in atoms:
+        for seg in cleaned:
             if merged:
                 prev = merged[-1]
                 can_merge = (
@@ -1552,6 +1750,8 @@ class ViewerPage(QWidget):
                     if seg["top_prob"] > prev["top_prob"]:
                         prev["top_prob"] = seg["top_prob"]
                         prev["probs"] = seg["probs"]
+                        prev["lead_importance"] = seg.get("lead_importance")
+                        prev["time_heatmap"] = seg.get("time_heatmap")
                     continue
             merged.append(dict(seg))
         return merged
@@ -1574,6 +1774,8 @@ class ViewerPage(QWidget):
                 probs=seg.get("probs"),
                 color_code=seg.get("color", 0),
                 source="ai",
+                lead_importance=seg.get("lead_importance"),
+                time_heatmap=seg.get("time_heatmap"),
             )
             self._marking_store.add(marking)
         # Scan bulk operations are not undoable
@@ -1594,10 +1796,13 @@ class ViewerPage(QWidget):
             code = seg["color"]
             top_cls = seg.get("top_cls") or ""
             top_prob = seg.get("top_prob") or 0.0
-            name = CLASS_NAMES_PL.get(top_cls, top_cls)
-            if len(name) > 22:
-                name = name[:20] + "."
-            label = f"{name} {top_prob * 100:.0f}%"
+            if top_prob * 100 < 40:
+                label = "Niepewne"
+            else:
+                name = CLASS_NAMES_PL.get(top_cls, top_cls)
+                if len(name) > 22:
+                    name = name[:20] + "."
+                label = f"{name} {top_prob * 100:.0f}%"
             if self._is_gt_mismatch(seg["t_start"], seg["t_end"]):
                 label = "\u26a0 " + label
             regions.append((seg["t_start"], seg["t_end"], code, [label]))
@@ -1870,11 +2075,31 @@ class ViewerPage(QWidget):
                     t1 = min(self.single_lead.pending_marker, t)
                     t2 = max(self.single_lead.pending_marker, t)
                     self._on_selection_live(t1, t2)
+        elif self._view_mode == 2:
+            # Seek monitor sweep to scrubber position
+            self._monitor_t = self.time_pos
+            self._monitor_page_start = (self._monitor_t // self._monitor_window) * self._monitor_window
+            for _, strip in self._monitor_strips:
+                strip._old_signal = None
+                strip._sweep_pos = None
+            self._refresh_monitor()
 
     def _update_time_display(self):
         window = self._window_1 if self._view_mode == 1 else self._window_12
+        if self._view_mode == 2:
+            window = self._monitor_window
         t_end = min(self.duration, self.time_pos + window)
         self.time_label.setText(f"{self.time_pos:.2f} – {t_end:.2f} s / {self.duration:.2f} s")
+        self.timeline_overview.set_window(self.time_pos, window)
+        mode_name = {0: "12-odprowadzeń", 1: "1 odprowadzenie", 2: "Podgląd ciągły"}.get(self._view_mode, "")
+        self.status_pos.setText(f"{mode_name} · pozycja: {self.time_pos:.2f} s")
+
+    def _on_overview_seek(self, t: float):
+        if self.signal is None:
+            return
+        # Clamp and update scrubber (triggers refresh via _on_scrubber)
+        t = max(0.0, min(t, self.scrubber.maximum() / 100.0))
+        self.scrubber.setValue(int(t * 100))
 
     # ── Monitor ──
     def _start_monitor(self):
@@ -1921,6 +2146,10 @@ class ViewerPage(QWidget):
         self._refresh_monitor()
         self.time_pos = self._monitor_t
         self._update_time_display()
+        # Advance scrubber with the sweep (blockSignals so it doesn't recurse)
+        self.scrubber.blockSignals(True)
+        self.scrubber.setValue(int(self._monitor_t * 100))
+        self.scrubber.blockSignals(False)
 
     def _on_monitor_pause(self, paused: bool):
         self._monitor_playing = not paused
