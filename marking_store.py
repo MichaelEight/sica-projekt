@@ -28,15 +28,18 @@ def auto_label(type: str, value_ms: float | None = None, t1: float = 0.0, t2: fl
                 "class_incomplete_right_conduction_disorder": "IRBBB",
                 "class_complete_left_conduction_disorder": "CLBBB",
             }
-            # Healthy never shown as a finding — pick top non-healthy class
             non_healthy = {c: p for c, p in probs.items() if c != "class_healthy"}
             if not non_healthy:
                 return "Niepewne"
             top_class = max(non_healthy, key=non_healthy.get)
             pct = non_healthy[top_class] * 100
-            # Below confidence floor → model doesn't recognize anything trained
+            healthy_pct = probs.get("class_healthy", 0.0) * 100
             if pct < 50:
-                return f"Niepewne (top: {_CLASS_NAMES_PL.get(top_class, top_class)} {pct:.0f}%)"
+                # Below illness threshold: shown only when healthy < 50% (set by viewer)
+                return (
+                    f"Niepewne — zdrowy {healthy_pct:.0f}% · "
+                    f"top: {_CLASS_NAMES_PL.get(top_class, top_class)} {pct:.0f}%"
+                )
             return f"{_CLASS_NAMES_PL.get(top_class, top_class)}: {pct:.0f}%"
         elif type == "custom":
             return label if label else "Custom"
@@ -71,6 +74,7 @@ class Marking:
     color_code: int = 0
     source: str = "user"
     lead_importance: dict | None = None  # {lead_name: pct} from explainable AI
+    time_heatmap: list | None = None     # per-sample attention 0..1 from Grad-CAM
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
@@ -101,6 +105,7 @@ class Marking:
             "color_code": self.color_code,
             "source": self.source,
             "lead_importance": self.lead_importance,
+            "time_heatmap": self.time_heatmap,
             "created_at": self.created_at,
         }
 
@@ -120,6 +125,7 @@ class Marking:
                 color_code=int(d.get("color_code", 0)),
                 source=d.get("source", "user"),
                 lead_importance=d.get("lead_importance"),
+                time_heatmap=d.get("time_heatmap"),
             )
             if "id" in d:
                 m.id = d["id"]

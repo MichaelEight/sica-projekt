@@ -1083,8 +1083,31 @@ class ViewerPage(QWidget):
             self.single_lead.update()
         # Compute lead importance on demand for scan markings without cached XAI
         m = self._marking_store.get_by_id(marking_id)
-        if m and m.type == "scan" and not m.lead_importance and self.signal is not None:
-            self._compute_lead_importance_for_marking(m)
+        if m and m.type == "scan":
+            if not m.lead_importance and self.signal is not None:
+                self._compute_lead_importance_for_marking(m)
+            else:
+                self._apply_explain_heatmap(m)
+        else:
+            self._apply_explain_heatmap(None)
+
+    def _apply_explain_heatmap(self, marking):
+        """Set/clear attention overlay on all canvases."""
+        if marking is None or not marking.time_heatmap:
+            self.single_lead.attention_overlay = None
+            for cell in self.grid_12.cells.values():
+                cell.attention_overlay = None
+            self.grid_12.rhythm.attention_overlay = None
+        else:
+            ov = (marking.t1, marking.t2, marking.time_heatmap)
+            self.single_lead.attention_overlay = ov
+            for cell in self.grid_12.cells.values():
+                cell.attention_overlay = ov
+            self.grid_12.rhythm.attention_overlay = ov
+        self.single_lead.update()
+        for cell in self.grid_12.cells.values():
+            cell.update()
+        self.grid_12.rhythm.update()
 
     def _compute_lead_importance_for_marking(self, marking):
         """Run explain_prediction on a scan marking's window and update panel."""
@@ -1112,10 +1135,14 @@ class ViewerPage(QWidget):
             )
             if exp.get("explanations"):
                 imp = exp["explanations"][0].get("lead_importance_percent")
+                heat = exp["explanations"][0].get("time_heatmap")
                 if imp:
-                    self._marking_store.edit(marking.id, lead_importance=imp)
+                    self._marking_store.edit(
+                        marking.id, lead_importance=imp, time_heatmap=heat,
+                    )
                     title = f"{marking.t1:.1f}\u2013{marking.t2:.1f} s \u00b7 {marking.label}"
                     self.markings_panel._lead_importance_panel.set_data(imp, title=title)
+                    self._apply_explain_heatmap(marking)
                     self._save_ann()
         except Exception:
             pass
@@ -1467,22 +1494,33 @@ class ViewerPage(QWidget):
                 except Exception:
                     prob_dict = {cls: 0.0 for cls in TARGET_CLASSES}
 
-                top_cls = max(prob_dict, key=prob_dict.get)
-                top_prob = prob_dict[top_cls]
-                if top_cls == "class_healthy" and top_prob >= 0.5:
-                    color = 0
-                elif top_cls != "class_healthy" and top_prob >= 0.5:
-                    color = 2
-                else:
-                    color = 1
+                # Thresholds (per professor 2026-04-19):
+                #   ILLNESS_HIGH = 0.5  → confidently detected illness
+                #   ILLNESS_FLOOR = 0.4 → below this, ignore window entirely
+                #   HEALTHY_FLOOR = 0.5 → if healthy < this AND illness >= floor → Niepewne
+                ILLNESS_HIGH = 0.5
+                ILLNESS_FLOOR = 0.4
+                HEALTHY_FLOOR = 0.5
 
-                # Lead importance (XAI) — only for non-healthy detections to save time
+                p_hlt = prob_dict.get("class_healthy", 0.0)
+                non_healthy = [(c, p) for c, p in prob_dict.items() if c != "class_healthy"]
+                top_ill_cls, p_ill = max(non_healthy, key=lambda x: x[1]) if non_healthy else ("", 0.0)
+
+                if p_ill >= ILLNESS_HIGH:
+                    color = 2  # detected illness
+                elif p_hlt < HEALTHY_FLOOR and p_ill >= ILLNESS_FLOOR:
+                    color = 1  # uncertain — model says not healthy but no clear illness
+                else:
+                    color = 0  # drop (healthy or all probs too low to be actionable)
+
+                # XAI: lead importance + time heatmap. Only run for actionable windows.
                 lead_importance = None
+                time_heatmap = None
                 non_healthy_top = max(
                     ((c, p) for c, p in prob_dict.items() if c != "class_healthy"),
                     key=lambda x: x[1], default=(None, 0.0),
                 )
-                if non_healthy_top[0] and non_healthy_top[1] >= 0.3:
+                if color != 0 and non_healthy_top[0]:
                     try:
                         exp = explain_prediction(
                             model=model, data=window,
@@ -1491,13 +1529,16 @@ class ViewerPage(QWidget):
                         )
                         if exp.get("explanations"):
                             lead_importance = exp["explanations"][0].get("lead_importance_percent")
+                            time_heatmap = exp["explanations"][0].get("time_heatmap")
                     except Exception:
                         lead_importance = None
+                        time_heatmap = None
 
                 results.append({
                     "t_start": t_start, "t_end": t_end,
                     "color": color, "probs": prob_dict,
                     "lead_importance": lead_importance,
+                    "time_heatmap": time_heatmap,
                 })
             self._autoscan_thread_results = results
 
@@ -1594,6 +1635,7 @@ class ViewerPage(QWidget):
                 "color": int(m.color_code or 0),
                 "probs": m.probs or {},
                 "lead_importance": m.lead_importance,
+                "time_heatmap": m.time_heatmap,
             })
         # Sort by start time for predictable merge output.
         synthetic.sort(key=lambda r: r["t_start"])
@@ -1646,10 +1688,31 @@ class ViewerPage(QWidget):
                 "top_prob": top_prob,
                 "probs": rep.get("probs") or {},
                 "lead_importance": rep.get("lead_importance"),
+                "time_heatmap": rep.get("time_heatmap"),
             })
 
+        # Drop "Niepewne" atoms whose top class matches a touching strong atom
+        # (avoids Y-R-R-Y noise where Y predicts same illness weakly).
+        cleaned: list[dict] = []
+        for i, seg in enumerate(atoms):
+            if seg["color"] == 1 and seg["top_cls"]:
+                neighbours = []
+                if i > 0:
+                    neighbours.append(atoms[i - 1])
+                if i + 1 < len(atoms):
+                    neighbours.append(atoms[i + 1])
+                if any(
+                    n["color"] == 2 and n["top_cls"] == seg["top_cls"]
+                    and abs(n["t_end"] - seg["t_start"]) < 1e-6
+                    or n["color"] == 2 and n["top_cls"] == seg["top_cls"]
+                    and abs(seg["t_end"] - n["t_start"]) < 1e-6
+                    for n in neighbours
+                ):
+                    continue
+            cleaned.append(seg)
+
         merged: list[dict] = []
-        for seg in atoms:
+        for seg in cleaned:
             if merged:
                 prev = merged[-1]
                 can_merge = (
@@ -1664,6 +1727,7 @@ class ViewerPage(QWidget):
                         prev["top_prob"] = seg["top_prob"]
                         prev["probs"] = seg["probs"]
                         prev["lead_importance"] = seg.get("lead_importance")
+                        prev["time_heatmap"] = seg.get("time_heatmap")
                     continue
             merged.append(dict(seg))
         return merged
@@ -1687,6 +1751,7 @@ class ViewerPage(QWidget):
                 color_code=seg.get("color", 0),
                 source="ai",
                 lead_importance=seg.get("lead_importance"),
+                time_heatmap=seg.get("time_heatmap"),
             )
             self._marking_store.add(marking)
         # Scan bulk operations are not undoable

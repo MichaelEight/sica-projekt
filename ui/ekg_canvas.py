@@ -92,6 +92,8 @@ class EkgCellCanvas(QWidget):
         self.autoscan_regions = []        # list of (t_start, t_end, color_code, label_lines)
         self.show_autoscan_labels = False
         self.gt_annotations = []          # list of (t_start, t_end, label_text)
+        # XAI attention overlay: (t_start, t_end, heatmap_array_0_to_1) or None
+        self.attention_overlay = None
         self.setMinimumSize(80, 40)
         self.setMouseTracking(True)
         self._hover_x = None
@@ -121,6 +123,7 @@ class EkgCellCanvas(QWidget):
         self.analysis_clickable_end = None
         self.autoscan_regions = []
         self.show_autoscan_labels = False
+        self.attention_overlay = None
         self.update()
 
     def set_data(self, lead_name: str, signal: np.ndarray, fs: int,
@@ -431,6 +434,36 @@ class EkgCellCanvas(QWidget):
                     else:
                         path.lineTo(sig_start + px_i, py)
                 p.drawPath(path)
+
+                # XAI attention dots — draw on signal trajectory at high-heat samples
+                if self.attention_overlay is not None:
+                    ov_ts, ov_te, heat = self.attention_overlay
+                    try:
+                        heat_arr = np.asarray(heat, dtype=float)
+                    except Exception:
+                        heat_arr = None
+                    if heat_arr is not None and heat_arr.size > 0 and ov_te > ov_ts:
+                        n_h = heat_arr.size
+                        ov_dur = ov_te - ov_ts
+                        thresh = 0.35
+                        p.setPen(Qt.NoPen)
+                        for px_i in range(0, draw_end, 2):
+                            frac = px_i / sig_w
+                            t_at = self.t_start + frac * duration
+                            if t_at < ov_ts or t_at > ov_te:
+                                continue
+                            h_idx = int((t_at - ov_ts) / ov_dur * n_h)
+                            if h_idx < 0 or h_idx >= n_h:
+                                continue
+                            hv = float(heat_arr[h_idx])
+                            if hv < thresh:
+                                continue
+                            sample_idx = max(0, min(int(t_at * self.fs), n_samples - 1))
+                            py = v_to_y(self.signal[sample_idx])
+                            r = 1.5 + hv * 3.5
+                            alpha = int(140 + 115 * hv)
+                            p.setBrush(QColor(220, 38, 38, alpha))
+                            p.drawEllipse(QPointF(sig_start + px_i, py), r, r)
 
         # Sweep cursor + old data (monitor mode)
         if self._sweep_pos is not None:
