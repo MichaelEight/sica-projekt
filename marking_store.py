@@ -34,12 +34,9 @@ def auto_label(type: str, value_ms: float | None = None, t1: float = 0.0, t2: fl
             top_class = max(non_healthy, key=non_healthy.get)
             pct = non_healthy[top_class] * 100
             healthy_pct = probs.get("class_healthy", 0.0) * 100
-            if pct < 50:
-                # Below illness threshold: shown only when healthy < 50% (set by viewer)
-                return (
-                    f"Niepewne — zdrowy {healthy_pct:.0f}% · "
-                    f"top: {_CLASS_NAMES_PL.get(top_class, top_class)} {pct:.0f}%"
-                )
+            # Below 40% illness AND healthy is dominant → "Niepewne" (model unsure)
+            if pct < 40:
+                return f"Niepewne — zdrowy {healthy_pct:.0f}%"
             return f"{_CLASS_NAMES_PL.get(top_class, top_class)}: {pct:.0f}%"
         elif type == "custom":
             return label if label else "Custom"

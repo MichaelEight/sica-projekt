@@ -14,14 +14,23 @@ from ui.ekg_canvas import synth_ekg
 
 
 class EkgPreviewWidget(QWidget):
-    """Small EKG preview for the report (12-lead thumbnail)."""
+    """12-lead grid + rhythm strip preview for the report."""
 
     def __init__(self, signal=None, leads=None, fs=500, parent=None):
         super().__init__(parent)
         self.signal = signal
         self.leads = leads or []
         self.fs = fs
-        self.setFixedHeight(160)
+        # 3 grid rows × 80px + 100px rhythm + padding
+        self.setFixedHeight(360)
+
+    def _voltage_range(self):
+        if self.signal is None or self.signal.size == 0:
+            return -1.5, 1.5
+        mn = float(self.signal.min())
+        mx = float(self.signal.max())
+        pad = max((mx - mn) * 0.1, 0.2)
+        return mn - pad, mx + pad
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -31,108 +40,136 @@ class EkgPreviewWidget(QWidget):
 
         grid = [["I", "aVR", "V1", "V4"], ["II", "aVL", "V2", "V5"],
                 ["III", "aVF", "V3", "V6"]]
-        row_h = h / 4
+        rhythm_h = 110
+        grid_h = h - rhythm_h
+        row_h = grid_h / 3
         col_w = w / 4
+        v_min, v_max = self._voltage_range()
+        v_range = max(v_max - v_min, 0.1)
 
-        # Grid
-        sq_x = col_w / 60
-        sq_y = row_h / 15
+        # Grid lines (mm paper feel) — fine + bold every 5
+        sq = min(col_w / 30, row_h / 12)
         p.setPen(QPen(QColor(T.GRID_MINOR), 0.3))
-        for x in np.arange(0, w, sq_x):
+        x = 0.0
+        while x < w:
             p.drawLine(int(x), 0, int(x), h)
-        for y in np.arange(0, h, sq_y):
+            x += sq
+        y = 0.0
+        while y < h:
             p.drawLine(0, int(y), w, int(y))
-        p.setPen(QPen(QColor(T.GRID_MAJOR), 0.6))
-        for x in np.arange(0, w, sq_x * 5):
+            y += sq
+        p.setPen(QPen(QColor(T.GRID_MAJOR), 0.7))
+        x = 0.0
+        while x < w:
             p.drawLine(int(x), 0, int(x), h)
-        for y in np.arange(0, h, sq_y * 5):
+            x += sq * 5
+        y = 0.0
+        while y < h:
             p.drawLine(0, int(y), w, int(y))
+            y += sq * 5
 
         # Cell borders
-        p.setPen(QPen(QColor("#d1d5db"), 1))
+        p.setPen(QPen(QColor("#cbd5e1"), 1))
         for c in range(1, 4):
-            p.drawLine(int(c * col_w), 0, int(c * col_w), int(3 * row_h))
-        for r in range(1, 4):
+            p.drawLine(int(c * col_w), 0, int(c * col_w), int(grid_h))
+        for r in range(1, 3):
             p.drawLine(0, int(r * row_h), w, int(r * row_h))
+        p.drawLine(0, int(grid_h), w, int(grid_h))
 
-        # Signal traces
-        p.setPen(QPen(QColor(T.SIGNAL_COLOR), 1.2))
+        # Signal traces — fill cell vertically using global voltage range
+        sig_pen = QPen(QColor(T.SIGNAL_COLOR), 1.4)
         for r_i, row_leads in enumerate(grid):
             for c_i, lead in enumerate(row_leads):
                 x_off = c_i * col_w
-                y_mid = r_i * row_h + row_h / 2
-                mv_px = row_h / 3
-                seed = LEAD_SEEDS.get(lead, 0)
-                amp = LEAD_AMPS.get(lead, 1)
+                y_top = r_i * row_h + 4
+                y_bot = (r_i + 1) * row_h - 4
+                cell_h = y_bot - y_top
                 t_start = c_i * 2.5
                 t_end = t_start + 2.5
 
+                p.setPen(sig_pen)
+                path = QPainterPath()
                 if self.signal is not None and lead in self.leads:
                     lead_idx = self.leads.index(lead)
                     n_start = int(t_start * self.fs)
                     n_end = min(int(t_end * self.fs), self.signal.shape[0])
                     sig = self.signal[n_start:n_end, lead_idx]
-                    path = QPainterPath()
+                    n = len(sig)
                     for px_i in range(int(col_w)):
-                        frac = px_i / col_w
-                        idx = min(int(frac * len(sig)), len(sig) - 1)
-                        v = sig[idx]
-                        py = y_mid - v * mv_px
+                        if n == 0:
+                            break
+                        idx = min(int(px_i / col_w * n), n - 1)
+                        v = float(sig[idx])
+                        py = y_bot - (v - v_min) / v_range * cell_h
                         if px_i == 0:
                             path.moveTo(x_off + px_i, py)
                         else:
                             path.lineTo(x_off + px_i, py)
-                    p.drawPath(path)
                 else:
-                    # Synthetic fallback
+                    seed = LEAD_SEEDS.get(lead, 0)
+                    amp = LEAD_AMPS.get(lead, 1)
                     t = np.linspace(t_start, t_end, int(col_w))
                     vals = synth_ekg(t, seed, amp)
-                    path = QPainterPath()
                     for px_i in range(len(vals)):
-                        py = y_mid - vals[px_i] * mv_px
+                        v = float(vals[px_i])
+                        py = y_bot - (v - v_min) / v_range * cell_h
                         if px_i == 0:
                             path.moveTo(x_off + px_i, py)
                         else:
                             path.lineTo(x_off + px_i, py)
-                    p.drawPath(path)
+                p.drawPath(path)
 
-                # Lead label
+                # Lead label badge
+                p.setFont(QFont(".AppleSystemUIFont", 10, QFont.DemiBold))
+                fm = p.fontMetrics()
+                tw = fm.horizontalAdvance(lead) + 10
+                th = fm.height() + 2
+                bg = QColor(T.WHITE)
+                bg.setAlpha(220)
+                p.fillRect(QRectF(x_off + 4, r_i * row_h + 4, tw, th), bg)
                 p.setPen(QColor(T.TEXT))
-                p.setFont(QFont("Menlo", 8, QFont.Bold))
-                p.drawText(int(x_off + 4), int(r_i * row_h + 14), lead)
-                p.setPen(QPen(QColor(T.SIGNAL_COLOR), 1.2))
+                p.drawText(int(x_off + 9), int(r_i * row_h + 4 + fm.ascent() + 1), lead)
 
-        # Rhythm strip (row 4 = II)
-        y_mid = 3 * row_h + row_h / 2
-        mv_px = row_h / 3
+        # Rhythm strip (full duration, lead II)
+        ry_top = grid_h + 6
+        ry_bot = h - 6
+        rhythm_h_actual = ry_bot - ry_top
+        p.setPen(sig_pen)
+        path = QPainterPath()
         if self.signal is not None and "II" in self.leads:
             idx = self.leads.index("II")
             sig = self.signal[:, idx]
-            path = QPainterPath()
+            n = len(sig)
             for px_i in range(w):
-                frac = px_i / w
-                si = min(int(frac * len(sig)), len(sig) - 1)
-                py = y_mid - sig[si] * mv_px
+                si = min(int(px_i / w * n), n - 1)
+                v = float(sig[si])
+                py = ry_bot - (v - v_min) / v_range * rhythm_h_actual
                 if px_i == 0:
                     path.moveTo(px_i, py)
                 else:
                     path.lineTo(px_i, py)
-            p.drawPath(path)
         else:
             t = np.linspace(0, 10, w)
             vals = synth_ekg(t, 0.5, 1.0)
-            path = QPainterPath()
             for px_i in range(len(vals)):
-                py = y_mid - vals[px_i] * mv_px
+                v = float(vals[px_i])
+                py = ry_bot - (v - v_min) / v_range * rhythm_h_actual
                 if px_i == 0:
                     path.moveTo(px_i, py)
                 else:
                     path.lineTo(px_i, py)
-            p.drawPath(path)
+        p.drawPath(path)
 
+        # Rhythm label badge
+        p.setFont(QFont(".AppleSystemUIFont", 10, QFont.DemiBold))
+        fm = p.fontMetrics()
+        tw = fm.horizontalAdvance("II (rytm)") + 10
+        th = fm.height() + 2
+        bg = QColor(T.WHITE)
+        bg.setAlpha(220)
+        p.fillRect(QRectF(4, ry_top, tw, th), bg)
         p.setPen(QColor(T.TEXT))
-        p.setFont(QFont("Menlo", 8, QFont.Bold))
-        p.drawText(4, int(3 * row_h + 14), "II")
+        p.drawText(9, int(ry_top + fm.ascent() + 1), "II (rytm)")
         p.end()
 
 
@@ -179,20 +216,30 @@ class ReportPage(QWidget):
         tb.addStretch()
 
         badge = QLabel("Podgl\u0105d raportu")
-        badge.setStyleSheet("""
-            font-size: 12px; background: #dbeafe; color: #1e40af;
-            padding: 5px 12px; border-radius: 5px; font-weight: 600;
+        badge.setStyleSheet(f"""
+            font-size: 12px; color: {T.ACCENT}; font-weight: 600;
+            background: transparent; padding: 4px 8px;
         """)
         tb.addWidget(badge)
 
-        sep2 = QFrame()
-        sep2.setFixedSize(1, 24)
-        sep2.setStyleSheet(f"background: {T.SEPARATOR};")
-        tb.addWidget(sep2)
-
-        btn_back = QPushButton("Powr\u00f3t do widoku")
-        btn_back.setStyleSheet(f"background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;border-radius:5px;border:none;")
+        btn_back = QPushButton("\u2190  Powr\u00f3t do widoku")
         btn_back.setCursor(Qt.PointingHandCursor)
+        btn_back.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {T.BTN_TEXT};
+                font-size: 12px; font-weight: 500;
+                padding: 6px 14px; border-radius: 6px;
+                border: 1px solid {T.SEPARATOR};
+            }}
+            QPushButton:hover {{
+                background: {T.ACCENT}; color: {T.ACCENT_TEXT};
+                border: 1px solid {T.ACCENT};
+            }}
+            QPushButton:pressed {{
+                background: {'#047857' if T.is_dark_mode() else '#2563eb'};
+                border: 1px solid {'#047857' if T.is_dark_mode() else '#2563eb'};
+            }}
+        """)
         btn_back.clicked.connect(self.go_back.emit)
         tb.addWidget(btn_back)
         outer.addWidget(topbar)
@@ -260,18 +307,9 @@ class ReportPage(QWidget):
         sep_line.setStyleSheet(f"background: {T.BORDER}; border: none; max-height: 1px;")
         r_layout.addWidget(sep_line)
 
-        # EKG preview
-        sec_ecg = QLabel("ZAPIS EKG (12 ODPROWADZE\u0143)")
-        sec_ecg.setStyleSheet(f"font-size: 13px; font-weight: 700; letter-spacing: 0.5px; margin-top: 10px;")
-        r_layout.addWidget(sec_ecg)
-
+        # EKG preview hidden — kept as no-op widget so set_signal still works
         self.ecg_preview = EkgPreviewWidget()
-        self.ecg_preview.setStyleSheet(f"border: 1px solid {T.BORDER}; border-radius: 4px;")
-        r_layout.addWidget(self.ecg_preview)
-
-        ecg_meta = QLabel("25 mm/s | 10 mm/mV | 0.05-150 Hz")
-        ecg_meta.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED}; font-family: Menlo;")
-        r_layout.addWidget(ecg_meta)
+        self.ecg_preview.hide()
 
         # Measurements table
         sec_meas = QLabel("POMIARY")
@@ -700,11 +738,23 @@ class ReportPage(QWidget):
         hl.addStretch()
         self._ai_per_class_layout.addWidget(hdr)
 
-        sorted_classes = sorted(per_class_max.items(), key=lambda kv: kv[1][0], reverse=True)
+        # Show only non-zero results (≥1%)
+        sorted_classes = [
+            (cls, vals) for cls, vals in
+            sorted(per_class_max.items(), key=lambda kv: kv[1][0], reverse=True)
+            if vals[0] >= 0.01
+        ]
         for i, (cls, (p, s, e)) in enumerate(sorted_classes):
+            if i > 0:
+                # Thin separator line between rows (avoids stylesheet inheritance bleed)
+                sep = QFrame()
+                sep.setFrameShape(QFrame.HLine)
+                sep.setFixedHeight(1)
+                sep.setStyleSheet(f"background: {T.AMBER_BORDER}; border: none; max-height: 1px;")
+                self._ai_per_class_layout.addWidget(sep)
             row = QWidget()
-            border_top = "" if i == 0 else f"border-top: 1px solid {T.AMBER_BORDER};"
-            row.setStyleSheet(f"background: transparent; {border_top}")
+            row.setObjectName(f"aiClassRow_{i}")
+            row.setStyleSheet(f"QWidget#aiClassRow_{i} {{ background: transparent; }}")
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 6, 0, 6)
             rl.setSpacing(8)
@@ -744,18 +794,12 @@ class ReportPage(QWidget):
             avg = sum(healthy_dominant_probs) / len(healthy_dominant_probs) * 100
             mn = min(healthy_dominant_probs) * 100
             self._ai_healthy.setText(
-                f"Zdrowy (gdy dominuje): średnia {avg:.1f}% · minimum {mn:.1f}% "
-                f"· {len(healthy_dominant_probs)}/{len(scan_results)} okien"
+                f"Zdrowy (gdy dominuje): średnia {avg:.1f}% · minimum {mn:.1f}%"
             )
         else:
-            self._ai_healthy.setText(
-                f"Zdrowy nie był dominującą klasą w żadnym z {len(scan_results)} okien"
-            )
+            self._ai_healthy.setText("Zdrowy nie był dominującą klasą")
 
-        self._ai_model.setText(
-            f"Model: {model_name} · {len(scan_results)} okien skanowania" if model_name
-            else f"{len(scan_results)} okien skanowania"
-        )
+        self._ai_model.setText(f"Model: {model_name}" if model_name else "")
 
     def _export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(self, "Eksportuj PDF", "raport_ekg.pdf", "PDF (*.pdf)")

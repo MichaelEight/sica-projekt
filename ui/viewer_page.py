@@ -853,9 +853,15 @@ class ViewerPage(QWidget):
 
         # Load .ann file (overrides patient info, loads markings)
         self._load_ann()
-        # If the .ann brought in scan markings (from single-file or batch
-        # analysis), rebuild the overlay so colored bands render immediately.
-        self._rebuild_autoscan_from_markings()
+        # Prefer the raw window-level autoscan cache (full per-window probs)
+        # over rebuilding from merged markings — markings collapse into 1 region.
+        cached_raw = self._load_autoscan_cache()
+        if cached_raw:
+            self._autoscan_results = cached_raw
+            self._apply_autoscan_overlay()
+            self.analysis_badge.show()
+        else:
+            self._rebuild_autoscan_from_markings()
 
         self._refresh_views()
         self._refresh_markings()
@@ -1494,24 +1500,28 @@ class ViewerPage(QWidget):
                 except Exception:
                     prob_dict = {cls: 0.0 for cls in TARGET_CLASSES}
 
-                # Thresholds (per professor 2026-04-19):
-                #   ILLNESS_HIGH = 0.5  → confidently detected illness
-                #   ILLNESS_FLOOR = 0.4 → below this, ignore window entirely
-                #   HEALTHY_FLOOR = 0.5 → if healthy < this AND illness >= floor → Niepewne
-                ILLNESS_HIGH = 0.5
+                # Thresholds (per user 2026-04-19):
+                #   top illness >= 0.7              → red (illness label)
+                #   top illness in [0.4, 0.7)       → yellow (illness label)
+                #   true top is healthy and < 0.5   → yellow (Niepewne label)
+                #   else                            → drop
+                ILLNESS_HIGH = 0.7
                 ILLNESS_FLOOR = 0.4
                 HEALTHY_FLOOR = 0.5
 
                 p_hlt = prob_dict.get("class_healthy", 0.0)
                 non_healthy = [(c, p) for c, p in prob_dict.items() if c != "class_healthy"]
                 top_ill_cls, p_ill = max(non_healthy, key=lambda x: x[1]) if non_healthy else ("", 0.0)
+                true_top_cls = max(prob_dict, key=prob_dict.get) if prob_dict else ""
 
                 if p_ill >= ILLNESS_HIGH:
-                    color = 2  # detected illness
-                elif p_hlt < HEALTHY_FLOOR and p_ill >= ILLNESS_FLOOR:
-                    color = 1  # uncertain — model says not healthy but no clear illness
+                    color = 2
+                elif p_ill >= ILLNESS_FLOOR:
+                    color = 1
+                elif true_top_cls == "class_healthy" and p_hlt < HEALTHY_FLOOR:
+                    color = 1  # model thinks healthy but uncertain → flag as Niepewne
                 else:
-                    color = 0  # drop (healthy or all probs too low to be actionable)
+                    color = 0
 
                 # XAI: lead importance + time heatmap. Only run for actionable windows.
                 lead_importance = None
@@ -1772,7 +1782,7 @@ class ViewerPage(QWidget):
             code = seg["color"]
             top_cls = seg.get("top_cls") or ""
             top_prob = seg.get("top_prob") or 0.0
-            if top_prob * 100 < 50:
+            if top_prob * 100 < 40:
                 label = "Niepewne"
             else:
                 name = CLASS_NAMES_PL.get(top_cls, top_cls)
