@@ -472,10 +472,30 @@ class ReportPage(QWidget):
         eb.addWidget(btn_print)
 
         eb.addStretch()
-        page_sel = QComboBox()
-        page_sel.addItems(["A4", "Letter"])
-        page_sel.setStyleSheet(f"font-size: 12px; padding: 6px 10px; border: 1px solid {T.BORDER}; border-radius: 6px;")
-        eb.addWidget(page_sel)
+        page_lbl = QLabel("Format:")
+        page_lbl.setStyleSheet(f"font-size: 12px; color: {T.TEXT_MUTED}; background: transparent;")
+        eb.addWidget(page_lbl)
+        self._page_sel = QComboBox()
+        self._page_sel.addItems(["A4", "Letter"])
+        self._page_sel.setFixedWidth(90)
+        self._page_sel.setCursor(Qt.PointingHandCursor)
+        self._page_sel.setStyleSheet(f"""
+            QComboBox {{
+                font-size: 12px; padding: 6px 10px;
+                border: 1px solid {T.BORDER}; border-radius: 6px;
+                background: {T.WHITE}; color: {T.TEXT};
+            }}
+            QComboBox::drop-down {{
+                border: none; width: 20px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {T.WHITE}; color: {T.TEXT};
+                selection-background-color: {T.ACCENT};
+                selection-color: {T.ACCENT_TEXT};
+                border: 1px solid {T.BORDER};
+            }}
+        """)
+        eb.addWidget(self._page_sel)
 
         outer.addWidget(export_bar)
 
@@ -801,26 +821,78 @@ class ReportPage(QWidget):
 
         self._ai_model.setText(f"Model: {model_name}" if model_name else "")
 
-    def _export_pdf(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Eksportuj PDF", "raport_ekg.pdf", "PDF (*.pdf)")
-        if path:
-            printer = QPrinter(QPrinter.HighResolution)
-            printer.setOutputFormat(QPrinter.PdfFormat)
-            printer.setOutputFileName(path)
-            painter = QPainter(printer)
-            self.report.render(painter)
+    def _selected_page_size(self):
+        from PySide6.QtGui import QPageSize
+        if self._page_sel.currentText() == "Letter":
+            return QPageSize(QPageSize.PageSizeId.Letter)
+        return QPageSize(QPageSize.PageSizeId.A4)
+
+    def _grab_full_report(self):
+        """Capture the full report widget at its laid-out size."""
+        # Force layout to settle so size is correct
+        self.report.adjustSize()
+        return self.report.grab()
+
+    def _render_pixmap_to_printer(self, printer):
+        from PySide6.QtCore import QRect
+        pix = self._grab_full_report()
+        painter = QPainter()
+        if not painter.begin(printer):
+            return False
+        try:
+            # Use painter.viewport() — guaranteed to be in printer device pixels.
+            page = painter.viewport()
+            src_w = pix.width()
+            src_h = pix.height()
+            if src_w <= 0 or src_h <= 0:
+                return False
+            scale = min(page.width() / src_w, page.height() / src_h)
+            tw = int(src_w * scale)
+            th = int(src_h * scale)
+            x = page.x() + (page.width() - tw) // 2
+            y = page.y() + (page.height() - th) // 2
+            painter.drawPixmap(QRect(x, y, tw, th), pix)
+        finally:
             painter.end()
+        return True
+
+    def _export_pdf(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Eksportuj PDF", "raport_ekg.pdf", "PDF (*.pdf)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        printer.setOutputFileName(path)
+        printer.setPageSize(self._selected_page_size())
+        ok = self._render_pixmap_to_printer(printer)
+        from PySide6.QtWidgets import QMessageBox
+        if ok:
+            QMessageBox.information(self, "Eksport PDF", f"Zapisano: {path}")
+        else:
+            QMessageBox.warning(self, "Eksport PDF", "Nie udało się zapisać pliku.")
 
     def _export_png(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Eksportuj PNG", "raport_ekg.png", "PNG (*.png)")
-        if path:
-            pixmap = self.report.grab()
-            pixmap.save(path, "PNG")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Eksportuj PNG", "raport_ekg.png", "PNG (*.png)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".png"):
+            path += ".png"
+        pixmap = self._grab_full_report()
+        from PySide6.QtWidgets import QMessageBox
+        if pixmap.save(path, "PNG"):
+            QMessageBox.information(self, "Eksport PNG", f"Zapisano: {path}")
+        else:
+            QMessageBox.warning(self, "Eksport PNG", "Nie udało się zapisać pliku.")
 
     def _print(self):
-        printer = QPrinter()
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setPageSize(self._selected_page_size())
         dialog = QPrintDialog(printer, self)
-        if dialog.exec() == QPrintDialog.Accepted:
-            painter = QPainter(printer)
-            self.report.render(painter)
-            painter.end()
+        if dialog.exec() == QPrintDialog.DialogCode.Accepted:
+            self._render_pixmap_to_printer(printer)
