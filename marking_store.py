@@ -25,9 +25,9 @@ def auto_label(type: str, value_ms: float | None = None, t1: float = 0.0, t2: fl
             _CLASS_NAMES_PL = {
                 "class_healthy": "Zdrowy (NORM)",
                 "class_front_heart_attack": "Zawał przedniej ściany",
-                "class_side_heart_attack": "Zawał ściany bocznej",
+                "class_first_degree_av_block": "Blok I stopnia AVB",
                 "class_bottom_heart_attack": "Zawał ściany dolnej",
-                "class_back_heart_attack": "Zawał ściany tylnej",
+                "class_atrial_fibrillation": "Migotanie przedsionków",
                 "class_complete_right_conduction_disorder": "CRBBB",
                 "class_incomplete_right_conduction_disorder": "IRBBB",
                 "class_complete_left_conduction_disorder": "CLBBB",
