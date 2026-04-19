@@ -375,6 +375,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(T.STYLESHEET)
         # Re-apply all component styles
         self.viewer_page.apply_theme()
+        self.report_page.apply_theme()
         # Refresh views to pick up new colors
         if self._signal is not None:
             self.viewer_page._refresh_views()
