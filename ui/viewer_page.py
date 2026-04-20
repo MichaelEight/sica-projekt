@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import time
+import sys
 
 import threading
 import numpy as np
@@ -168,13 +169,25 @@ class AutoscanOverlay(QDialog):
             self.move(parent.mapToGlobal(QPoint(x, y)))
 
 
+def get_resource_path(relative_path):
+    """ Get the absolute path to a resource. Works for dev and for PyInstaller. """
+    try:
+        # PyInstaller creates a temp folder and stores its path in sys._MEIPASS
+        base_path = sys._MEIPASS
+    except AttributeError:
+        # If not running as an exe, use the current absolute directory
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
 def discover_models():
     """Scan known directories for .pt checkpoint files."""
     search_dirs = ["model/annotations", "models"]
     found = []
     for d in search_dirs:
-        if os.path.isdir(d):
-            found.extend(glob.glob(os.path.join(d, "*.pt")))
+        abs_dir = get_resource_path(d)
+        if os.path.isdir(abs_dir):
+            found.extend(glob.glob(os.path.join(abs_dir, "*.pt")))
     found.sort(key=lambda p: (0 if "model-sota" in os.path.basename(p) else 1, p))
     return found
 
