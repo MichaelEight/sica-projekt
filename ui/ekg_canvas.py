@@ -1009,18 +1009,18 @@ class TwelveLeadGrid(QWidget):
 
         if lid == "grid_3x4":
             leads = self._visible_leads or ALL_LEADS_ORDER
-            cols = 1 if len(leads) == 3 else 3
+            cols = 1 if len(leads) <= 3 else 3
             rows = [leads[i:i + cols] for i in range(0, min(12, len(leads)), cols)]
         elif lid == "grid_2x6":
             leads = self._visible_leads or ALL_LEADS_ORDER
-            cols = 1 if len(leads) == 3 else 2
+            cols = 1 if len(leads) <= 3 else 2
             rows = [leads[i:i + cols] for i in range(0, min(12, len(leads)), cols)]
         elif lid == "stack_1xN":
             leads = self._visible_leads or ["II", "V1", "V5"]
             rows = [[l] for l in leads]
         else:
             leads = self._visible_leads or ALL_LEADS_ORDER
-            cols = 1 if len(leads) == 3 else 3
+            cols = 1 if len(leads) <= 3 else 3
             rows = [leads[i:i + cols] for i in range(0, min(12, len(leads)), cols)]
         show_rhythm = False
 

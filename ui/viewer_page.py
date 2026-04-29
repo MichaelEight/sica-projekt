@@ -336,6 +336,7 @@ class LayoutSwitcher(QWidget):
 
     layout_changed = Signal(str)
     live_toggled = Signal(bool)
+    live_reset_requested = Signal()
     speed_changed = Signal(float)
     focus_lead_changed = Signal(str)
     visible_leads_changed = Signal(list)
@@ -457,6 +458,13 @@ class LayoutSwitcher(QWidget):
             speed_row.addWidget(btn, 1)
             self._speed_pills.append(btn)
         layout.addLayout(speed_row)
+
+        self._live_reset_btn = QPushButton("Resetuj podgląd ciągły")
+        self._live_reset_btn.setFixedHeight(26)
+        self._live_reset_btn.setCursor(Qt.PointingHandCursor)
+        self._live_reset_btn.setFont(QFont(".AppleSystemUIFont", 10))
+        self._live_reset_btn.clicked.connect(self.live_reset_requested.emit)
+        layout.addWidget(self._live_reset_btn)
 
         # ── Section 5: Patient (collapsible) ──
         self._pat_section = _CollapsibleSection("Pacjent", info_panel.patient_widget,
@@ -610,6 +618,7 @@ class LayoutSwitcher(QWidget):
             btn.setStyleSheet(base)
         self._lead_all_btn.setStyleSheet(self._btn_style(False, active_bg, active_fg, idle_bg, idle_fg))
         self._lead_only_i_btn.setStyleSheet(self._btn_style(False, active_bg, active_fg, idle_bg, idle_fg))
+        self._live_reset_btn.setStyleSheet(self._btn_style(False, active_bg, active_fg, idle_bg, idle_fg))
         for i, btn in enumerate(self._speed_pills):
             on = (i == self._speed_idx)
             btn.setStyleSheet(self._btn_style(on, active_bg, active_fg, idle_bg, idle_fg))
@@ -845,6 +854,7 @@ class ViewerPage(QWidget):
         self.layout_switcher.speed_changed.connect(self._on_monitor_speed)
         self.layout_switcher.visible_leads_changed.connect(self._on_visible_leads_changed)
         self.layout_switcher.focus_lead_changed.connect(self._on_focus_lead_target_changed)
+        self.layout_switcher.live_reset_requested.connect(lambda: self._on_live_toggled(False))
         self.content.addWidget(self.layout_switcher)
 
         # Single grid view shared by all layouts. Cells are reused across layouts.
@@ -1574,7 +1584,14 @@ class ViewerPage(QWidget):
             f"QLabel {{ color: {T.TEXT}; font-size: 13px; }}"
             f"QRadioButton {{ color: {T.TEXT}; font-size: 13px;"
             f"  spacing: 8px; padding: 4px 0; }}"
-            f"QRadioButton::indicator {{ width: 16px; height: 16px; }}"
+            f"QRadioButton::indicator {{ width: 16px; height: 16px;"
+            f"  border-radius: 9px; border: 2px solid {T.BORDER};"
+            f"  background: {T.WHITE}; }}"
+            f"QRadioButton::indicator:hover {{ border-color: {T.ACCENT}; }}"
+            f"QRadioButton::indicator:checked {{"
+            f"  background: qradialgradient(cx:0.5, cy:0.5, radius:0.5,"
+            f"    fx:0.5, fy:0.5, stop:0.45 {T.WHITE}, stop:0.5 {T.ACCENT});"
+            f"  border-color: {T.ACCENT}; }}"
             f"QTextEdit {{ background: {T.WHITE}; color: {T.TEXT};"
             f"  border: 1px solid {T.BORDER}; border-radius: 6px; padding: 6px;"
             f"  font-size: 12px; }}"
