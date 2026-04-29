@@ -42,7 +42,7 @@ def _make_viewer():
 def test_initial_state():
     print("\n[test_initial_state]")
     v = _make_viewer()
-    _check(v._layout_id == "grid_4x3", "default layout is grid_4x3")
+    _check(v._layout_id == "grid_3x4", "default layout is grid_3x4")
     _check(v._live is False, "live mode off by default")
     _check(v._focus_lead == "II", "default focus lead is II")
     _check(len(v.grid_view.cells) == 12, "grid has 12 cells")
@@ -55,7 +55,7 @@ def test_layout_switching_preserves_cells():
     print("\n[test_layout_switching_preserves_cells]")
     v = _make_viewer()
     cell_ids_before = {lead: id(c) for lead, c in v.grid_view.cells.items()}
-    for lid in ["grid_4x3", "grid_3x4", "grid_2x6", "stack_1xN", "focus_1L"]:
+    for lid in ["grid_3x4", "grid_2x6", "stack_1xN", "focus_1L"]:
         v._on_layout_changed(lid)
         _check(v._layout_id == lid, f"layout switched to {lid}")
     cell_ids_after = {lead: id(c) for lead, c in v.grid_view.cells.items()}
@@ -152,8 +152,8 @@ def test_layout_switcher_has_required_controls():
     print("\n[test_layout_switcher_has_required_controls]")
     v = _make_viewer()
     ls = v.layout_switcher
-    _check(hasattr(ls, "_layout_btns") and len(ls._layout_btns) == 5,
-           "5 layout buttons present")
+    _check(hasattr(ls, "_layout_btns") and len(ls._layout_btns) == 4,
+           "4 layout buttons present")
     _check(hasattr(ls, "_live_btn"), "live toggle button present")
     _check(hasattr(ls, "_speed_pills") and len(ls._speed_pills) == 3,
            "3 speed pill buttons present")
@@ -161,7 +161,7 @@ def test_layout_switcher_has_required_controls():
            "12 lead toggle buttons present")
     _check(hasattr(ls, "_lead_all_btn"), "select-all leads button present")
     _check(ls._info_panel is v.info_panel, "info_panel embedded inline")
-    _check(ls.width() >= 200, "panel is wide (>=200px)")
+    _check(ls.width() >= 250, "panel is wide (>=250px)")
 
 
 def test_visible_leads_filter_in_subset_layouts():

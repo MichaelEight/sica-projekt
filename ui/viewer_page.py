@@ -284,7 +284,6 @@ class LayoutSwitcher(QWidget):
     visible_leads_changed = Signal(list)
 
     _LAYOUTS = [
-        ("grid_4x3", "12 + rytm"),
         ("grid_3x4", "3×4"),
         ("grid_2x6", "2×6"),
         ("stack_1xN", "Paski"),
@@ -294,14 +293,14 @@ class LayoutSwitcher(QWidget):
 
     def __init__(self, info_panel, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(220)
+        self.setFixedWidth(260)
         self.setStyleSheet(f"background: {T.WHITE}; border-right: 1px solid {T.BORDER};")
 
         from PySide6.QtWidgets import QScrollArea, QGridLayout
         from ui.widgets import section_header
         from ui.ekg_canvas import ALL_LEADS_ORDER
 
-        self._layout_id = "grid_4x3"
+        self._layout_id = "grid_3x4"
         self._live = False
         self._speed_idx = 1
         self._focus_lead = "II"
@@ -326,7 +325,7 @@ class LayoutSwitcher(QWidget):
         layout.setAlignment(Qt.AlignTop)
 
         # ── Section 1: Patient + measurements (inline InfoPanel) ──
-        info_panel.setFixedWidth(200)
+        info_panel.setFixedWidth(240)
         layout.addWidget(info_panel)
 
         # ── Section 2: Layout buttons ──
@@ -353,11 +352,11 @@ class LayoutSwitcher(QWidget):
         self._lead_btns: dict[str, QPushButton] = {}
         for i, lead in enumerate(ALL_LEADS_ORDER):
             btn = QPushButton(lead)
-            btn.setFixedSize(58, 26)
+            btn.setFixedSize(72, 28)
             btn.setCheckable(True)
             btn.setChecked(True)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setFont(QFont("Menlo", 10, QFont.DemiBold))
+            btn.setFont(QFont("Menlo", 11, QFont.DemiBold))
             btn.clicked.connect(lambda checked=False, l=lead: self._on_lead_toggle(l))
             lead_grid.addWidget(btn, i // 3, i % 3)
             self._lead_btns[lead] = btn
@@ -379,20 +378,19 @@ class LayoutSwitcher(QWidget):
         self._live_btn.clicked.connect(self._toggle_live)
         layout.addWidget(self._live_btn)
 
-        speed_row = QHBoxLayout()
-        speed_row.setSpacing(3)
         speed_lbl = QLabel("Prędkość")
         speed_lbl.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
-        speed_row.addWidget(speed_lbl)
-        speed_row.addStretch()
+        layout.addWidget(speed_lbl)
+        speed_row = QHBoxLayout()
+        speed_row.setSpacing(4)
         self._speed_pills: list[QPushButton] = []
         for i, spd in enumerate(self._SPEEDS):
             btn = QPushButton(f"{spd:g}×")
-            btn.setFixedSize(38, 24)
+            btn.setFixedHeight(28)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setFont(QFont(".AppleSystemUIFont", 10))
+            btn.setFont(QFont(".AppleSystemUIFont", 11, QFont.DemiBold))
             btn.clicked.connect(lambda checked=False, idx=i: self._set_speed(idx))
-            speed_row.addWidget(btn)
+            speed_row.addWidget(btn, 1)
             self._speed_pills.append(btn)
         layout.addLayout(speed_row)
 
@@ -620,7 +618,7 @@ class ViewerPage(QWidget):
         self._v_min = -1.5
         self._v_max = 1.5
         # Unified screen state — replaces _view_mode
-        self._layout_id = "grid_4x3"  # grid_4x3 | grid_3x4 | grid_2x6 | stack_1xN | focus_1L
+        self._layout_id = "grid_3x4"  # grid_3x4 | grid_2x6 | stack_1xN | focus_1L
         self._live = False
         self._focus_lead = "II"
         self._visible_leads: list[str] = list(STANDARD_LEADS)
@@ -652,13 +650,13 @@ class ViewerPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ── Row 1: Navigation & view ──
+        # ── Single-row top bar ──
         self.toolbar = QWidget()
-        self.toolbar.setFixedHeight(36)
+        self.toolbar.setFixedHeight(40)
         self.toolbar.setStyleSheet(f"background: {T.TOPBAR};")
         tb = QHBoxLayout(self.toolbar)
         tb.setContentsMargins(10, 0, 10, 0)
-        tb.setSpacing(6)
+        tb.setSpacing(8)
 
         logo = make_logo(12)
         tb.addWidget(logo)
@@ -667,7 +665,6 @@ class ViewerPage(QWidget):
         self.file_label = QLabel("")
         self.file_label.setStyleSheet(f"font-size:11px; color:{T.BTN_TEXT}; font-family:Menlo;")
         tb.addWidget(self.file_label)
-        tb.addStretch()
 
         self.analysis_badge = QLabel("Analiza zakończona")
         self.analysis_badge.setFont(QFont(".AppleSystemUIFont", 11))
@@ -678,6 +675,30 @@ class ViewerPage(QWidget):
         """)
         self.analysis_badge.hide()
         tb.addWidget(self.analysis_badge)
+
+        tb.addStretch()
+
+        from ui.theme import is_dark_mode as _idm
+        _ah = '#047857' if _idm() else '#3a8eef'
+        self.btn_full_analysis = QPushButton("Pełna analiza")
+        self.btn_full_analysis.setObjectName("primary")
+        self.btn_full_analysis.setCursor(Qt.PointingHandCursor)
+        self.btn_full_analysis.setStyleSheet(f"""
+            QPushButton {{ background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;
+                padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px; }}
+            QPushButton:hover {{ background:{_ah}; }}
+        """)
+        self.btn_full_analysis.clicked.connect(self._run_full_analysis)
+        tb.addWidget(self.btn_full_analysis)
+
+        self.btn_report = QPushButton("Raport")
+        self.btn_report.setStyleSheet(f"""
+            background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;
+            border-radius:5px;border:none;
+        """)
+        self.btn_report.setCursor(Qt.PointingHandCursor)
+        self.btn_report.clicked.connect(self.show_report.emit)
+        tb.addWidget(self.btn_report)
 
         tb.addWidget(make_separator())
 
@@ -694,43 +715,6 @@ class ViewerPage(QWidget):
         tb.addWidget(self.btn_dark)
 
         outer.addWidget(self.toolbar)
-
-        # ── Row 2: Tools & analysis ──
-        self.toolbar2 = QWidget()
-        self.toolbar2.setFixedHeight(36)
-        self.toolbar2.setStyleSheet(f"background: {T.TOPBAR};")
-        tb2 = QHBoxLayout(self.toolbar2)
-        tb2.setContentsMargins(10, 0, 10, 0)
-        tb2.setSpacing(6)
-
-        tb2.addStretch()
-
-        # Full analysis button (replaces Autoskan + Zaznacz do analizy + Analizuj)
-        from ui.theme import is_dark_mode as _idm
-        _ah = '#047857' if _idm() else '#3a8eef'
-        self.btn_full_analysis = QPushButton("Pelna Analiza")
-        self.btn_full_analysis.setObjectName("primary")
-        self.btn_full_analysis.setCursor(Qt.PointingHandCursor)
-        self.btn_full_analysis.setStyleSheet(f"""
-            QPushButton {{ background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;
-                padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px; }}
-            QPushButton:hover {{ background:{_ah}; }}
-        """)
-        self.btn_full_analysis.clicked.connect(self._run_full_analysis)
-        tb2.addWidget(self.btn_full_analysis)
-
-        tb2.addWidget(make_separator())
-
-        self.btn_report = QPushButton("Raport")
-        self.btn_report.setStyleSheet(f"""
-            background:{T.BTN_DARK};color:{T.BTN_TEXT};font-size:12px;padding:6px 14px;
-            border-radius:5px;border:none;
-        """)
-        self.btn_report.setCursor(Qt.PointingHandCursor)
-        self.btn_report.clicked.connect(self.show_report.emit)
-        tb2.addWidget(self.btn_report)
-
-        outer.addWidget(self.toolbar2)
 
         # ── Content area ──
         self.content = QHBoxLayout()
@@ -939,7 +923,6 @@ class ViewerPage(QWidget):
         """Re-apply all styles after theme change."""
         # Toolbar
         self.toolbar.setStyleSheet(f"background: {T.TOPBAR};")
-        self.toolbar2.setStyleSheet(f"background: {T.TOPBAR};")
         self.file_label.setStyleSheet(f"font-size:11px; color:{T.BTN_TEXT}; font-family:Menlo;")
         self.analysis_badge.setStyleSheet(f"""
             font-size: 11px; background: {T.BADGE_NORM_BG}; color: {T.BADGE_NORM_TEXT};
@@ -995,11 +978,11 @@ class ViewerPage(QWidget):
         self.time_pos = 0.0
         self._monitor_t = 0.0
         self._monitor_playing = False
-        # Reset to default layout (4x3 + rhythm), live off
-        self._layout_id = "grid_4x3"
+        # Reset to default 3x4 layout, live off
+        self._layout_id = "grid_3x4"
         self._live = False
         self._visible_leads = list(leads) if leads else list(STANDARD_LEADS)
-        self.layout_switcher.set_layout("grid_4x3")
+        self.layout_switcher.set_layout("grid_3x4")
         self.layout_switcher.set_live(False)
         self.layout_switcher.set_visible_leads(self._visible_leads)
         self._monitor_timer.stop()
@@ -1170,15 +1153,7 @@ class ViewerPage(QWidget):
                           self._monitor_page_start,
                           self._monitor_page_start + self._monitor_window)
             cell.set_sweep(sweep_frac)
-        # Rhythm strip too if visible
-        if self._layout_id == "grid_4x3" and "II" in self.leads:
-            ii_idx = self.leads.index("II")
-            self.grid_view.rhythm.v_min = self._v_min
-            self.grid_view.rhythm.v_max = self._v_max
-            self.grid_view.rhythm.set_data("II (rytm)", self.signal[:, ii_idx], self.fs,
-                                           self._monitor_page_start,
-                                           self._monitor_page_start + self._monitor_window)
-            self.grid_view.rhythm.set_sweep(sweep_frac)
+
 
     # ── Layout / live switching ──
     def _apply_layout(self):
@@ -2361,7 +2336,6 @@ class ViewerPage(QWidget):
         self.time_label.setText(f"{self.time_pos:.2f} – {t_end:.2f} s / {self.duration:.2f} s")
         self.timeline_overview.set_window(self.time_pos, window)
         layout_names = {
-            "grid_4x3": "12-odprowadzeń",
             "grid_3x4": "Siatka 3×4",
             "grid_2x6": "Siatka 2×6",
             "stack_1xN": "Wybrane jako paski",
@@ -2417,11 +2391,6 @@ class ViewerPage(QWidget):
                 cell._old_signal = self.signal[:, idx]
                 cell._old_t_start = self._monitor_page_start
                 cell._old_t_end = page_end
-            if self._layout_id == "grid_4x3" and "II" in self.leads:
-                ii_idx = self.leads.index("II")
-                self.grid_view.rhythm._old_signal = self.signal[:, ii_idx]
-                self.grid_view.rhythm._old_t_start = self._monitor_page_start
-                self.grid_view.rhythm._old_t_end = page_end
             self._monitor_page_start = page_end
             if self._monitor_page_start >= self.duration:
                 self._monitor_page_start = 0.0

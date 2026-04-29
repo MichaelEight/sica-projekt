@@ -848,7 +848,7 @@ class TwelveLeadGrid(QWidget):
             lambda t, v: self.cell_double_clicked.emit("II", t))
 
         # Current layout state
-        self._layout_id = "grid_4x3"
+        self._layout_id = "grid_3x4"
         self._visible_leads: list[str] = list(ALL_LEADS_ORDER)
         self._focus_lead: str = "II"
 
@@ -869,8 +869,6 @@ class TwelveLeadGrid(QWidget):
         """Return leads currently shown on screen, in display order."""
         if self._layout_id == "focus_1L":
             return [self._focus_lead] if self._focus_lead in self.cells else []
-        if self._layout_id == "grid_4x3":
-            return list(ALL_LEADS_ORDER)
         return list(self._visible_leads)
 
     def _clear_layout(self):
@@ -931,24 +929,19 @@ class TwelveLeadGrid(QWidget):
         for c in self.cells.values():
             c.draw_border = False
 
-        if lid == "grid_4x3":
-            rows = STANDARD_GRID_ROWS_4x3
-            show_rhythm = True
-        elif lid == "grid_3x4":
+        if lid == "grid_3x4":
             leads = self._visible_leads or ALL_LEADS_ORDER
             rows = [leads[i:i + 3] for i in range(0, min(12, len(leads)), 3)]
-            show_rhythm = False
         elif lid == "grid_2x6":
             leads = self._visible_leads or ALL_LEADS_ORDER
             rows = [leads[i:i + 2] for i in range(0, min(12, len(leads)), 2)]
-            show_rhythm = False
         elif lid == "stack_1xN":
             leads = self._visible_leads or ["II", "V1", "V5"]
             rows = [[l] for l in leads]
-            show_rhythm = False
         else:
-            rows = STANDARD_GRID_ROWS_4x3
-            show_rhythm = True
+            leads = self._visible_leads or ALL_LEADS_ORDER
+            rows = [leads[i:i + 3] for i in range(0, min(12, len(leads)), 3)]
+        show_rhythm = False
 
         # Hide all cells first; show only those used in rows
         for cell in self.cells.values():

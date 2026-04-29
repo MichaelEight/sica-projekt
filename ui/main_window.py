@@ -170,7 +170,7 @@ class MainWindow(QMainWindow):
                     fn()
             return wrapper
 
-        _sc(Qt.Key_1, _on_viewer(lambda: self.viewer_page._on_layout_changed("grid_4x3")))
+        _sc(Qt.Key_1, _on_viewer(lambda: self.viewer_page._on_layout_changed("grid_3x4")))
         _sc(Qt.Key_2, _on_viewer(lambda: self.viewer_page._on_layout_changed("focus_1L")))
         _sc(Qt.Key_3, _on_viewer(lambda: self.viewer_page._on_live_toggled(not self.viewer_page._live)))
         _sc(QKeySequence("Ctrl+Z"), _on_viewer(lambda: self.viewer_page._undo()))
