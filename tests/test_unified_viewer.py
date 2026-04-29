@@ -155,9 +155,13 @@ def test_layout_switcher_has_required_controls():
     _check(hasattr(ls, "_layout_btns") and len(ls._layout_btns) == 5,
            "5 layout buttons present")
     _check(hasattr(ls, "_live_btn"), "live toggle button present")
-    _check(hasattr(ls, "_speed_btn"), "speed cycle button present")
-    _check(hasattr(ls, "_patient_btn"), "patient drawer button present")
-    _check(hasattr(ls, "_leads_btn"), "lead chooser button present")
+    _check(hasattr(ls, "_speed_pills") and len(ls._speed_pills) == 3,
+           "3 speed pill buttons present")
+    _check(hasattr(ls, "_lead_btns") and len(ls._lead_btns) == 12,
+           "12 lead toggle buttons present")
+    _check(hasattr(ls, "_lead_all_btn"), "select-all leads button present")
+    _check(ls._info_panel is v.info_panel, "info_panel embedded inline")
+    _check(ls.width() >= 200, "panel is wide (>=200px)")
 
 
 def test_visible_leads_filter_in_subset_layouts():
@@ -168,6 +172,22 @@ def test_visible_leads_filter_in_subset_layouts():
     visible = v.grid_view.visible_cell_leads()
     _check(set(visible) == {"I", "II", "V1", "V5"},
            "3x4 honours visible_leads subset")
+
+
+def test_lead_toggle_buttons_drive_visible_leads():
+    print("\n[test_lead_toggle_buttons_drive_visible_leads]")
+    v = _make_viewer()
+    ls = v.layout_switcher
+    # All 12 active by default
+    _check(set(ls.visible_leads()) == set(ls._lead_btns.keys()),
+           "all 12 leads checked by default")
+    # Untoggle V1
+    ls._lead_btns["V1"].setChecked(False)
+    ls._on_lead_toggle("V1")
+    _check("V1" not in ls.visible_leads(), "V1 removed after untoggle")
+    # Re-select all
+    ls._select_all_leads()
+    _check(len(ls.visible_leads()) == 12, "select_all restores 12 leads")
 
 
 def test_focus_lead_aliases_single_lead():
@@ -226,6 +246,7 @@ def main():
         test_scrubber_in_static_and_live,
         test_layout_switcher_has_required_controls,
         test_visible_leads_filter_in_subset_layouts,
+        test_lead_toggle_buttons_drive_visible_leads,
         test_focus_lead_aliases_single_lead,
         test_pause_button_only_active_in_live,
         test_undo_redo_via_panel,

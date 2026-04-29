@@ -269,105 +269,132 @@ class ToolbarBtn(QPushButton):
         return self._active
 
 
-# ── Layout Switcher ────────────────────────────
+# ── Unified Left Panel ─────────────────────────
 class LayoutSwitcher(QWidget):
-    """Vertical sidebar replacing SegmentedControl + LeadSidebar + MonitorSidebar.
+    """Wide unified left panel: patient + measurements + layout + leads + live/speed.
 
-    Buttons select grid layout, toggle live preview, set speed, choose focus lead.
+    All sections inline (no subpanels/popups). Replaces SegmentedControl +
+    LeadSidebar + MonitorSidebar + InfoPanel-as-drawer.
     """
 
-    layout_changed = Signal(str)        # layout_id
-    live_toggled = Signal(bool)         # is_live
-    speed_changed = Signal(float)       # 0.5 / 1.0 / 2.0
-    focus_lead_changed = Signal(str)    # lead name (focus_1L mode)
-    visible_leads_changed = Signal(list)  # list of leads
-    patient_drawer_toggled = Signal(bool)  # show/hide info drawer
+    layout_changed = Signal(str)
+    live_toggled = Signal(bool)
+    speed_changed = Signal(float)
+    focus_lead_changed = Signal(str)
+    visible_leads_changed = Signal(list)
 
     _LAYOUTS = [
-        ("grid_4x3", "12", "12 odprowadzeń + rytm"),
-        ("grid_3x4", "3×4", "Siatka 3×4"),
-        ("grid_2x6", "2×6", "Siatka 2×6"),
-        ("stack_1xN", "1×N", "Wybrane jako paski"),
-        ("focus_1L", "1L", "Pojedyncze odprowadzenie"),
+        ("grid_4x3", "12 + rytm"),
+        ("grid_3x4", "3×4"),
+        ("grid_2x6", "2×6"),
+        ("stack_1xN", "Paski"),
+        ("focus_1L", "Pojedyncze"),
     ]
     _SPEEDS = [0.5, 1.0, 2.0]
 
-    def __init__(self, parent=None):
+    def __init__(self, info_panel, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(72)
+        self.setFixedWidth(220)
         self.setStyleSheet(f"background: {T.WHITE}; border-right: 1px solid {T.BORDER};")
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 8, 6, 8)
-        layout.setSpacing(4)
-        layout.setAlignment(Qt.AlignTop)
+        from PySide6.QtWidgets import QScrollArea, QGridLayout
+        from ui.widgets import section_header
+        from ui.ekg_canvas import ALL_LEADS_ORDER
 
         self._layout_id = "grid_4x3"
         self._live = False
         self._speed_idx = 1
-        self._patient_open = False
         self._focus_lead = "II"
-        self._visible_leads: set[str] = set(STANDARD_LEADS)
+        self._visible_leads: set[str] = set(ALL_LEADS_ORDER)
+        self._info_panel = info_panel
 
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("border: none;")
+        outer.addWidget(scroll)
+
+        body = QWidget()
+        scroll.setWidget(body)
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignTop)
+
+        # ── Section 1: Patient + measurements (inline InfoPanel) ──
+        info_panel.setFixedWidth(200)
+        layout.addWidget(info_panel)
+
+        # ── Section 2: Layout buttons ──
+        layout.addWidget(section_header("Układ"))
+        layout_grid = QGridLayout()
+        layout_grid.setSpacing(4)
+        layout_grid.setContentsMargins(0, 0, 0, 0)
         self._layout_btns: dict[str, QPushButton] = {}
-        for lid, label, tip in self._LAYOUTS:
+        for i, (lid, label) in enumerate(self._LAYOUTS):
             btn = QPushButton(label)
-            btn.setFixedSize(60, 36)
+            btn.setFixedHeight(28)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setToolTip(tip)
-            btn.setFont(QFont(".AppleSystemUIFont", 11, QFont.DemiBold))
+            btn.setFont(QFont(".AppleSystemUIFont", 10, QFont.DemiBold))
             btn.clicked.connect(lambda checked=False, l=lid: self._set_layout(l))
             self._layout_btns[lid] = btn
-            layout.addWidget(btn, alignment=Qt.AlignCenter)
+            layout_grid.addWidget(btn, i // 2, i % 2)
+        layout.addLayout(layout_grid)
 
-        # Separator
-        sep1 = QFrame()
-        sep1.setFixedSize(48, 1)
-        sep1.setStyleSheet(f"background: {T.BORDER};")
-        layout.addSpacing(4)
-        layout.addWidget(sep1, alignment=Qt.AlignCenter)
-        layout.addSpacing(4)
+        # ── Section 3: Lead toggle grid (12 buttons, 3 cols) ──
+        layout.addWidget(section_header("Odprowadzenia"))
+        lead_grid = QGridLayout()
+        lead_grid.setSpacing(3)
+        lead_grid.setContentsMargins(0, 0, 0, 0)
+        self._lead_btns: dict[str, QPushButton] = {}
+        for i, lead in enumerate(ALL_LEADS_ORDER):
+            btn = QPushButton(lead)
+            btn.setFixedSize(58, 26)
+            btn.setCheckable(True)
+            btn.setChecked(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFont(QFont("Menlo", 10, QFont.DemiBold))
+            btn.clicked.connect(lambda checked=False, l=lead: self._on_lead_toggle(l))
+            lead_grid.addWidget(btn, i // 3, i % 3)
+            self._lead_btns[lead] = btn
+        layout.addLayout(lead_grid)
 
-        # Live toggle
-        self._live_btn = QPushButton("▶ Live")
-        self._live_btn.setFixedSize(60, 36)
+        self._lead_all_btn = QPushButton("Pokaż wszystkie")
+        self._lead_all_btn.setFixedHeight(22)
+        self._lead_all_btn.setCursor(Qt.PointingHandCursor)
+        self._lead_all_btn.setFont(QFont(".AppleSystemUIFont", 10))
+        self._lead_all_btn.clicked.connect(self._select_all_leads)
+        layout.addWidget(self._lead_all_btn)
+
+        # ── Section 4: Monitor controls ──
+        layout.addWidget(section_header("Podgląd ciągły"))
+        self._live_btn = QPushButton("▶ Włącz")
+        self._live_btn.setFixedHeight(32)
         self._live_btn.setCursor(Qt.PointingHandCursor)
-        self._live_btn.setToolTip("Podgląd ciągły")
-        self._live_btn.setFont(QFont(".AppleSystemUIFont", 10, QFont.DemiBold))
+        self._live_btn.setFont(QFont(".AppleSystemUIFont", 11, QFont.DemiBold))
         self._live_btn.clicked.connect(self._toggle_live)
-        layout.addWidget(self._live_btn, alignment=Qt.AlignCenter)
+        layout.addWidget(self._live_btn)
 
-        # Speed cycle
-        self._speed_btn = QPushButton("1×")
-        self._speed_btn.setFixedSize(60, 30)
-        self._speed_btn.setCursor(Qt.PointingHandCursor)
-        self._speed_btn.setToolTip("Prędkość odtwarzania")
-        self._speed_btn.setFont(QFont(".AppleSystemUIFont", 11, QFont.DemiBold))
-        self._speed_btn.clicked.connect(self._cycle_speed)
-        layout.addWidget(self._speed_btn, alignment=Qt.AlignCenter)
-
-        sep2 = QFrame()
-        sep2.setFixedSize(48, 1)
-        sep2.setStyleSheet(f"background: {T.BORDER};")
-        layout.addSpacing(4)
-        layout.addWidget(sep2, alignment=Qt.AlignCenter)
-        layout.addSpacing(4)
-
-        # Patient drawer toggle
-        self._patient_btn = QPushButton("Pacjent")
-        self._patient_btn.setFixedSize(60, 30)
-        self._patient_btn.setCursor(Qt.PointingHandCursor)
-        self._patient_btn.setFont(QFont(".AppleSystemUIFont", 10))
-        self._patient_btn.clicked.connect(self._toggle_patient)
-        layout.addWidget(self._patient_btn, alignment=Qt.AlignCenter)
-
-        # Lead chooser button (opens popup of 12 toggles)
-        self._leads_btn = QPushButton("Odpr.")
-        self._leads_btn.setFixedSize(60, 30)
-        self._leads_btn.setCursor(Qt.PointingHandCursor)
-        self._leads_btn.setFont(QFont(".AppleSystemUIFont", 10))
-        self._leads_btn.clicked.connect(self._open_lead_popup)
-        layout.addWidget(self._leads_btn, alignment=Qt.AlignCenter)
+        speed_row = QHBoxLayout()
+        speed_row.setSpacing(3)
+        speed_lbl = QLabel("Prędkość")
+        speed_lbl.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
+        speed_row.addWidget(speed_lbl)
+        speed_row.addStretch()
+        self._speed_pills: list[QPushButton] = []
+        for i, spd in enumerate(self._SPEEDS):
+            btn = QPushButton(f"{spd:g}×")
+            btn.setFixedSize(38, 24)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFont(QFont(".AppleSystemUIFont", 10))
+            btn.clicked.connect(lambda checked=False, idx=i: self._set_speed(idx))
+            speed_row.addWidget(btn)
+            self._speed_pills.append(btn)
+        layout.addLayout(speed_row)
 
         layout.addStretch()
         self._refresh_styles()
@@ -376,7 +403,7 @@ class LayoutSwitcher(QWidget):
     def set_layout(self, layout_id: str):
         if layout_id == self._layout_id:
             return
-        if layout_id not in {lid for lid, _, _ in self._LAYOUTS}:
+        if layout_id not in {lid for lid, _ in self._LAYOUTS}:
             return
         self._layout_id = layout_id
         self._refresh_styles()
@@ -392,16 +419,17 @@ class LayoutSwitcher(QWidget):
             self._speed_idx = self._SPEEDS.index(speed)
         except ValueError:
             return
-        self._speed_btn.setText(f"{self._SPEEDS[self._speed_idx]:g}×")
+        self._refresh_styles()
 
     def set_focus_lead(self, lead: str):
         self._focus_lead = lead
 
     def set_visible_leads(self, leads: list[str]):
         self._visible_leads = set(leads)
-
-    def set_patient_open(self, opened: bool):
-        self._patient_open = opened
+        for lead, btn in self._lead_btns.items():
+            btn.blockSignals(True)
+            btn.setChecked(lead in self._visible_leads)
+            btn.blockSignals(False)
         self._refresh_styles()
 
     def active_layout(self) -> str:
@@ -430,54 +458,34 @@ class LayoutSwitcher(QWidget):
         self._refresh_styles()
         self.live_toggled.emit(self._live)
 
-    def _cycle_speed(self):
-        self._speed_idx = (self._speed_idx + 1) % len(self._SPEEDS)
-        self._speed_btn.setText(f"{self._SPEEDS[self._speed_idx]:g}×")
-        self.speed_changed.emit(self._SPEEDS[self._speed_idx])
-
-    def _toggle_patient(self):
-        self._patient_open = not self._patient_open
+    def _set_speed(self, idx: int):
+        self._speed_idx = idx
         self._refresh_styles()
-        self.patient_drawer_toggled.emit(self._patient_open)
+        self.speed_changed.emit(self._SPEEDS[idx])
 
-    def _open_lead_popup(self):
-        from PySide6.QtWidgets import QMenu, QWidgetAction, QGridLayout
+    def _on_lead_toggle(self, lead: str):
+        if self._lead_btns[lead].isChecked():
+            self._visible_leads.add(lead)
+        else:
+            self._visible_leads.discard(lead)
+            if not self._visible_leads:
+                self._visible_leads.add(lead)
+                self._lead_btns[lead].setChecked(True)
+                return
+        self._refresh_styles()
+        self.visible_leads_changed.emit(self.visible_leads())
+
+    def _select_all_leads(self):
         from ui.ekg_canvas import ALL_LEADS_ORDER
-        menu = QMenu(self)
-        menu.setStyleSheet(f"""
-            QMenu {{ background: {T.WHITE}; color: {T.TEXT};
-                border: 1px solid {T.BORDER}; border-radius: 6px; padding: 8px; }}
-        """)
-        container = QWidget()
-        grid = QGridLayout(container)
-        grid.setContentsMargins(6, 6, 6, 6)
-        grid.setSpacing(4)
-        toggles: dict[str, QPushButton] = {}
-        for i, lead in enumerate(ALL_LEADS_ORDER):
-            btn = QPushButton(lead)
-            btn.setFixedSize(48, 28)
-            btn.setCheckable(True)
-            btn.setChecked(lead in self._visible_leads)
-            grid.addWidget(btn, i // 3, i % 3)
-            toggles[lead] = btn
-        action = QWidgetAction(menu)
-        action.setDefaultWidget(container)
-        menu.addAction(action)
-
-        def _commit():
-            new_set = {l for l, b in toggles.items() if b.isChecked()}
-            if not new_set:
-                return  # disallow empty
-            if new_set != self._visible_leads:
-                self._visible_leads = new_set
-                self.visible_leads_changed.emit(self.visible_leads())
-
-        menu.aboutToHide.connect(_commit)
-        global_pt = self._leads_btn.mapToGlobal(QPoint(self._leads_btn.width(), 0))
-        menu.exec(global_pt)
+        self._visible_leads = set(ALL_LEADS_ORDER)
+        for lead, btn in self._lead_btns.items():
+            btn.blockSignals(True)
+            btn.setChecked(True)
+            btn.blockSignals(False)
+        self._refresh_styles()
+        self.visible_leads_changed.emit(self.visible_leads())
 
     def _refresh_styles(self):
-        from ui.theme import is_dark_mode
         active_bg = T.ACCENT
         active_fg = T.ACCENT_TEXT
         idle_bg = T.WHITE
@@ -485,15 +493,18 @@ class LayoutSwitcher(QWidget):
         for lid, btn in self._layout_btns.items():
             on = (lid == self._layout_id)
             btn.setStyleSheet(self._btn_style(on, active_bg, active_fg, idle_bg, idle_fg))
+        for lead, btn in self._lead_btns.items():
+            on = btn.isChecked()
+            btn.setStyleSheet(self._btn_style(on, active_bg, active_fg, idle_bg, idle_fg))
+        self._lead_all_btn.setStyleSheet(self._btn_style(False, active_bg, active_fg, idle_bg, idle_fg))
         live_on = self._live
         live_bg = T.GREEN if live_on else idle_bg
         live_fg = T.ACCENT_TEXT if live_on else idle_fg
-        self._live_btn.setText("⏸ Pauza" if live_on else "▶ Live")
+        self._live_btn.setText("⏸ Pauza" if live_on else "▶ Włącz")
         self._live_btn.setStyleSheet(self._btn_style(live_on, live_bg, live_fg, idle_bg, idle_fg))
-        self._speed_btn.setStyleSheet(self._btn_style(False, active_bg, active_fg, idle_bg, idle_fg))
-        pat_on = self._patient_open
-        self._patient_btn.setStyleSheet(self._btn_style(pat_on, active_bg, active_fg, idle_bg, idle_fg))
-        self._leads_btn.setStyleSheet(self._btn_style(False, active_bg, active_fg, idle_bg, idle_fg))
+        for i, btn in enumerate(self._speed_pills):
+            on = (i == self._speed_idx)
+            btn.setStyleSheet(self._btn_style(on, active_bg, active_fg, idle_bg, idle_fg))
         self.setStyleSheet(f"background: {T.WHITE}; border-right: 1px solid {T.BORDER};")
 
     @staticmethod
@@ -502,11 +513,13 @@ class LayoutSwitcher(QWidget):
             f"QPushButton {{ background: {on_bg if on else off_bg};"
             f"  color: {on_fg if on else off_fg};"
             f"  border: 1px solid {T.BORDER if not on else on_bg};"
-            f"  border-radius: 5px; }}"
+            f"  border-radius: 4px; font-size: 11px; }}"
             f"QPushButton:hover {{ background: {T.BG_SECONDARY if not on else on_bg}; }}"
         )
 
     def apply_theme(self):
+        if self._info_panel is not None:
+            self._info_panel.apply_theme()
         self._refresh_styles()
 
 
@@ -724,20 +737,17 @@ class ViewerPage(QWidget):
         self.content.setContentsMargins(0, 0, 0, 0)
         self.content.setSpacing(0)
 
-        # Layout switcher (replaces SegmentedControl + LeadSidebar + MonitorSidebar)
-        self.layout_switcher = LayoutSwitcher()
+        # InfoPanel constructed first (embedded inside LayoutSwitcher inline)
+        self.info_panel = InfoPanel()
+        self.info_panel.patient_changed.connect(self._save_ann)
+
+        # Wide unified left panel
+        self.layout_switcher = LayoutSwitcher(self.info_panel)
         self.layout_switcher.layout_changed.connect(self._on_layout_changed)
         self.layout_switcher.live_toggled.connect(self._on_live_toggled)
         self.layout_switcher.speed_changed.connect(self._on_monitor_speed)
         self.layout_switcher.visible_leads_changed.connect(self._on_visible_leads_changed)
-        self.layout_switcher.patient_drawer_toggled.connect(self._on_patient_drawer)
         self.content.addWidget(self.layout_switcher)
-
-        # Patient/measurements drawer (collapsible InfoPanel)
-        self.info_panel = InfoPanel()
-        self.info_panel.patient_changed.connect(self._save_ann)
-        self.info_panel.hide()  # drawer starts closed
-        self.content.addWidget(self.info_panel)
 
         # Single grid view shared by all layouts. Cells are reused across layouts.
         self.grid_view = TwelveLeadGrid()
@@ -944,12 +954,10 @@ class ViewerPage(QWidget):
         """)
         from ui.theme import is_dark_mode
         self.btn_dark.setText("Tryb jasny" if is_dark_mode() else "Tryb ciemny")
-        # Layout switcher
+        # Layout switcher (re-themes embedded info_panel too)
         self.layout_switcher.apply_theme()
         # Grid view
         self.grid_view.setStyleSheet(f"background: {T.BG_SECONDARY};")
-        # Info panel drawer
-        self.info_panel.apply_theme()
         self.markings_panel.apply_theme()
 
         # Bottom controls panel
@@ -1210,9 +1218,6 @@ class ViewerPage(QWidget):
         self._visible_leads = list(leads)
         if self._layout_id in {"grid_3x4", "grid_2x6", "stack_1xN"}:
             self._apply_layout()
-
-    def _on_patient_drawer(self, opened: bool):
-        self.info_panel.setVisible(opened)
 
     def _on_cell_clicked(self, lead: str):
         self._last_clicked_lead = lead
