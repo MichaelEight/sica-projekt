@@ -95,6 +95,9 @@ class TimelineOverview(QWidget):
         self._time_pos: float = 0.0
         self._window: float = 0.0
         self._dragging = False
+        # list of (t_start, t_end, code) — color codes match TwelveLeadGrid
+        # autoscan: 1 = yellow (borderline), 2 = red (illness).
+        self._autoscan_regions: list = []
 
     def set_signal(self, signal: np.ndarray | None, duration: float):
         """Set the full signal (N,C) and duration; builds a lightweight envelope."""
@@ -119,6 +122,17 @@ class TimelineOverview(QWidget):
         self._window = float(window)
         self.update()
 
+    def set_autoscan_regions(self, regions: list):
+        """Accept (t_start, t_end, code, *_) tuples; only first three used."""
+        self._autoscan_regions = [
+            (float(r[0]), float(r[1]), int(r[2])) for r in (regions or [])
+        ]
+        self.update()
+
+    def clear_autoscan_regions(self):
+        self._autoscan_regions = []
+        self.update()
+
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
@@ -129,6 +143,24 @@ class TimelineOverview(QWidget):
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(T.BORDER_LIGHT))
         p.drawRoundedRect(0, 2, w, h - 4, 3, 3)
+
+        # Autoscan colored bands — drawn beneath envelope so signal stays
+        # readable. Yellow = borderline, red = illness, healthy gets nothing.
+        if self._autoscan_regions and self._duration > 0:
+            colors = {
+                1: QColor(250, 204, 21, 110),  # yellow
+                2: QColor(239, 68, 68, 130),   # red
+            }
+            for t_s, t_e, code in self._autoscan_regions:
+                if code <= 0:
+                    continue
+                x1 = int(t_s / self._duration * w)
+                x2 = int(t_e / self._duration * w)
+                if x2 <= x1:
+                    continue
+                p.setBrush(colors.get(min(code, 2), colors[2]))
+                p.setPen(Qt.NoPen)
+                p.drawRect(x1, 2, x2 - x1, h - 4)
 
         # Signal envelope
         if self._overview is not None and self._duration > 0:

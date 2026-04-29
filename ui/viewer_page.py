@@ -1143,6 +1143,7 @@ class ViewerPage(QWidget):
         self._autoscan_file_path = None
         self.grid_12.clear_autoscan_regions()
         self.single_lead.autoscan_regions = []
+        self.timeline_overview.clear_autoscan_regions()
 
         # Enable/disable full analysis based on duration
         min_samples = int(10.0 * self.fs)
@@ -2357,6 +2358,7 @@ class ViewerPage(QWidget):
 
         self.grid_12.set_autoscan_regions(regions)
         self.grid_12.set_gt_annotations(gt_lines)
+        self.timeline_overview.set_autoscan_regions(regions)
         self.single_lead.autoscan_regions = regions
         self.single_lead.show_autoscan_labels = True
         self.single_lead.gt_annotations = gt_lines
@@ -2424,6 +2426,7 @@ class ViewerPage(QWidget):
         self.single_lead.autoscan_regions = []
         self.single_lead.gt_annotations = []
         self.single_lead.update()
+        self.timeline_overview.clear_autoscan_regions()
 
     def _run_window_scan(self, lead: str, t1: float, t2: float):
         """Run AI scan on the selected region and store result as a scan marking."""

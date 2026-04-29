@@ -1062,6 +1062,9 @@ class TwelveLeadGrid(QWidget):
         else:
             self.rhythm.hide()
 
+        # Layout decides whether each cell shows autoscan labels.
+        self._refresh_autoscan_label_visibility()
+
     def apply_theme(self):
         self.setStyleSheet(f"background: {T.BG_SECONDARY};")
         for sep in self._separators:
@@ -1085,14 +1088,29 @@ class TwelveLeadGrid(QWidget):
         self.set_analysis_overlay(None, None)
 
     def set_autoscan_regions(self, regions: list):
-        """Set colored autoscan regions + labels on every cell + rhythm strip."""
+        """Set colored autoscan regions on every cell. Label visibility is
+        layout-dependent — see _refresh_autoscan_label_visibility()."""
         for cell in self.cells.values():
             cell.autoscan_regions = regions
-            cell.show_autoscan_labels = True
-            cell.update()
         self.rhythm.autoscan_regions = regions
-        self.rhythm.show_autoscan_labels = True
+        self._refresh_autoscan_label_visibility()
+        for cell in self.cells.values():
+            cell.update()
         self.rhythm.update()
+
+    def _refresh_autoscan_label_visibility(self):
+        """Show labels on all visible cells, except in stack_1xN (Paski)
+        where only the bottom-most strip carries labels — repeating them on
+        every row would be visual noise."""
+        # Default: every cell + rhythm shows labels.
+        for cell in self.cells.values():
+            cell.show_autoscan_labels = True
+        self.rhythm.show_autoscan_labels = True
+        if self._layout_id == "stack_1xN":
+            visible = self._visible_leads or []
+            bottom = visible[-1] if visible else None
+            for lead, cell in self.cells.items():
+                cell.show_autoscan_labels = (lead == bottom)
 
     def set_gt_annotations(self, gt_lines: list):
         """Set ground truth annotation brackets on rhythm strip only."""
