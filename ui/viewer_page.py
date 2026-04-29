@@ -269,6 +269,63 @@ class ToolbarBtn(QPushButton):
         return self._active
 
 
+# ── Collapsible section ────────────────────────
+class _CollapsibleSection(QWidget):
+    """Header row (label + chevron on right) + content area. Click toggles."""
+
+    def __init__(self, title: str, content: QWidget, expanded: bool = False, parent=None):
+        super().__init__(parent)
+        self._expanded = expanded
+        self._title = title
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(2)
+
+        from PySide6.QtWidgets import QFrame
+        self._header = QFrame()
+        self._header.setCursor(Qt.PointingHandCursor)
+        self._header.setFixedHeight(28)
+        self._header.setStyleSheet(
+            f"QFrame {{ border: none; border-bottom: 1px solid {T.BORDER_LIGHT};"
+            f"  background: transparent; }}"
+            f"QFrame:hover {{ background: {T.BG_SECONDARY}; }}"
+        )
+        h_lay = QHBoxLayout(self._header)
+        h_lay.setContentsMargins(8, 0, 8, 0)
+        h_lay.setSpacing(4)
+        self._title_lbl = QLabel(title.upper())
+        self._title_lbl.setStyleSheet(
+            f"border: none; color: {T.TEXT_DIM}; font-size: 11px;"
+            f"  font-weight: 700; letter-spacing: 0.5px;"
+        )
+        self._arrow_lbl = QLabel()
+        self._arrow_lbl.setStyleSheet(
+            f"border: none; color: {T.TEXT_DIM}; font-size: 12px;"
+        )
+        h_lay.addWidget(self._title_lbl)
+        h_lay.addStretch()
+        h_lay.addWidget(self._arrow_lbl)
+        self._header.mousePressEvent = lambda e: self.toggle()
+        root.addWidget(self._header)
+
+        self._content = content
+        # Reparent content into self.
+        if content.parentWidget() is not None:
+            content.setParent(None)
+        root.addWidget(self._content)
+        self._content.setVisible(self._expanded)
+        self._refresh_arrow()
+
+    def toggle(self):
+        self._expanded = not self._expanded
+        self._content.setVisible(self._expanded)
+        self._refresh_arrow()
+
+    def _refresh_arrow(self):
+        self._arrow_lbl.setText("▾" if self._expanded else "▸")
+
+
 # ── Unified Left Panel ─────────────────────────
 class LayoutSwitcher(QWidget):
     """Wide unified left panel: patient + measurements + layout + leads + live/speed.
@@ -324,11 +381,11 @@ class LayoutSwitcher(QWidget):
         layout.setSpacing(8)
         layout.setAlignment(Qt.AlignTop)
 
-        # ── Section 1: Patient + measurements (inline InfoPanel) ──
+        # InfoPanel is the source of patient/measurement data; we pull its
+        # subwidgets out and host them in collapsible sections below.
         info_panel.setFixedWidth(240)
-        layout.addWidget(info_panel)
 
-        # ── Section 2: Layout buttons ──
+        # ── Section 1: Layout buttons ──
         layout.addWidget(section_header("Układ"))
         layout_grid = QGridLayout()
         layout_grid.setSpacing(4)
@@ -362,24 +419,31 @@ class LayoutSwitcher(QWidget):
             self._lead_btns[lead] = btn
         layout.addLayout(lead_grid)
 
+        lead_quick_row = QHBoxLayout()
+        lead_quick_row.setSpacing(4)
+        lead_quick_row.setContentsMargins(0, 0, 0, 0)
         self._lead_all_btn = QPushButton("Pokaż wszystkie")
         self._lead_all_btn.setFixedHeight(22)
         self._lead_all_btn.setCursor(Qt.PointingHandCursor)
         self._lead_all_btn.setFont(QFont(".AppleSystemUIFont", 10))
         self._lead_all_btn.clicked.connect(self._select_all_leads)
-        layout.addWidget(self._lead_all_btn)
+        lead_quick_row.addWidget(self._lead_all_btn, 1)
+
+        self._lead_only_i_btn = QPushButton("Pokaż I")
+        self._lead_only_i_btn.setFixedHeight(22)
+        self._lead_only_i_btn.setCursor(Qt.PointingHandCursor)
+        self._lead_only_i_btn.setFont(QFont(".AppleSystemUIFont", 10))
+        self._lead_only_i_btn.clicked.connect(lambda: self._select_only_lead("I"))
+        lead_quick_row.addWidget(self._lead_only_i_btn, 1)
+        layout.addLayout(lead_quick_row)
 
         # ── Section 4: Monitor controls ──
+        # Start/pause lives in the bottom navbar play button — section here
+        # only owns the speed control.
         layout.addWidget(section_header("Podgląd ciągły"))
-        self._live_btn = QPushButton("▶ Włącz")
-        self._live_btn.setFixedHeight(32)
-        self._live_btn.setCursor(Qt.PointingHandCursor)
-        self._live_btn.setFont(QFont(".AppleSystemUIFont", 11, QFont.DemiBold))
-        self._live_btn.clicked.connect(self._toggle_live)
-        layout.addWidget(self._live_btn)
-
-        speed_lbl = QLabel("Prędkość")
+        speed_lbl = QLabel("Prędkość podglądu ciągłego")
         speed_lbl.setStyleSheet(f"font-size: 11px; color: {T.TEXT_MUTED};")
+        speed_lbl.setWordWrap(True)
         layout.addWidget(speed_lbl)
         speed_row = QHBoxLayout()
         speed_row.setSpacing(4)
@@ -393,6 +457,16 @@ class LayoutSwitcher(QWidget):
             speed_row.addWidget(btn, 1)
             self._speed_pills.append(btn)
         layout.addLayout(speed_row)
+
+        # ── Section 5: Patient (collapsible) ──
+        self._pat_section = _CollapsibleSection("Pacjent", info_panel.patient_widget,
+                                                 expanded=False)
+        layout.addWidget(self._pat_section)
+
+        # ── Section 6: Measurements (collapsible) ──
+        self._meas_section = _CollapsibleSection("Pomiary", info_panel.meas_widget,
+                                                  expanded=False)
+        layout.addWidget(self._meas_section)
 
         layout.addStretch()
         self._refresh_styles()
@@ -421,6 +495,7 @@ class LayoutSwitcher(QWidget):
 
     def set_focus_lead(self, lead: str):
         self._focus_lead = lead
+        self._refresh_styles()
 
     def set_visible_leads(self, leads: list[str]):
         self._visible_leads = set(leads)
@@ -462,6 +537,19 @@ class LayoutSwitcher(QWidget):
         self.speed_changed.emit(self._SPEEDS[idx])
 
     def _on_lead_toggle(self, lead: str):
+        # In single-lead mode, lead buttons act as focus targets — they
+        # don't toggle visibility. Revert the auto-toggle from the click
+        # so checked state keeps tracking _visible_leads.
+        if self._layout_id == "focus_1L":
+            btn = self._lead_btns[lead]
+            btn.blockSignals(True)
+            btn.setChecked(lead in self._visible_leads)
+            btn.blockSignals(False)
+            self._focus_lead = lead
+            self._refresh_styles()
+            self.focus_lead_changed.emit(lead)
+            return
+
         if self._lead_btns[lead].isChecked():
             self._visible_leads.add(lead)
         else:
@@ -483,6 +571,17 @@ class LayoutSwitcher(QWidget):
         self._refresh_styles()
         self.visible_leads_changed.emit(self.visible_leads())
 
+    def _select_only_lead(self, lead: str):
+        if lead not in self._lead_btns:
+            return
+        self._visible_leads = {lead}
+        for l, btn in self._lead_btns.items():
+            btn.blockSignals(True)
+            btn.setChecked(l == lead)
+            btn.blockSignals(False)
+        self._refresh_styles()
+        self.visible_leads_changed.emit(self.visible_leads())
+
     def _refresh_styles(self):
         active_bg = T.ACCENT
         active_fg = T.ACCENT_TEXT
@@ -491,15 +590,26 @@ class LayoutSwitcher(QWidget):
         for lid, btn in self._layout_btns.items():
             on = (lid == self._layout_id)
             btn.setStyleSheet(self._btn_style(on, active_bg, active_fg, idle_bg, idle_fg))
+        focus_target = self._focus_lead if self._layout_id == "focus_1L" else None
         for lead, btn in self._lead_btns.items():
             on = btn.isChecked()
-            btn.setStyleSheet(self._btn_style(on, active_bg, active_fg, idle_bg, idle_fg))
+            base = self._btn_style(on, active_bg, active_fg, idle_bg, idle_fg)
+            if lead == focus_target:
+                # High-contrast orange — green didn't pop against the blue
+                # ACCENT background. Orange clashes well on both blue and
+                # white states across themes.
+                FOCUS_COLOR = "#f97316"  # orange-500
+                base = (
+                    f"QPushButton {{ background: {active_bg if on else idle_bg};"
+                    f"  color: {active_fg if on else idle_fg};"
+                    f"  border: 3px solid {FOCUS_COLOR};"
+                    f"  border-radius: 6px; font-size: 12px;"
+                    f"  font-weight: 800; }}"
+                    f"QPushButton:hover {{ background: {T.BG_SECONDARY if not on else active_bg}; }}"
+                )
+            btn.setStyleSheet(base)
         self._lead_all_btn.setStyleSheet(self._btn_style(False, active_bg, active_fg, idle_bg, idle_fg))
-        live_on = self._live
-        live_bg = T.GREEN if live_on else idle_bg
-        live_fg = T.ACCENT_TEXT if live_on else idle_fg
-        self._live_btn.setText("⏸ Pauza" if live_on else "▶ Włącz")
-        self._live_btn.setStyleSheet(self._btn_style(live_on, live_bg, live_fg, idle_bg, idle_fg))
+        self._lead_only_i_btn.setStyleSheet(self._btn_style(False, active_bg, active_fg, idle_bg, idle_fg))
         for i, btn in enumerate(self._speed_pills):
             on = (i == self._speed_idx)
             btn.setStyleSheet(self._btn_style(on, active_bg, active_fg, idle_bg, idle_fg))
@@ -640,6 +750,9 @@ class ViewerPage(QWidget):
         self._monitor_t = 0.0
         self._monitor_speed = 1.0
         self._monitor_window = 3.0
+        # Snapshot of the multi-lead view captured before switching to
+        # focus_1L; restored via the canvas context menu.
+        self._prev_view_snapshot = None
         self._monitor_page_start = 0.0
 
         self._build_ui()
@@ -731,6 +844,7 @@ class ViewerPage(QWidget):
         self.layout_switcher.live_toggled.connect(self._on_live_toggled)
         self.layout_switcher.speed_changed.connect(self._on_monitor_speed)
         self.layout_switcher.visible_leads_changed.connect(self._on_visible_leads_changed)
+        self.layout_switcher.focus_lead_changed.connect(self._on_focus_lead_target_changed)
         self.content.addWidget(self.layout_switcher)
 
         # Single grid view shared by all layouts. Cells are reused across layouts.
@@ -772,6 +886,7 @@ class ViewerPage(QWidget):
         self.markings_panel.marking_deleted.connect(self._on_marking_deleted)
         self.markings_panel.marking_edited.connect(self._on_marking_edited)
         self.markings_panel.marking_focus.connect(self._on_marking_focus)
+        self.markings_panel.marking_feedback_requested.connect(self._on_marking_feedback)
         self.markings_panel.annotation_created.connect(self._on_annotation_created)
         self.markings_panel.undo_requested.connect(self._undo)
         self.markings_panel.redo_requested.connect(self._redo)
@@ -825,11 +940,10 @@ class ViewerPage(QWidget):
         for label, handler in back_buttons:
             _make_nav(label, handler)
 
-        self.pause_btn = QPushButton("\u275a\u275a")
+        self.pause_btn = QPushButton("\u25b6")  # \u25b6 \u2014 start live preview
         self.pause_btn.setCursor(Qt.PointingHandCursor)
         self._apply_pause_btn_style()
         self.pause_btn.clicked.connect(self._on_navbar_pause)
-        self.pause_btn.setEnabled(False)  # enabled when live mode active
         nav.addWidget(self.pause_btn)
 
         for label, handler in fwd_buttons:
@@ -986,7 +1100,7 @@ class ViewerPage(QWidget):
         self.layout_switcher.set_live(False)
         self.layout_switcher.set_visible_leads(self._visible_leads)
         self._monitor_timer.stop()
-        self.pause_btn.setEnabled(False)
+        self.pause_btn.setText("▶")
 
         # ── Analyze signal ranges once ──
         self._global_min = float(signal.min())
@@ -1168,18 +1282,20 @@ class ViewerPage(QWidget):
         self._update_time_display()
 
     def _on_layout_changed(self, layout_id: str):
+        # Manual layout pick → invalidate previous-view snapshot.
+        self._prev_view_snapshot = None
         self._layout_id = layout_id
         self._clear_selection_preview()
         self._apply_layout()
 
     def _on_live_toggled(self, live: bool):
         self._live = live
-        self.pause_btn.setEnabled(live)
         if live:
             self._start_monitor()
         else:
             self._monitor_timer.stop()
             self._monitor_playing = False
+            self.pause_btn.setText("▶")
             # Clear sweep state on every cell
             for cell in self.grid_view.cells.values():
                 cell._sweep_pos = None
@@ -1191,8 +1307,16 @@ class ViewerPage(QWidget):
 
     def _on_visible_leads_changed(self, leads: list):
         self._visible_leads = list(leads)
-        if self._layout_id in {"grid_3x4", "grid_2x6", "stack_1xN"}:
-            self._apply_layout()
+        if self._layout_id not in {"grid_3x4", "grid_2x6", "stack_1xN"}:
+            return
+        # Visibility-only: grid + signal repush; skip markings-panel rebuild
+        # (markings unchanged → avoids tearing down/recreating all cards).
+        if self.signal is not None:
+            self._refresh_views()
+        else:
+            self.grid_view.set_layout(self._layout_id, self._visible_leads, self._focus_lead)
+        self._update_zoom_label()
+        self._update_time_display()
 
     def _on_cell_clicked(self, lead: str):
         self._last_clicked_lead = lead
@@ -1214,6 +1338,18 @@ class ViewerPage(QWidget):
         self._on_cell_clicked(lead)
         self._refresh_single_lead()
         self._refresh_markings()
+
+    def _on_focus_lead_target_changed(self, lead: str):
+        """Single-lead mode: lead button click changes focused lead.
+        Keeps current time_pos. Fall back to start only if pos invalid."""
+        if not self.leads or lead not in self.leads:
+            return
+        self._focus_lead = lead
+        self._last_clicked_lead = lead
+        # Validate time_pos still in range; otherwise reset to start.
+        if self.time_pos < 0 or self.time_pos >= self.duration:
+            self.time_pos = 0.0
+        self._apply_layout()
 
     def _default_model_path(self) -> str:
         """First discovered checkpoint (model-sota prioritised by discover_models)."""
@@ -1388,27 +1524,148 @@ class ViewerPage(QWidget):
         self._save_ann()
 
     def _on_marking_focus(self, marking_id: str):
-        """Scroll canvas to show the marking, switching to focus_1L if needed."""
+        """Scroll canvas to show the marking. Keep current layout if it can
+        display this marking; otherwise switch to focus_1L of its lead."""
         m = self._marking_store.get_by_id(marking_id)
         if not m:
             return
-        # Switch to focus on this lead
-        self._focus_lead = m.lead
-        self._last_clicked_lead = m.lead
-        self._layout_id = "focus_1L"
-        self.layout_switcher.set_layout("focus_1L")
-        self.layout_switcher.set_focus_lead(m.lead)
+        m_lead = (m.lead or "").strip()
+        is_global = (m_lead == "" or m_lead.lower() == "all")
+        visible = set(self.grid_view.cells.keys())
+        already_visible = is_global or (m_lead in visible)
+        if not already_visible:
+            self._save_view_snapshot()
+            target_lead = m_lead if m_lead else "II"
+            self._focus_lead = target_lead
+            self._last_clicked_lead = target_lead
+            self._layout_id = "focus_1L"
+            self.layout_switcher.set_layout("focus_1L")
+            self.layout_switcher.set_focus_lead(target_lead)
         # Center the view on the marking
+        win = self._window_1 if self._layout_id == "focus_1L" else self._window_12
         mid = (m.t1 + m.t2) / 2
-        self.time_pos = max(0.0, mid - self._window_1 / 2)
-        self.time_pos = min(self.time_pos, max(0.0, self.duration - self._window_1))
+        self.time_pos = max(0.0, mid - win / 2)
+        self.time_pos = min(self.time_pos, max(0.0, self.duration - win))
         self._restore_scrubber_range()
         self._apply_layout()
-        # Highlight it
-        cell = self.grid_view.cells.get(m.lead)
+        # Highlight it on whichever cell shows that lead
+        cell_lead = m_lead if m_lead in self.grid_view.cells else "II"
+        cell = self.grid_view.cells.get(cell_lead)
         if cell is not None:
             cell.selected_marking = marking_id
             cell.update()
+
+    def _on_marking_feedback(self, marking_id: str):
+        """Collect user feedback for an AI scan marking → append to logs/feedback.jsonl."""
+        m = self._marking_store.get_by_id(marking_id)
+        if not m or m.type != "scan":
+            return
+        from PySide6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QLabel, QRadioButton,
+            QButtonGroup, QTextEdit, QPushButton, QMessageBox,
+        )
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Zgłoś opinię o diagnozie AI")
+        dlg.setMinimumWidth(440)
+        # Force theme — Qt picks up the OS dark/light otherwise and produces
+        # an unreadable mix on light theme.
+        dlg.setStyleSheet(
+            f"QDialog {{ background: {T.WHITE}; }}"
+            f"QLabel {{ color: {T.TEXT}; font-size: 13px; }}"
+            f"QRadioButton {{ color: {T.TEXT}; font-size: 13px;"
+            f"  spacing: 8px; padding: 4px 0; }}"
+            f"QRadioButton::indicator {{ width: 16px; height: 16px; }}"
+            f"QTextEdit {{ background: {T.WHITE}; color: {T.TEXT};"
+            f"  border: 1px solid {T.BORDER}; border-radius: 6px; padding: 6px;"
+            f"  font-size: 12px; }}"
+            f"QTextEdit:focus {{ border-color: {T.ACCENT}; }}"
+            f"QPushButton {{ background: {T.WHITE}; color: {T.TEXT};"
+            f"  border: 1px solid {T.BORDER}; border-radius: 6px;"
+            f"  padding: 6px 18px; font-size: 12px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {T.BG_SECONDARY};"
+            f"  border-color: {T.ACCENT}; color: {T.ACCENT}; }}"
+            f"QPushButton:default {{ background: {T.ACCENT};"
+            f"  color: {T.ACCENT_TEXT}; border-color: {T.ACCENT}; }}"
+            f"QPushButton:default:hover {{ background: {T.ACCENT};"
+            f"  color: {T.ACCENT_TEXT}; }}"
+        )
+        v = QVBoxLayout(dlg)
+        v.setContentsMargins(20, 20, 20, 16)
+        v.setSpacing(10)
+
+        title = QLabel(m.label)
+        title.setStyleSheet(
+            f"color: {T.TEXT}; font-size: 16px; font-weight: 700;"
+        )
+        v.addWidget(title)
+
+        range_lbl = QLabel(f"Zakres: {m.t1:.2f} – {m.t2:.2f} s")
+        range_lbl.setStyleSheet(f"color: {T.TEXT_MUTED}; font-size: 12px;")
+        v.addWidget(range_lbl)
+        v.addSpacing(6)
+
+        question = QLabel("Czy diagnoza AI jest poprawna?")
+        question.setStyleSheet(
+            f"color: {T.TEXT}; font-size: 13px; font-weight: 600;"
+        )
+        v.addWidget(question)
+
+        rb_correct = QRadioButton("Poprawna")
+        rb_wrong = QRadioButton("Błędna")
+        rb_unsure = QRadioButton("Niepewna")
+        rb_correct.setChecked(True)
+        bg = QButtonGroup(dlg)
+        for rb in (rb_correct, rb_wrong, rb_unsure):
+            bg.addButton(rb)
+            v.addWidget(rb)
+
+        v.addSpacing(6)
+        comment_lbl = QLabel("Komentarz (opcjonalnie):")
+        comment_lbl.setStyleSheet(
+            f"color: {T.TEXT_MUTED}; font-size: 12px;"
+        )
+        v.addWidget(comment_lbl)
+        note = QTextEdit()
+        note.setFixedHeight(90)
+        v.addWidget(note)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addStretch()
+        cancel = QPushButton("Anuluj")
+        cancel.clicked.connect(dlg.reject)
+        save = QPushButton("Zapisz")
+        save.setDefault(True)
+        save.clicked.connect(dlg.accept)
+        row.addWidget(cancel)
+        row.addWidget(save)
+        v.addLayout(row)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        verdict = "correct" if rb_correct.isChecked() else (
+            "wrong" if rb_wrong.isChecked() else "unsure")
+        import os, json
+        from datetime import datetime
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        path = os.path.join(log_dir, "feedback.jsonl")
+        record = {
+            "ts": datetime.now().isoformat(),
+            "marking_id": marking_id,
+            "label": m.label,
+            "lead": m.lead,
+            "t1": m.t1,
+            "t2": m.t2,
+            "probs": m.probs,
+            "verdict": verdict,
+            "note": note.toPlainText().strip(),
+            "file": getattr(self, "filename", None),
+        }
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            QMessageBox.warning(self, "Błąd", f"Nie udało się zapisać opinii: {exc}")
 
     def _on_marking_edited(self, marking_id: str, field: str, value: str):
         self._marking_store.edit(marking_id, **{field: value})
@@ -1439,12 +1696,38 @@ class ViewerPage(QWidget):
 
     def _on_cell_double_click(self, lead: str, time: float):
         """Double-click on cell — jump to focus single-lead view of that lead."""
+        self._save_view_snapshot()
         self._focus_lead = lead
         self._last_clicked_lead = lead
         self._layout_id = "focus_1L"
         self.layout_switcher.set_layout("focus_1L")
         self.layout_switcher.set_focus_lead(lead)
         self.time_pos = max(0, time - self._window_1 / 2)
+        self._restore_scrubber_range()
+        self._apply_layout()
+
+    def _save_view_snapshot(self):
+        """Snapshot multi-lead view before jumping to focus_1L. No-op if
+        already in focus_1L (would overwrite the meaningful snapshot)."""
+        if self._layout_id == "focus_1L":
+            return
+        self._prev_view_snapshot = {
+            "layout_id": self._layout_id,
+            "visible_leads": list(self._visible_leads),
+            "focus_lead": self._focus_lead,
+        }
+
+    def _restore_view_snapshot(self):
+        snap = self._prev_view_snapshot
+        if not snap:
+            return
+        self._prev_view_snapshot = None
+        self._layout_id = snap["layout_id"]
+        self._visible_leads = list(snap["visible_leads"])
+        self._focus_lead = snap["focus_lead"]
+        self.layout_switcher.set_layout(self._layout_id)
+        self.layout_switcher.set_visible_leads(self._visible_leads)
+        self.layout_switcher.set_focus_lead(self._focus_lead)
         self._restore_scrubber_range()
         self._apply_layout()
 
@@ -1461,13 +1744,21 @@ class ViewerPage(QWidget):
             }}
             QMenu::item {{
                 padding: 6px 16px; border-radius: 4px;
+                color: {T.TEXT};
             }}
             QMenu::item:selected {{
                 background: {T.BG_SECONDARY};
             }}
+            QMenu::item:disabled {{
+                color: {T.TEXT_DIM};
+                background: transparent;
+            }}
         """)
         reset_action = menu.addAction("Resetuj powiększenie")
         reset_action.triggered.connect(self._reset_zoom)
+        back_action = menu.addAction("Powrót do poprzedniego widoku")
+        back_action.setEnabled(self._prev_view_snapshot is not None)
+        back_action.triggered.connect(self._restore_view_snapshot)
         menu.exec(QPoint(int(gx), int(gy)))
 
     _ZOOM_STEPS = [0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 15.0, 20.0, 30.0]
@@ -2267,17 +2558,29 @@ class ViewerPage(QWidget):
         if self._hold_handler:
             self._hold_handler()
 
-    # ── Navbar pause button ──────────────────────────────
+    # ── Navbar play/pause button ──────────────────────────
     def _on_navbar_pause(self):
-        if not self._live:
+        """Unified live-preview toggle. Starts live mode if off, otherwise
+        pauses/resumes the sweep without altering layout or zoom."""
+        if self.signal is None:
             return
-        self._monitor_playing = not self._monitor_playing
+        if not self._live:
+            # Capture current zoom so live preserves it (no jump on start)
+            current = self._window_1 if self._is_focus() else self._window_12
+            if current > 0:
+                self._monitor_window = current
+            self._on_live_toggled(True)
+            self.pause_btn.setText("\u275a\u275a")
+            return
+        # Already in live mode — toggle play/pause of the sweep.
         if self._monitor_playing:
+            self._monitor_timer.stop()
+            self._monitor_playing = False
+            self.pause_btn.setText("\u25b6")
+        else:
+            self._monitor_playing = True
             self._monitor_timer.start()
             self.pause_btn.setText("\u275a\u275a")
-        else:
-            self._monitor_timer.stop()
-            self.pause_btn.setText("\u25b6")
 
     def _nav_start(self):
         self.time_pos = 0

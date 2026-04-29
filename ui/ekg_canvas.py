@@ -75,6 +75,7 @@ class EkgCellCanvas(QWidget):
         self.hovered_marking = None  # marking id (str) or None
         self.selected_marking = None # marking id (str) or None
         self.pending_marker = None   # float time — first click point
+        self._pending_marker_px = None  # pixel x of first click — kept until pending cleared
         self.selection_preview = None  # (t1, t2) — live selection (not yet committed)
         self.selection_mode = False  # only enabled on single_lead canvas
         self._drag_active = False    # True while click-drag is in progress
@@ -111,6 +112,7 @@ class EkgCellCanvas(QWidget):
         self.hovered_marking = None
         self.selected_marking = None
         self.pending_marker = None
+        self._pending_marker_px = None
         self.selection_preview = None
         # Don't reset selection_mode in clear() — it's set by the viewer
         self._drag_active = False
@@ -554,45 +556,70 @@ class EkgCellCanvas(QWidget):
                         p.fillRect(QRectF(ax1, 0, ax2 - ax1, h),
                                          _AUTOSCAN_COLORS[min(code, 2)])
 
-                # Draw autoscan labels — second pass after all regions
+                # Draw autoscan labels — pack into rows to prevent overlap.
                 if self.show_autoscan_labels:
-                    p.setFont(QFont("Menlo", 14, QFont.Bold))
+                    # Adaptive font: smaller cells need smaller text. Clamp
+                    # to a readable range so it never disappears or dominates.
+                    font_pt = max(8, min(12, int(h / 22)))
+                    p.setFont(QFont("Menlo", font_pt, QFont.Bold))
                     fm = p.fontMetrics()
                     line_h = fm.height()
-                    label_idx = 0
+
+                    # 1) Build candidate pills (clipped to visible canvas)
+                    pills = []
                     for region in self.autoscan_regions:
                         ar_s, ar_e, code = region[0], region[1], region[2]
                         label_lines = region[3] if len(region) > 3 else None
                         if code == 0 or not label_lines:
-                            label_idx += 1
                             continue
-
-                        total_h = line_h * len(label_lines) + 6
                         max_tw = max(fm.horizontalAdvance(ln) for ln in label_lines)
-                        pill_w = max_tw + 16
-
-                        # Regions are already merged and non-overlapping —
-                        # center the label horizontally on the region.
+                        pill_w = max_tw + 10
+                        pill_h = line_h * len(label_lines) + 4
                         t_anchor = ar_s + (ar_e - ar_s) * 0.5
                         cx = sig_s_a + ((t_anchor - self.t_start) / duration) * sig_w_a
                         pill_x = cx - pill_w / 2
+                        if pill_x + pill_w < sig_s_a or pill_x > w:
+                            continue
+                        if pill_x < sig_s_a:
+                            pill_x = sig_s_a
+                        if pill_x + pill_w > w:
+                            pill_x = w - pill_w
+                        pills.append({
+                            "x": pill_x, "w": pill_w, "h": pill_h,
+                            "lines": label_lines,
+                        })
 
-                        # Always at bottom — leave room for the time ruler
-                        by = h - total_h - 22
+                    # 2) First-fit row packing by ascending x
+                    pills.sort(key=lambda pp: pp["x"])
+                    level_ends: list[float] = []
+                    for pp in pills:
+                        chosen = None
+                        for li, le in enumerate(level_ends):
+                            if pp["x"] >= le + 4:
+                                chosen = li
+                                break
+                        if chosen is None:
+                            chosen = len(level_ends)
+                            level_ends.append(pp["x"] + pp["w"])
+                        else:
+                            level_ends[chosen] = pp["x"] + pp["w"]
+                        pp["level"] = chosen
 
-                        label_idx += 1
-
-                        if pill_x + pill_w > sig_s_a and pill_x < w:
-                            bg = QColor(T.WHITE)
-                            bg.setAlpha(220)
-                            p.fillRect(
-                                QRectF(pill_x, by - 3, pill_w, total_h + 6), bg)
-                            p.setPen(QColor(T.TEXT))
-                            for li, line in enumerate(label_lines):
-                                tw = fm.horizontalAdvance(line)
-                                tx = pill_x + (pill_w - tw) / 2
-                                ty = by + (li + 1) * line_h
-                                p.drawText(QPointF(tx, ty), line)
+                    # 3) Stack levels upward from bottom; clamp into canvas
+                    bottom_margin = 18
+                    bg = QColor(T.WHITE)
+                    bg.setAlpha(220)
+                    for pp in pills:
+                        by = h - bottom_margin - (pp["level"] + 1) * (pp["h"] + 4)
+                        if by < 2:
+                            by = 2
+                        p.fillRect(QRectF(pp["x"], by - 2, pp["w"], pp["h"] + 4), bg)
+                        p.setPen(QColor(T.TEXT))
+                        for li, line in enumerate(pp["lines"]):
+                            tw = fm.horizontalAdvance(line)
+                            tx = pp["x"] + (pp["w"] - tw) / 2
+                            ty = by + (li + 1) * line_h - 2
+                            p.drawText(QPointF(tx, ty), line)
 
         # Ground truth annotation brackets
         if self.gt_annotations and self.show_autoscan_labels:
@@ -709,6 +736,7 @@ class EkgCellCanvas(QWidget):
         if event.button() == Qt.RightButton:
             if self.pending_marker is not None or self.selection_preview is not None:
                 self.pending_marker = None
+                self._pending_marker_px = None
                 self.selection_preview = None
                 self._drag_active = False
                 self._drag_start_px = None
@@ -728,18 +756,36 @@ class EkgCellCanvas(QWidget):
 
                 if self.selection_mode:
                     if self.pending_marker is not None:
-                        # Second click — complete selection
-                        t1 = min(self.pending_marker, t)
-                        t2 = max(self.pending_marker, t)
-                        self.selection_preview = (t1, t2)
-                        self.pending_marker = None
-                        self._drag_active = False
-                        self._drag_start_px = None
-                        self.selection_completed.emit(t1, t2)
-                        self.update()
+                        # Second click — complete selection.
+                        # If second click is on top of the first (same px),
+                        # treat as start of a double-click; discard pending so
+                        # mouseDoubleClickEvent can handle navigation without
+                        # leaving a tiny spurious annotation behind.
+                        same_spot = (
+                            self._pending_marker_px is not None
+                            and abs(event.position().x() - self._pending_marker_px) < 5
+                        )
+                        if same_spot:
+                            self.pending_marker = None
+                            self._pending_marker_px = None
+                            self.selection_preview = None
+                            self._drag_active = False
+                            self._drag_start_px = None
+                            self.update()
+                        else:
+                            t1 = min(self.pending_marker, t)
+                            t2 = max(self.pending_marker, t)
+                            self.selection_preview = (t1, t2)
+                            self.pending_marker = None
+                            self._pending_marker_px = None
+                            self._drag_active = False
+                            self._drag_start_px = None
+                            self.selection_completed.emit(t1, t2)
+                            self.update()
                     else:
                         # First click — set pending marker, start potential drag
                         self.pending_marker = t
+                        self._pending_marker_px = event.position().x()
                         self.selection_preview = None
                         self._drag_active = True
                         self._drag_start_px = event.position().x()
@@ -772,6 +818,7 @@ class EkgCellCanvas(QWidget):
                     t2 = max(self.pending_marker, t)
                     self.selection_preview = (t1, t2)
                     self.pending_marker = None
+                    self._pending_marker_px = None
                     self._drag_active = False
                     self._drag_start_px = None
                     self.selection_completed.emit(t1, t2)
@@ -962,16 +1009,19 @@ class TwelveLeadGrid(QWidget):
 
         if lid == "grid_3x4":
             leads = self._visible_leads or ALL_LEADS_ORDER
-            rows = [leads[i:i + 3] for i in range(0, min(12, len(leads)), 3)]
+            cols = 1 if len(leads) == 3 else 3
+            rows = [leads[i:i + cols] for i in range(0, min(12, len(leads)), cols)]
         elif lid == "grid_2x6":
             leads = self._visible_leads or ALL_LEADS_ORDER
-            rows = [leads[i:i + 2] for i in range(0, min(12, len(leads)), 2)]
+            cols = 1 if len(leads) == 3 else 2
+            rows = [leads[i:i + cols] for i in range(0, min(12, len(leads)), cols)]
         elif lid == "stack_1xN":
             leads = self._visible_leads or ["II", "V1", "V5"]
             rows = [[l] for l in leads]
         else:
             leads = self._visible_leads or ALL_LEADS_ORDER
-            rows = [leads[i:i + 3] for i in range(0, min(12, len(leads)), 3)]
+            cols = 1 if len(leads) == 3 else 3
+            rows = [leads[i:i + cols] for i in range(0, min(12, len(leads)), cols)]
         show_rhythm = False
 
         # Hide all cells first; show only those used in rows
@@ -1035,10 +1085,10 @@ class TwelveLeadGrid(QWidget):
         self.set_analysis_overlay(None, None)
 
     def set_autoscan_regions(self, regions: list):
-        """Set colored autoscan regions on all cells. Labels only on rhythm strip."""
+        """Set colored autoscan regions + labels on every cell + rhythm strip."""
         for cell in self.cells.values():
             cell.autoscan_regions = regions
-            cell.show_autoscan_labels = False
+            cell.show_autoscan_labels = True
             cell.update()
         self.rhythm.autoscan_regions = regions
         self.rhythm.show_autoscan_labels = True

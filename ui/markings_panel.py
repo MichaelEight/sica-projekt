@@ -95,6 +95,61 @@ class _FilterPills(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Themed context-menu row (lets us color individual items, e.g. red "Usuń")
+# ---------------------------------------------------------------------------
+
+class _MenuRow(QWidget):
+    """Custom menu item; clicked emits a signal. Used inside QMenu via
+    QWidgetAction so we can color text per row (Qt menu QSS can't target
+    individual items)."""
+
+    clicked = Signal()
+
+    def __init__(self, text: str, color: str, parent=None):
+        super().__init__(parent)
+        self._text = text
+        self._color = color
+        self._hover = False
+        self.setMouseTracking(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(28)
+        # Width hint based on text — menu auto-sizes to its widest row.
+        from PySide6.QtGui import QFontMetrics
+        from PySide6.QtWidgets import QApplication
+        fm = QFontMetrics(QApplication.font())
+        self._text_w = fm.horizontalAdvance(text)
+        self.setMinimumWidth(self._text_w + 36)
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+        super().leaveEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(e)
+
+    def paintEvent(self, e):
+        from PySide6.QtGui import QPainter, QColor
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        if self._hover:
+            bg = QColor(T.BLUE_BG)
+            p.setBrush(bg)
+            p.setPen(Qt.NoPen)
+            p.drawRoundedRect(self.rect().adjusted(2, 1, -2, -1), 4, 4)
+        p.setPen(QColor(self._color))
+        p.drawText(self.rect().adjusted(14, 0, -14, 0),
+                   Qt.AlignVCenter | Qt.AlignLeft, self._text)
+
+
+# ---------------------------------------------------------------------------
 # Single marking card
 # ---------------------------------------------------------------------------
 
@@ -105,6 +160,8 @@ class _MarkingCard(QFrame):
     hovered = Signal(str)
     unhovered = Signal()
     delete_clicked = Signal(str)
+    focus_requested = Signal(str)
+    feedback_requested = Signal(str)
 
     def __init__(self, marking, parent=None):
         super().__init__(parent)
@@ -279,8 +336,37 @@ class _MarkingCard(QFrame):
     # -- events --
 
     def mousePressEvent(self, event):
-        self.clicked.emit(self.marking.id)
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self.marking.id)
         super().mousePressEvent(event)
+
+    def contextMenuEvent(self, event):
+        from PySide6.QtWidgets import QMenu, QWidgetAction
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            f"QMenu {{ background: {T.WHITE}; border: 1px solid {T.BORDER};"
+            f"  border-radius: 6px; padding: 4px; }}"
+            f"QMenu::separator {{ height: 1px; background: {T.BORDER_LIGHT};"
+            f"  margin: 4px 6px; }}"
+        )
+
+        def add_row(label: str, color: str, callback):
+            row = _MenuRow(label, color, menu)
+            row.clicked.connect(menu.close)
+            row.clicked.connect(callback)
+            wa = QWidgetAction(menu)
+            wa.setDefaultWidget(row)
+            menu.addAction(wa)
+
+        add_row("Pokaż na wykresie", T.TEXT,
+                lambda: self.focus_requested.emit(self.marking.id))
+        if self.marking.type == "scan":
+            add_row("Zgłoś opinię", T.TEXT,
+                    lambda: self.feedback_requested.emit(self.marking.id))
+        menu.addSeparator()
+        add_row("Usuń", T.RED,
+                lambda: self.delete_clicked.emit(self.marking.id))
+        menu.exec(event.globalPos())
 
     def enterEvent(self, event):
         self.hovered.emit(self.marking.id)
@@ -305,6 +391,7 @@ class MarkingsPanel(QWidget):
     marking_edited = Signal(str, str, str)  # id, field, new_value
     annotation_created = Signal(str, str, str, float, float)  # lead, category, note, t1, t2
     marking_focus = Signal(str)  # id — scroll canvas to show this marking
+    marking_feedback_requested = Signal(str)  # id — open feedback dialog (scan only)
     undo_requested = Signal()
     redo_requested = Signal()
 
@@ -743,6 +830,8 @@ class MarkingsPanel(QWidget):
             card.hovered.connect(self.marking_hovered.emit)
             card.unhovered.connect(self.marking_unhovered.emit)
             card.delete_clicked.connect(self.marking_deleted.emit)
+            card.focus_requested.connect(self.marking_focus.emit)
+            card.feedback_requested.connect(self.marking_feedback_requested.emit)
             if self._selected_id and m.id == self._selected_id:
                 card.set_selected(True)
             self._card_layout.addWidget(card)

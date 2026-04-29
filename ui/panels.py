@@ -19,16 +19,17 @@ class InfoPanel(QWidget):
         self.setFixedWidth(160)
         self.setStyleSheet(f"background: {T.WHITE}; border-right: 1px solid {T.BORDER};")
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(4)
-
         self._section_headers = []
         self._field_labels = []
-        self._patient_header = section_header("Pacjent")
-        self._section_headers.append(self._patient_header)
-        layout.addWidget(self._patient_header)
         self._patient_fields = {}
+        self._meas_labels = {}
+
+        # Patient sub-widget: just the rows, no header (header lives outside
+        # so it can be replaced by a collapsible-section header in the host).
+        self.patient_widget = QWidget()
+        pat_lay = QVBoxLayout(self.patient_widget)
+        pat_lay.setContentsMargins(0, 0, 0, 0)
+        pat_lay.setSpacing(4)
         for key, label in [
             ("name", "Imię"),
             ("id", "ID"),
@@ -36,15 +37,13 @@ class InfoPanel(QWidget):
             ("sex", "Płeć"),
             ("date", "Data"),
         ]:
-            row = self._editable_info_row(key, label)
-            layout.addWidget(row)
+            pat_lay.addWidget(self._editable_info_row(key, label))
 
-        layout.addSpacing(10)
-
-        self._meas_header = section_header("Pomiary")
-        self._section_headers.append(self._meas_header)
-        layout.addWidget(self._meas_header)
-        self._meas_labels = {}
+        # Measurements sub-widget: rows only.
+        self.meas_widget = QWidget()
+        meas_lay = QVBoxLayout(self.meas_widget)
+        meas_lay.setContentsMargins(0, 0, 0, 0)
+        meas_lay.setSpacing(4)
         for key, label, val, unit in [
             ("hr", "HR", "", "bpm"),
             ("pr", "PR", "", "ms"),
@@ -55,8 +54,23 @@ class InfoPanel(QWidget):
         ]:
             row = info_row(label, val, unit)
             self._meas_labels[key] = row
-            layout.addWidget(row)
+            meas_lay.addWidget(row)
 
+        # Default standalone arrangement (used when InfoPanel is shown as
+        # its own widget, e.g. report builder). Hosts that want a custom
+        # arrangement reparent patient_widget / meas_widget directly.
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(4)
+        self._patient_header = section_header("Pacjent")
+        self._section_headers.append(self._patient_header)
+        layout.addWidget(self._patient_header)
+        layout.addWidget(self.patient_widget)
+        layout.addSpacing(10)
+        self._meas_header = section_header("Pomiary")
+        self._section_headers.append(self._meas_header)
+        layout.addWidget(self._meas_header)
+        layout.addWidget(self.meas_widget)
         layout.addStretch()
 
     def _editable_info_row(self, key, label):
