@@ -420,22 +420,47 @@ class EkgCellCanvas(QWidget):
 
                 p.setPen(QPen(QColor(T.SIGNAL_COLOR), 1.5))
                 path = QPainterPath()
-                first = True
-                for px_i in range(draw_end):
-                    frac = px_i / sig_w
-                    t = self.t_start + frac * duration
-                    sample_idx = int(t * self.fs)
-                    sample_idx = max(0, min(sample_idx, n_samples - 1))
-                    v = self.signal[sample_idx]
-                    py = v_to_y(v)
-                    if first:
-                        path.moveTo(sig_start + px_i, py)
-                        first = False
-                    else:
-                        path.lineTo(sig_start + px_i, py)
+                samples_per_px = (self.fs * duration) / sig_w if sig_w > 0 else 1.0
+                if samples_per_px > 2.0 and draw_end > 0:
+                    # Aggregate min/max per pixel — prevents peak loss when
+                    # multiple samples fall under one pixel (aliasing on scroll).
+                    first = True
+                    inv_sig_w = 1.0 / sig_w
+                    for px_i in range(draw_end):
+                        s0 = int((self.t_start + (px_i * inv_sig_w) * duration) * self.fs)
+                        s1 = int((self.t_start + ((px_i + 1) * inv_sig_w) * duration) * self.fs) + 1
+                        s0 = max(0, min(s0, n_samples - 1))
+                        s1 = max(s0 + 1, min(s1, n_samples))
+                        seg = self.signal[s0:s1]
+                        v_lo = float(seg.min())
+                        v_hi = float(seg.max())
+                        y_lo = v_to_y(v_lo)
+                        y_hi = v_to_y(v_hi)
+                        x = sig_start + px_i
+                        if first:
+                            path.moveTo(x, y_hi)
+                            first = False
+                        else:
+                            path.lineTo(x, y_hi)
+                        path.lineTo(x, y_lo)
+                else:
+                    first = True
+                    for px_i in range(draw_end):
+                        frac = px_i / sig_w
+                        t = self.t_start + frac * duration
+                        sample_idx = int(t * self.fs)
+                        sample_idx = max(0, min(sample_idx, n_samples - 1))
+                        v = self.signal[sample_idx]
+                        py = v_to_y(v)
+                        if first:
+                            path.moveTo(sig_start + px_i, py)
+                            first = False
+                        else:
+                            path.lineTo(sig_start + px_i, py)
                 p.drawPath(path)
 
-                # XAI attention dots — draw on signal trajectory at high-heat samples
+                # XAI attention dots — anchored to heatmap indices (data space)
+                # so positions/sizes don't jitter when scrolling.
                 if self.attention_overlay is not None:
                     ov_ts, ov_te, heat = self.attention_overlay
                     try:
@@ -446,24 +471,30 @@ class EkgCellCanvas(QWidget):
                         n_h = heat_arr.size
                         ov_dur = ov_te - ov_ts
                         thresh = 0.35
+                        # Stride in data time (~0.06s) → fixed dot density on signal,
+                        # invariant to pixel zoom and scroll offset.
+                        min_dot_spacing_s = 0.06
+                        idx_stride = max(1, int(min_dot_spacing_s * n_h / ov_dur))
+                        if self._sweep_pos is not None:
+                            t_cutoff = self.t_start + self._sweep_pos * duration
+                        else:
+                            t_cutoff = self.t_end
                         p.setPen(Qt.NoPen)
-                        for px_i in range(0, draw_end, 2):
-                            frac = px_i / sig_w
-                            t_at = self.t_start + frac * duration
-                            if t_at < ov_ts or t_at > ov_te:
-                                continue
-                            h_idx = int((t_at - ov_ts) / ov_dur * n_h)
-                            if h_idx < 0 or h_idx >= n_h:
-                                continue
+                        for h_idx in range(0, n_h, idx_stride):
                             hv = float(heat_arr[h_idx])
                             if hv < thresh:
                                 continue
+                            t_at = ov_ts + (h_idx + 0.5) / n_h * ov_dur
+                            if t_at < self.t_start or t_at > t_cutoff:
+                                continue
+                            frac = (t_at - self.t_start) / duration
+                            x_px = sig_start + frac * sig_w
                             sample_idx = max(0, min(int(t_at * self.fs), n_samples - 1))
                             py = v_to_y(self.signal[sample_idx])
                             r = 1.5 + hv * 3.5
                             alpha = int(140 + 115 * hv)
                             p.setBrush(QColor(220, 38, 38, alpha))
-                            p.drawEllipse(QPointF(sig_start + px_i, py), r, r)
+                            p.drawEllipse(QPointF(x_px, py), r, r)
 
         # Sweep cursor + old data (monitor mode)
         if self._sweep_pos is not None:

@@ -750,6 +750,18 @@ class MarkingsPanel(QWidget):
         self._card_layout.addStretch()
 
     def _on_card_clicked(self, marking_id: str):
+        # Re-click selected card → deselect
+        if self._selected_id == marking_id:
+            self._selected_id = None
+            for card in self._cards:
+                card.set_selected(False)
+            self._lead_importance_panel.set_data(None)
+            self.marking_selected.emit("")
+            if self._stack.currentIndex() == 2:
+                self._stack.setCurrentIndex(0)
+                self._editing_id = None
+            return
+
         self._selected_id = marking_id
         for card in self._cards:
             card.set_selected(card.marking.id == marking_id)
