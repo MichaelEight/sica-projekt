@@ -170,9 +170,9 @@ class MainWindow(QMainWindow):
                     fn()
             return wrapper
 
-        _sc(Qt.Key_1, _on_viewer(lambda: self.viewer_page.view_seg.set_active(0)))
-        _sc(Qt.Key_2, _on_viewer(lambda: self.viewer_page.view_seg.set_active(1)))
-        _sc(Qt.Key_3, _on_viewer(lambda: self.viewer_page.view_seg.set_active(2)))
+        _sc(Qt.Key_1, _on_viewer(lambda: self.viewer_page._on_layout_changed("grid_4x3")))
+        _sc(Qt.Key_2, _on_viewer(lambda: self.viewer_page._on_layout_changed("focus_1L")))
+        _sc(Qt.Key_3, _on_viewer(lambda: self.viewer_page._on_live_toggled(not self.viewer_page._live)))
         _sc(QKeySequence("Ctrl+Z"), _on_viewer(lambda: self.viewer_page._undo()))
         _sc(QKeySequence("Ctrl+Shift+Z"), _on_viewer(lambda: self.viewer_page._redo()))
         _sc(Qt.Key_Left, _on_viewer(lambda: self.viewer_page._nav_step(-0.2)))
@@ -180,7 +180,7 @@ class MainWindow(QMainWindow):
         _sc(Qt.Key_Home, _on_viewer(self.viewer_page._nav_start))
         _sc(Qt.Key_End, _on_viewer(self.viewer_page._nav_end))
         space_sc = _sc(Qt.Key_Space, _on_viewer(lambda: self.viewer_page._on_navbar_pause()
-                                     if self.viewer_page._view_mode == 2 else None))
+                                     if self.viewer_page._live else None))
         space_sc.setContext(Qt.WindowShortcut)
         _sc(QKeySequence("Ctrl+E"), _on_viewer(self._go_report))
         _sc(QKeySequence("Ctrl+Return"), _on_viewer(self.viewer_page._run_full_analysis))
@@ -195,8 +195,9 @@ class MainWindow(QMainWindow):
                     self.viewer_page._context_menu = None
                     self.viewer_page._clear_selection_preview()
                     return
-                if self.viewer_page._view_mode == 2:
-                    self.viewer_page.view_seg.set_active(0)
+                if self.viewer_page._live:
+                    self.viewer_page._on_live_toggled(False)
+                    self.viewer_page.layout_switcher.set_live(False)
                 else:
                     self.viewer_page._clear_selection_preview()
             elif self.stack.currentIndex() == 2:

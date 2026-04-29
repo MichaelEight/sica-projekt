@@ -801,39 +801,169 @@ class EkgCellCanvas(QWidget):
 
 
 # ── 12-Lead Grid ───────────────────────────────
+STANDARD_GRID_ROWS_4x3 = [
+    ["I", "aVR", "V1", "V4"],
+    ["II", "aVL", "V2", "V5"],
+    ["III", "aVF", "V3", "V6"],
+]
+ALL_LEADS_ORDER = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+
+
 class TwelveLeadGrid(QWidget):
-    """4x3 grid of EKG cells + rhythm strip, matching the v2 12-lead design."""
+    """Multi-layout EKG grid. Default 4x3 + rhythm strip. Supports 3x4, 2x6, 1xN, focus_1L."""
 
     cell_double_clicked = Signal(str, float)  # lead_name, time_seconds
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QFrame
         self.cells: dict[str, EkgCellCanvas] = {}
         self.setStyleSheet(f"background: {T.BG_SECONDARY};")
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(0)
+        from PySide6.QtWidgets import QVBoxLayout, QFrame
+        self._root = QVBoxLayout(self)
+        self._root.setContentsMargins(8, 8, 8, 8)
+        self._root.setSpacing(0)
 
-        grid_rows = [
-            ["I", "aVR", "V1", "V4"],
-            ["II", "aVL", "V2", "V5"],
-            ["III", "aVF", "V3", "V6"],
-        ]
+        self._separators: list = []
+        self._row_layouts: list = []
+
+        # Construct 12 cells once, reuse across layouts.
+        for lead in ALL_LEADS_ORDER:
+            cell = EkgCellCanvas()
+            cell.draw_border = False
+            cell.INSET = 1
+            self.cells[lead] = cell
+            cell.double_clicked.connect(
+                lambda t, v, ln=lead: self.cell_double_clicked.emit(ln, t))
+
+        # Rhythm strip widgets (used in 4x3 layout)
+        self._rhythm_sep = QFrame()
+        self._rhythm_sep.setFixedHeight(3)
+        self._rhythm_sep.setStyleSheet(f"background: {T.ACCENT};")
+        self.rhythm = EkgCellCanvas()
+        self.rhythm.draw_border = False
+        self.rhythm.INSET = 1
+        self.rhythm.setFixedHeight(100)
+        self.rhythm.double_clicked.connect(
+            lambda t, v: self.cell_double_clicked.emit("II", t))
+
+        # Current layout state
+        self._layout_id = "grid_4x3"
+        self._visible_leads: list[str] = list(ALL_LEADS_ORDER)
+        self._focus_lead: str = "II"
+
+        self._apply_layout_widgets()
+
+    # ── Layout management ──
+    def set_layout(self, layout_id: str, visible_leads: list[str] | None = None,
+                   focus_lead: str | None = None):
+        """Switch grid layout. Reparents cells; preserves cell state."""
+        self._layout_id = layout_id
+        if visible_leads is not None:
+            self._visible_leads = [l for l in ALL_LEADS_ORDER if l in visible_leads]
+        if focus_lead is not None and focus_lead in self.cells:
+            self._focus_lead = focus_lead
+        self._apply_layout_widgets()
+
+    def visible_cell_leads(self) -> list[str]:
+        """Return leads currently shown on screen, in display order."""
+        if self._layout_id == "focus_1L":
+            return [self._focus_lead] if self._focus_lead in self.cells else []
+        if self._layout_id == "grid_4x3":
+            return list(ALL_LEADS_ORDER)
+        return list(self._visible_leads)
+
+    def _clear_layout(self):
+        """Remove all widgets from root layout without destroying cells."""
+        from PySide6.QtWidgets import QLayout
+        while self._root.count():
+            item = self._root.takeAt(0)
+            w = item.widget()
+            if w is None:
+                inner = item.layout()
+                if inner is not None:
+                    self._strip_inner(inner)
+            else:
+                w.setParent(None)
+        # Drop separators (recreated next layout)
+        for sep in self._separators:
+            sep.setParent(None)
+            sep.deleteLater()
         self._separators = []
-        for ri, row_leads in enumerate(grid_rows):
+        for lay in self._row_layouts:
+            lay.setParent(None)
+            lay.deleteLater()
+        self._row_layouts = []
+        # Detach cells + rhythm
+        for cell in self.cells.values():
+            cell.setParent(None)
+            cell.show()
+        self.rhythm.setParent(None)
+        self._rhythm_sep.setParent(None)
+
+    def _strip_inner(self, inner):
+        from PySide6.QtWidgets import QFrame
+        while inner.count():
+            it = inner.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.setParent(None)
+
+    def _apply_layout_widgets(self):
+        """Build current layout from layout_id. Rebuilds row layouts each time."""
+        from PySide6.QtWidgets import QHBoxLayout, QFrame, QVBoxLayout
+
+        self._clear_layout()
+        lid = self._layout_id
+
+        if lid == "focus_1L":
+            lead = self._focus_lead if self._focus_lead in self.cells else "II"
+            for c in self.cells.values():
+                c.draw_border = False
+                c.hide()
+            cell = self.cells[lead]
+            cell.show_cal = True
+            cell.draw_border = True
+            cell.show()
+            self._root.addWidget(cell, stretch=1)
+            return
+        # Reset border for non-focus layouts
+        for c in self.cells.values():
+            c.draw_border = False
+
+        if lid == "grid_4x3":
+            rows = STANDARD_GRID_ROWS_4x3
+            show_rhythm = True
+        elif lid == "grid_3x4":
+            leads = self._visible_leads or ALL_LEADS_ORDER
+            rows = [leads[i:i + 3] for i in range(0, min(12, len(leads)), 3)]
+            show_rhythm = False
+        elif lid == "grid_2x6":
+            leads = self._visible_leads or ALL_LEADS_ORDER
+            rows = [leads[i:i + 2] for i in range(0, min(12, len(leads)), 2)]
+            show_rhythm = False
+        elif lid == "stack_1xN":
+            leads = self._visible_leads or ["II", "V1", "V5"]
+            rows = [[l] for l in leads]
+            show_rhythm = False
+        else:
+            rows = STANDARD_GRID_ROWS_4x3
+            show_rhythm = True
+
+        # Hide all cells first; show only those used in rows
+        for cell in self.cells.values():
+            cell.hide()
+
+        n_rows = len(rows)
+        for ri, row_leads in enumerate(rows):
             row_layout = QHBoxLayout()
             row_layout.setSpacing(0)
             for ci, lead in enumerate(row_leads):
-                cell = EkgCellCanvas()
-                cell.draw_border = False
-                cell.INSET = 1
-                self.cells[lead] = cell
-                # Connect double-click to grid-level signal
-                _lead = lead  # capture for closure
-                cell.double_clicked.connect(
-                    lambda t, v, ln=_lead: self.cell_double_clicked.emit(ln, t))
+                if lead not in self.cells:
+                    continue
+                cell = self.cells[lead]
+                cell.show_cal = True
+                cell.show()
                 row_layout.addWidget(cell)
                 if ci < len(row_leads) - 1:
                     vsep = QFrame()
@@ -841,26 +971,22 @@ class TwelveLeadGrid(QWidget):
                     vsep.setStyleSheet(f"background: {T.SEPARATOR};")
                     self._separators.append(vsep)
                     row_layout.addWidget(vsep)
-            layout.addLayout(row_layout, stretch=1)
-            if ri < len(grid_rows) - 1:
+            self._root.addLayout(row_layout, stretch=1)
+            self._row_layouts.append(row_layout)
+            if ri < n_rows - 1:
                 hsep = QFrame()
                 hsep.setFixedHeight(3)
                 hsep.setStyleSheet(f"background: {T.SEPARATOR};")
                 self._separators.append(hsep)
-                layout.addWidget(hsep)
+                self._root.addWidget(hsep)
 
-        # Rhythm strip — separated visually
-        self._rhythm_sep = QFrame()
-        self._rhythm_sep.setFixedHeight(3)
-        self._rhythm_sep.setStyleSheet(f"background: {T.ACCENT};")
-        layout.addWidget(self._rhythm_sep)
-        self.rhythm = EkgCellCanvas()
-        self.rhythm.draw_border = False
-        self.rhythm.INSET = 1
-        self.rhythm.setFixedHeight(100)
-        self.rhythm.double_clicked.connect(
-            lambda t, v: self.cell_double_clicked.emit("II", t))
-        layout.addWidget(self.rhythm)
+        if show_rhythm:
+            self._rhythm_sep.setStyleSheet(f"background: {T.ACCENT};")
+            self._root.addWidget(self._rhythm_sep)
+            self.rhythm.show()
+            self._root.addWidget(self.rhythm)
+        else:
+            self.rhythm.hide()
 
     def apply_theme(self):
         self.setStyleSheet(f"background: {T.BG_SECONDARY};")
@@ -931,11 +1057,6 @@ class TwelveLeadGrid(QWidget):
                    time_pos: float = 0.0, window: float = 2.5,
                    v_min: float = None, v_max: float = None):
         """Set real or demo signal data into all cells."""
-        grid_rows = [
-            ["I", "aVR", "V1", "V4"],
-            ["II", "aVL", "V2", "V5"],
-            ["III", "aVF", "V3", "V6"],
-        ]
         duration = signal.shape[0] / fs
         t_start = max(0.0, time_pos)
         t_end = min(duration, t_start + window)
@@ -950,22 +1071,18 @@ class TwelveLeadGrid(QWidget):
             v_min = global_min - pad
             v_max = global_max + pad
 
-        # Clear cells for leads not in this file
+        # Fill data into every cell whose lead is present in the file
         for lead, cell in self.cells.items():
-            if lead not in leads:
+            if lead in leads:
+                lead_idx = leads.index(lead)
+                cell.v_min = v_min
+                cell.v_max = v_max
+                cell.set_data(lead, signal[:, lead_idx], fs, t_start, t_end)
+            else:
                 cell.clear()
-                cell.lead_name = lead  # keep label to show it's empty
+                cell.lead_name = lead
 
-        for r, row_leads in enumerate(grid_rows):
-            for c, lead in enumerate(row_leads):
-                if lead in self.cells and lead in leads:
-                    lead_idx = leads.index(lead)
-                    self.cells[lead].v_min = v_min
-                    self.cells[lead].v_max = v_max
-                    self.cells[lead].set_data(lead, signal[:, lead_idx],
-                                              fs, t_start, t_end)
-
-        # Rhythm strip: lead II, full duration
+        # Rhythm strip: lead II, current window
         if "II" in leads:
             ii_idx = leads.index("II")
             self.rhythm.v_min = v_min
