@@ -53,8 +53,16 @@ class Inception1DNet(nn.Module):
         self.block6 = InceptionBlock(128, nb_filters=32)
         self.skip2_bn = nn.BatchNorm1d(128)
 
-        self.dropout = nn.Dropout(p=dropout)
-        self.head = nn.Linear(128, num_classes)
+# Concat-pooling (mean+max) doubles channels from 128 -> 256, so use a
+# small head like in PTB-XL benchmark: 256->128->BN->DO(0.25)->ReLU->DO(0.5)->num_classes
+        self.head = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.Dropout(p=0.25),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.5),
+            nn.Linear(128, num_classes),
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.stem(x)
@@ -73,8 +81,10 @@ class Inception1DNet(nn.Module):
         x = self.block6(x)
         x = torch.relu(self.skip2_bn(x + skip2))
 
-        x = torch.mean(x, dim=2)
-        x = self.dropout(x)
+        # concat-pooling: concatenate mean and max along temporal dim (dim=2)
+        x_mean = torch.mean(x, dim=2)
+        x_max = torch.max(x, dim=2)[0]
+        x = torch.cat([x_mean, x_max], dim=1)
         return self.head(x)
 
     @torch.no_grad()
