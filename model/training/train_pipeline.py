@@ -4,6 +4,8 @@ import argparse
 import csv
 import json
 import os
+import itertools
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +29,7 @@ from model.training.schema import infer_file_columns, infer_label_columns
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = PROJECT_ROOT / "data" / "training"
 ANNOTATIONS_DIR = PROJECT_ROOT / "model" / "annotations"
+RUNS_DIR = ANNOTATIONS_DIR / "runs"
 
 
 class FocalLoss(nn.Module):
@@ -208,6 +211,37 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-plots", action="store_true", help="Pomiń rysowanie grafik (tylko logi).")
     parser.add_argument("--loss", type=str, default="focal", choices=["focal", "bce"], help="Funkcja straty: 'focal' (Focal Loss) lub 'bce' (BCEWithLogitsLoss z tolerancją)")
     parser.add_argument("--num-workers", type=int, default=4, help="Liczba workerów DataLoadera.")
+    parser.add_argument("--sweep", action="store_true", help="Włącz tryb sweep (kombinacje hiperparametrów).")
+    parser.add_argument(
+        "--widths",
+        type=str,
+        default="",
+        help="Lista szerokości sieci (nb_filters), np. '32,48,64'.",
+    )
+    parser.add_argument(
+        "--kernel-sets",
+        type=str,
+        default="",
+        help="Lista zestawów kernel sizes, np. '9-19-39,10-20-40'.",
+    )
+    parser.add_argument(
+        "--losses",
+        type=str,
+        default="",
+        help="Lista funkcji straty, np. 'focal,bce'.",
+    )
+    parser.add_argument(
+        "--sweep-max-epochs",
+        type=int,
+        default=200,
+        help="Maksymalna liczba epok w trybie sweep (jeśli nie nadpiszesz --max-epochs).",
+    )
+    parser.add_argument(
+        "--run-name",
+        type=str,
+        default=None,
+        help="Opcjonalna nazwa runu (dla pojedynczego uruchomienia).",
+    )
     return parser.parse_args()
 
 
@@ -220,14 +254,94 @@ def _derive_columns_fast() -> tuple[list[str], dict[str, str | None]]:
     return label_columns, file_columns
 
 
+def _parse_int_list(raw: str) -> list[int]:
+    if not raw:
+        return []
+    return [int(val.strip()) for val in raw.split(",") if val.strip()]
 
-def _ensure_output_dirs() -> None:
-    os.makedirs(ANNOTATIONS_DIR, exist_ok=True)
+
+def _parse_kernel_sets(raw: str) -> list[tuple[int, int, int]]:
+    if not raw:
+        return []
+    sets = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        parts = [p for p in re.split(r"[-xX:]", token) if p]
+        if len(parts) != 3:
+            raise ValueError(f"Nieprawidlowy zestaw kernel sizes: '{token}' (oczekiwano 3 liczb)")
+        sets.append(tuple(int(p) for p in parts))
+    return sets
+
+
+def _parse_str_list(raw: str) -> list[str]:
+    if not raw:
+        return []
+    return [val.strip() for val in raw.split(",") if val.strip()]
+
+
+def _build_run_name(
+    width: int,
+    kernel_sizes: tuple[int, int, int],
+    loss_name: str,
+    timestamp: str,
+    prefix: str = "run",
+) -> str:
+    k1, k2, k3 = kernel_sizes
+    return f"{prefix}_{timestamp}_w{width}_k{k1}-{k2}-{k3}_{loss_name}"
+
+
+def _save_ranking(
+    results: list[dict[str, object]],
+    output_dir: Path,
+    metric_key: str,
+    filename: str,
+) -> None:
+    rows = []
+    for res in results:
+        value = res.get(metric_key)
+        rows.append(
+            {
+                "run_name": res.get("run_name"),
+                "output_dir": res.get("output_dir"),
+                "nb_filters": res.get("nb_filters"),
+                "kernel_sizes": res.get("kernel_sizes"),
+                "loss": res.get("loss"),
+                metric_key: value,
+            }
+        )
+
+    def _rank_value(item: dict[str, object]) -> float:
+        value = item.get(metric_key)
+        if value is None:
+            return float("-inf")
+        try:
+            val = float(value)
+        except (TypeError, ValueError):
+            return float("-inf")
+        if not np.isfinite(val):
+            return float("-inf")
+        return val
+
+    rows.sort(key=_rank_value, reverse=True)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / filename
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["run_name", "output_dir", "nb_filters", "kernel_sizes", "loss", metric_key])
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 
-def _load_or_refresh_metadata_inspection() -> dict[str, object]:
-    cache_path = ANNOTATIONS_DIR / "metadata_inspection.json"
+def _ensure_output_dirs(output_dir: Path) -> None:
+    os.makedirs(output_dir, exist_ok=True)
+
+
+
+def _load_or_refresh_metadata_inspection(cache_dir: Path) -> dict[str, object]:
+    cache_path = cache_dir / "metadata_inspection.json"
     current_cols = list(pd.read_csv(DATA_ROOT / "train" / "train_metadata.csv", nrows=0).columns)
     current_label_columns = infer_label_columns(current_cols)
     current_file_columns = infer_file_columns(current_cols)
@@ -317,7 +431,7 @@ def _append_train_log(log_path: Path, epoch: int, train_loss: float, val_loss: f
 
 
 
-def _plot_curves(history: dict[str, list[float]]) -> None:
+def _plot_curves(history: dict[str, list[float]], output_dir: Path) -> None:
     epochs = np.arange(1, len(history["train_loss"]) + 1)
     val_losses = np.asarray(history["val_loss"], dtype=np.float32)
     val_mask = np.isfinite(val_losses)
@@ -333,17 +447,25 @@ def _plot_curves(history: dict[str, list[float]]) -> None:
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(ANNOTATIONS_DIR / "loss_curve.png", dpi=150)
+    plt.savefig(output_dir / "loss_curve.png", dpi=150)
     plt.close()
 
 
 
-def _save_checkpoint(path: Path, model: nn.Module, optimizer: torch.optim.Optimizer, epoch: int, best_val_loss: float) -> None:
+def _save_checkpoint(
+    path: Path,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    epoch: int,
+    best_val_auc: float,
+    best_val_loss: float,
+) -> None:
     torch.save(
         {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
+            "best_val_auc": best_val_auc,
             "best_val_loss": best_val_loss,
         },
         path,
@@ -412,44 +534,36 @@ def _run_epoch(
     return mean_loss, y_true, y_prob
 
 
-
-def main() -> None:
-    args = _parse_args()
-
-    _ensure_output_dirs()
-
-    # ===== GPU INFO =====
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if torch.cuda.is_available():
-        gpu_name = torch.cuda.get_device_name(0)
-        gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        print(f"[GPU] Karta graficzna: {gpu_name} | Pamięć: {gpu_memory:.2f} GB")
-    else:
-        print("[GPU] Brak karty graficznej - będzie użyty CPU")
-
-    if args.sanity:
-        label_columns, file_columns = _derive_columns_fast()
-    else:
-        inspection = _load_or_refresh_metadata_inspection()
-        label_columns = inspection["label_columns"]  # type: ignore[assignment]
-        file_columns = inspection["file_columns"]  # type: ignore[assignment]
+def _run_training(
+    output_dir: Path,
+    label_columns: list[str],
+    file_columns: dict[str, str | None],
+    device: torch.device,
+    args: argparse.Namespace,
+    nb_filters: int,
+    kernel_sizes: tuple[int, int, int],
+    loss_type: str,
+    run_name: str,
+    allow_resume: bool,
+) -> dict[str, object]:
+    _ensure_output_dirs(output_dir)
 
     train_loader, val_loader, test_loader, train_ds = _build_dataloaders(
         label_columns, file_columns, num_workers=args.num_workers
     )
 
-    # BCEWithLogitsLoss is correct for independent multi-label targets.
-    # CrossEntropyLoss/Softmax assume exactly one true class per sample, which is wrong here.
     pos_weight = compute_pos_weight_tensor(train_ds)
     label_stats = compute_label_stats(train_ds)
     class_prior_cpu, focal_alpha_cpu, class_weight_cpu = _build_class_frequency_tensors(label_stats, label_columns)
 
-    save_json(ANNOTATIONS_DIR / "class_names.json", label_columns)
+    save_json(output_dir / "class_names.json", label_columns)
 
-    model = Inception1DNet(num_classes=len(label_columns)).to(device)
-    
-    # Select loss function based on argument
-    loss_type = args.loss
+    model = Inception1DNet(
+        num_classes=len(label_columns),
+        nb_filters=nb_filters,
+        kernel_sizes=kernel_sizes,
+    ).to(device)
+
     if loss_type == "focal":
         criterion = FocalLoss(
             alpha=focal_alpha_cpu.to(device),
@@ -465,7 +579,6 @@ def main() -> None:
             "(alpha/prior/class_weight)"
         )
     else:
-        # TolerantImbalanceBCELoss
         criterion = TolerantImbalanceBCELoss(
             pos_weight=pos_weight.to(device),
             tolerance=0.01,
@@ -476,25 +589,25 @@ def main() -> None:
             logit_temperature=1.2,
         )
         print("[LOSS] Using TolerantImbalanceBCELoss with auto class-frequency weighting")
-    
+
     optimizer = AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
 
     start_epoch = 1
+    best_val_auc = float("-inf")
     best_val_loss = float("inf")
 
-    # Resume from checkpoint if provided
-    resume_checkpoint = args.resume
-    if resume_checkpoint:
-        if os.path.exists(resume_checkpoint):
-            checkpoint = torch.load(resume_checkpoint, map_location=device)
+    if allow_resume and args.resume:
+        if os.path.exists(args.resume):
+            checkpoint = torch.load(args.resume, map_location=device)
             model.load_state_dict(checkpoint["model_state_dict"])
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
             start_epoch = checkpoint.get("epoch", 1) + 1
+            best_val_auc = checkpoint.get("best_val_auc", float("-inf"))
             best_val_loss = checkpoint.get("best_val_loss", float("inf"))
-            print(f"[RESUME] Loaded checkpoint from {resume_checkpoint}, starting from epoch {start_epoch}")
+            print(f"[RESUME] Loaded checkpoint from {args.resume}, starting from epoch {start_epoch}")
         else:
-            print(f"[WARN] Checkpoint {resume_checkpoint} not found, starting fresh")
-    
+            print(f"[WARN] Checkpoint {args.resume} not found, starting fresh")
+
     max_epochs = args.max_epochs
     patience = args.patience
     max_train_batches = args.max_train_batches
@@ -518,7 +631,7 @@ def main() -> None:
         )
 
     history: dict[str, list[float]] = {"train_loss": [], "val_loss": [], "val_macro_auc": []}
-    log_csv = ANNOTATIONS_DIR / "train_log.csv"
+    log_csv = output_dir / "train_log.csv"
     if start_epoch == 1:
         _write_train_log_header(log_csv)
     else:
@@ -527,12 +640,12 @@ def main() -> None:
     no_improve = 0
 
     if start_epoch == 1:
-        best_path = ANNOTATIONS_DIR / "best_model.pt"
+        best_path = output_dir / "best_model.pt"
         if best_path.exists():
             import time
 
             ts = int(time.time())
-            backup = ANNOTATIONS_DIR / f"best_model_backup_{ts}.pt"
+            backup = output_dir / f"best_model_backup_{ts}.pt"
             best_path.rename(backup)
             print(f"[WARN] Fresh start: existing best_model.pt backed up to {backup.name}")
 
@@ -547,9 +660,8 @@ def main() -> None:
             max_batches=max_train_batches,
         )
 
-        # Walidacja co val_freq epok
         should_validate = (epoch % val_freq == 0) or (epoch == max_epochs)
-        
+
         if should_validate:
             with torch.no_grad():
                 val_loss, val_true, val_prob = _run_epoch(
@@ -568,64 +680,197 @@ def main() -> None:
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
         history["val_macro_auc"].append(val_macro_auc)
-        
+
         if should_validate:
             _append_train_log(log_csv, epoch, train_loss, val_loss, val_macro_auc)
 
-        # Early stopping state update - wykonaj PRZED logowaniem,
-        # aby no_improve odzwierciedlało bieżącą walidację.
         if should_validate:
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            if np.isfinite(val_macro_auc) and val_macro_auc > best_val_auc:
+                best_val_auc = float(val_macro_auc)
+                best_val_loss = float(val_loss)
                 no_improve = 0
-                _save_checkpoint(ANNOTATIONS_DIR / "best_model.pt", model, optimizer, epoch, best_val_loss)
+                _save_checkpoint(output_dir / "best_model.pt", model, optimizer, epoch, best_val_auc, best_val_loss)
             else:
                 no_improve += 1
                 should_stop = no_improve >= patience
 
-        # Logi na konsoli co log_freq epok
         if epoch % log_freq == 0 or epoch == max_epochs:
             ts = datetime.now().strftime("%H:%M:%S")
             if should_validate:
                 print(
-                    f"[{ts}][Epoch {epoch:03d}] "
+                    f"[{ts}][{run_name}][Epoch {epoch:03d}] "
                     f"train_loss={train_loss:.4f} | "
                     f"val_loss={val_loss:.4f} | "
                     f"val_auc={val_macro_auc:.4f} | "
                     f"no_improve={no_improve}/{patience}"
                 )
             else:
-                print(f"[{ts}][Epoch {epoch:03d}] train_loss={train_loss:.4f}")
+                print(f"[{ts}][{run_name}][Epoch {epoch:03d}] train_loss={train_loss:.4f}")
 
-        # Checkpoint co checkpoint_freq epok
         if epoch % checkpoint_freq == 0 or epoch == max_epochs:
-            _save_checkpoint(ANNOTATIONS_DIR / "last_model.pt", model, optimizer, epoch, best_val_loss)
-            _cleanup_old_checkpoints(ANNOTATIONS_DIR)
+            _save_checkpoint(output_dir / "last_model.pt", model, optimizer, epoch, best_val_auc, best_val_loss)
+            _cleanup_old_checkpoints(output_dir)
 
         if should_stop:
             print(f"Early stopping at epoch {epoch} (patience={patience}).")
             break
 
-    # Plot curves only if skip_plots is not set
     if not skip_plots:
-        _plot_curves(history)
+        _plot_curves(history, output_dir)
     else:
         print("[INFO] Skipping plot generation (--skip-plots enabled)")
 
-    best_checkpoint = torch.load(ANNOTATIONS_DIR / "best_model.pt", map_location=device)
-    model.load_state_dict(best_checkpoint["model_state_dict"])
+    best_checkpoint_path = output_dir / "best_model.pt"
+    if best_checkpoint_path.exists():
+        best_checkpoint = torch.load(best_checkpoint_path, map_location=device)
+        model.load_state_dict(best_checkpoint["model_state_dict"])
 
+    test_macro_auc = float("nan")
     if skip_test_eval:
         print("[INFO] Skipping full test evaluation.")
     else:
-        run_evaluation(
+        eval_result = run_evaluation(
             model=model,
             dataloader=test_loader,
             device=device,
             class_names=label_columns,
-            output_path=ANNOTATIONS_DIR / "eval_results.txt",
+            output_path=output_dir / "eval_results.txt",
             max_batches=max_val_batches,
         )
+        test_macro_auc = float(eval_result.get("macro_auc", float("nan")))
+
+    return {
+        "run_name": run_name,
+        "output_dir": str(output_dir),
+        "best_val_auc": float(best_val_auc),
+        "best_val_loss": float(best_val_loss),
+        "epochs_completed": len(history["train_loss"]),
+        "test_macro_auc": test_macro_auc,
+    }
+
+
+
+def main() -> None:
+    args = _parse_args()
+
+    _ensure_output_dirs(ANNOTATIONS_DIR)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        print(f"[GPU] Karta graficzna: {gpu_name} | Pamięć: {gpu_memory:.2f} GB")
+    else:
+        print("[GPU] Brak karty graficznej - będzie użyty CPU")
+
+    if args.sanity:
+        label_columns, file_columns = _derive_columns_fast()
+    else:
+        inspection = _load_or_refresh_metadata_inspection(ANNOTATIONS_DIR)
+        label_columns = inspection["label_columns"]  # type: ignore[assignment]
+        file_columns = inspection["file_columns"]  # type: ignore[assignment]
+
+    widths = _parse_int_list(args.widths) if args.sweep else []
+    kernel_sets = _parse_kernel_sets(args.kernel_sets) if args.sweep else []
+    losses = _parse_str_list(args.losses) if args.sweep else []
+
+    if not widths:
+        widths = [32]
+    if not kernel_sets:
+        kernel_sets = [(9, 19, 39)]
+    if not losses:
+        losses = [args.loss]
+
+    if args.sweep and args.max_epochs == 50:
+        args.max_epochs = args.sweep_max_epochs
+        print(f"[SWEEP] Ustawiam max_epochs={args.max_epochs} (sweep-max-epochs)")
+
+    if args.sweep or args.run_name:
+        os.makedirs(RUNS_DIR, exist_ok=True)
+
+    sweep_configs = list(itertools.product(widths, kernel_sets, losses))
+    if not args.sweep:
+        sweep_configs = sweep_configs[:1]
+
+    results: list[dict[str, object]] = []
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    for idx, (width, kernel_sizes, loss_name) in enumerate(sweep_configs, start=1):
+        if not args.sweep and args.run_name:
+            run_name = args.run_name
+        else:
+            run_name = _build_run_name(width, kernel_sizes, loss_name, f"{timestamp}_{idx:02d}")
+
+        output_dir = RUNS_DIR / run_name if (args.sweep or args.run_name) else ANNOTATIONS_DIR
+
+        _ensure_output_dirs(output_dir)
+
+        run_config = {
+            "run_name": run_name,
+            "nb_filters": width,
+            "kernel_sizes": list(kernel_sizes),
+            "loss": loss_name,
+            "args": vars(args),
+        }
+        save_json(output_dir / "run_config.json", run_config)
+
+        print(f"[RUN] {run_name} | width={width} | kernels={kernel_sizes} | loss={loss_name}")
+
+        result = _run_training(
+            output_dir=output_dir,
+            label_columns=label_columns,
+            file_columns=file_columns,
+            device=device,
+            args=args,
+            nb_filters=width,
+            kernel_sizes=kernel_sizes,
+            loss_type=loss_name,
+            run_name=run_name,
+            allow_resume=not args.sweep,
+        )
+        results.append({**run_config, **result})
+
+    if results:
+        best = max(results, key=lambda r: r.get("best_val_auc", float("-inf")))
+        best_auc = float(best.get("best_val_auc", float("nan")))
+        print(
+            "\n[BEST RUN] "
+            f"name={best.get('run_name')} | "
+            f"best_val_auc={best_auc:.4f} | "
+            f"output_dir={best.get('output_dir')}"
+        )
+        if args.sweep:
+            save_json(RUNS_DIR / "sweep_summary.json", {"results": results})
+            save_json(RUNS_DIR / "best_run.json", best)
+            _save_ranking(results, RUNS_DIR, "best_val_auc", "ranking_val_auc.csv")
+            _save_ranking(results, RUNS_DIR, "test_macro_auc", "ranking_test_auc.csv")
+
+            def _rank_key(item: dict[str, object], metric_key: str) -> float:
+                value = item.get(metric_key)
+                if value is None:
+                    return float("-inf")
+                try:
+                    val = float(value)
+                except (TypeError, ValueError):
+                    return float("-inf")
+                if not np.isfinite(val):
+                    return float("-inf")
+                return val
+
+            top_val = sorted(results, key=lambda r: _rank_key(r, "best_val_auc"), reverse=True)[:5]
+            top_test = sorted(results, key=lambda r: _rank_key(r, "test_macro_auc"), reverse=True)[:5]
+            print("\n[RANKING] Top-5 by val_auc:")
+            for item in top_val:
+                print(
+                    f"  {item.get('run_name')} | val_auc={float(item.get('best_val_auc', float('nan'))):.4f} | "
+                    f"dir={item.get('output_dir')}"
+                )
+            print("\n[RANKING] Top-5 by test_auc:")
+            for item in top_test:
+                print(
+                    f"  {item.get('run_name')} | test_auc={float(item.get('test_macro_auc', float('nan'))):.4f} | "
+                    f"dir={item.get('output_dir')}"
+                )
 
 
 if __name__ == "__main__":

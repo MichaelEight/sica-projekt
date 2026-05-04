@@ -365,6 +365,30 @@ python -m model.training.train_pipeline --sanity
 python -m model.test_model_viewer --split test
 ```
 
+### 10.1 Sweep hiperparametrow (szerokosc, kernle, loss)
+
+Przyklad uruchomienia kilku wariantow i zapisu wynikow do osobnych folderow:
+
+```powershell
+python -m model.training.train_pipeline --sweep --widths 32,48 --kernel-sets 9-19-39,10-20-40 --losses focal,bce --max-epochs 200
+```
+
+### 10.2 Local search (tylko FocalLoss, ranking po test AUC)
+
+Skrypt przeszukuje okolice najlepszych parametrow (lub podanych bazowych) i wybiera najlepsza kombinacje po AUC na tescie:
+
+```powershell
+python -m model.training.local_search --include-base
+```
+
+Opcjonalnie mozesz wskazac baze i delty:
+
+```powershell
+python -m model.training.local_search --base-width 32 --base-kernels 9-19-39 --width-deltas -16,-8,-4,4,8 --kernel-deltas -4,-2,-1,1,2 --include-base
+```
+
+Wyniki kazdego runu trafiaja do `model/annotations/runs/<run_name>/`.
+
 ## 11) Artefakty treningu
 
 W `model/annotations/`:
@@ -375,3 +399,11 @@ W `model/annotations/`:
 - `train_log.csv` - historia epok,
 - `loss_curve.png` - przebieg straty,
 - `eval_results.txt` - metryki per klasa.
+
+W `model/annotations/runs/` (tryb sweep):
+
+- `run_config.json` - parametry uruchomienia,
+- `best_model.pt`, `last_model.pt` - checkpointy,
+- `train_log.csv`, `loss_curve.png`, `eval_results.txt` - logi i metryki,
+- `best_run.json`, `sweep_summary.json` - podsumowania sweepa.
+
