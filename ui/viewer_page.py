@@ -26,6 +26,14 @@ from ui.context_menu import SelectionContextMenu
 from ui.markings_panel import MarkingsPanel
 from PySide6.QtGui import QCursor
 from ecg_measurements import compute_measurements
+from resample import resample_to_target, TARGET_FS
+from ui.app_logger import get_logger
+
+_log = get_logger("viewer_page")
+
+
+def _log_window(msg: str) -> None:
+    _log.info("Resample-window: %s", msg)
 
 
 class _CheckmarkWidget(QWidget):
@@ -1145,6 +1153,10 @@ class ViewerPage(QWidget):
         self.single_lead.autoscan_regions = []
         self.timeline_overview.clear_autoscan_regions()
 
+        # Reset XAI state from previous file (lead importance bar + heatmap overlay)
+        self.markings_panel._lead_importance_panel.set_data(None)
+        self._apply_explain_heatmap(None)
+
         # Enable/disable full analysis based on duration
         min_samples = int(10.0 * self.fs)
         if self.signal.shape[0] < min_samples:
@@ -1154,8 +1166,8 @@ class ViewerPage(QWidget):
             self.btn_full_analysis.setEnabled(True)
             self.btn_full_analysis.setToolTip("")
 
-        max_window = max(self._window_12, self._window_1)
-        self._scrubber_max = max(0.0, self.duration - max_window)
+        active_window = self._current_window()
+        self._scrubber_max = max(0.0, self.duration - active_window)
         self.scrubber.setRange(0, int(self._scrubber_max * 100))
         self.scrubber.setValue(0)
 
@@ -1287,6 +1299,7 @@ class ViewerPage(QWidget):
         if self._focus_lead in self.grid_view.cells:
             self.single_lead = self.grid_view.cells[self._focus_lead]
         if self.signal is not None:
+            self._restore_scrubber_range()
             self._refresh_views()
             self._refresh_markings()
         self._update_zoom_label()
@@ -1503,6 +1516,9 @@ class ViewerPage(QWidget):
         if e - s < 100:
             return
         window = self.signal[s:e]
+        window, _, msg = resample_to_target(window, self.fs)
+        if msg:
+            _log_window(f"explain {marking.t1:.2f}-{marking.t2:.2f}s: {msg}")
         # Pick non-healthy top class to explain
         probs = marking.probs or {}
         non_healthy = [(c, p) for c, p in probs.items() if c != "class_healthy"]
@@ -1857,8 +1873,8 @@ class ViewerPage(QWidget):
         """Recompute scrubber range from current signal duration and zoom."""
         if self.signal is None:
             return
-        max_window = max(self._window_12, self._window_1)
-        self._scrubber_max = max(0.0, self.duration - max_window)
+        active_window = self._current_window()
+        self._scrubber_max = max(0.0, self.duration - active_window)
         self.scrubber.blockSignals(True)
         self.scrubber.setRange(0, int(self._scrubber_max * 100))
         self.scrubber.setValue(int(self.time_pos * 100))
@@ -2052,6 +2068,9 @@ class ViewerPage(QWidget):
                 window = self.signal[s:s + window_samples]
                 t_start = s / self.fs
                 t_end = (s + window_samples) / self.fs
+                window, _, msg = resample_to_target(window, self.fs)
+                if i == 0 and msg:
+                    _log_window(f"autoscan windows: {msg}")
 
                 try:
                     res = predict_with_model(
@@ -2448,6 +2467,9 @@ class ViewerPage(QWidget):
         start_sample = int(t1 * self.fs)
         end_sample = int(t2 * self.fs)
         window_signal = self.signal[start_sample:end_sample]
+        window_signal, _, msg = resample_to_target(window_signal, self.fs)
+        if msg:
+            _log_window(f"single window {t1:.2f}-{t2:.2f}s: {msg}")
 
         try:
             res = predict_with_model(

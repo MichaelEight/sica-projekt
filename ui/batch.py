@@ -16,6 +16,7 @@ from typing import Callable
 import numpy as np
 
 from marking_store import Marking, MarkingStore
+from resample import resample_to_target
 from ui.theme import TARGET_CLASSES
 
 
@@ -78,6 +79,7 @@ def scan_signal(signal: np.ndarray, fs: int, model, device) -> list[dict]:
         window = signal[s:s + window_samples]
         t_start = s / fs
         t_end = (s + window_samples) / fs
+        window, _, _ = resample_to_target(window, fs)
         try:
             res = predict_with_model(
                 model=model, data=window, threshold=0.5,
@@ -340,6 +342,7 @@ def _scan_with_progress(
         window = signal[s:s + window_samples]
         t_start = s / fs
         t_end = (s + window_samples) / fs
+        window, _, _ = resample_to_target(window, fs)
         try:
             res = predict_with_model(
                 model=model, data=window, threshold=0.5,

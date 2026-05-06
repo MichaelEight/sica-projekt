@@ -289,12 +289,23 @@ class MainWindow(QMainWindow):
             try:
                 record = wfdb.rdrecord(base_path)
                 self._signal = record.p_signal.astype(np.float32)
+                self._fs = int(round(float(record.fs)))
                 self._leads = _normalize_lead_names(record.sig_name)
-                self._fs = record.fs
                 self._filename = os.path.basename(base_path) + ".dat"
 
-                info = f"{self._signal.shape[0] / self._fs:.1f} s"
+                n = self._signal.shape[0]
+                duration = n / float(self._fs)
+
+                info = f"{duration:.2f} s @ {self._fs} Hz"
                 add_recent(base_path, info)
+                self.statusBar().showMessage(
+                    f"Wczytano {self._filename} | {n} pts @ {self._fs} Hz ({duration:.2f}s)",
+                    10000,
+                )
+                _log.info(
+                    "Load %s: shape=%s, fs=%d Hz, duration=%.3f s (no resample on load — applied per analysis window)",
+                    self._filename, self._signal.shape, self._fs, duration,
+                )
             except Exception as e:
                 self.statusBar().clearMessage()
                 QMessageBox.warning(self, "Błąd", f"Nie udało się wczytać pliku:\n{e}")
