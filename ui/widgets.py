@@ -180,14 +180,11 @@ class TimelineOverview(QWidget):
                     y2 = y1 + 1
                 p.drawLine(x, y1, x, y2)
 
-        # Window rectangle — snapped to discrete page boundaries so it jumps
-        # in sync with the actual graph window instead of sliding continuously.
+        # Window rectangle — track _time_pos continuously so the box stays
+        # in sync with the slider/scrubber. Click-seek still snaps via _x_to_time.
         if self._duration > 0 and self._window > 0:
-            page_idx = int(self._time_pos // self._window)
-            snapped = page_idx * self._window
-            if snapped + self._window > self._duration:
-                snapped = max(0.0, self._duration - self._window)
-            x = int(snapped / self._duration * w)
+            pos = max(0.0, min(self._time_pos, self._duration - self._window))
+            x = int(pos / self._duration * w)
             rect_w = max(4, int(self._window / self._duration * w))
             rect_w = min(rect_w, w - x)
             p.setPen(QPen(QColor(T.ACCENT), 2))
