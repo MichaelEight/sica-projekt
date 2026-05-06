@@ -2069,8 +2069,16 @@ class ViewerPage(QWidget):
                 t_start = s / self.fs
                 t_end = (s + window_samples) / self.fs
                 window, _, msg = resample_to_target(window, self.fs)
-                if i == 0 and msg:
-                    _log_window(f"autoscan windows: {msg}")
+                if i < 3 and msg:
+                    _log_window(
+                        f"autoscan window #{i + 1}/{n_windows} "
+                        f"[{t_start:.2f}-{t_end:.2f}s]: {msg}"
+                    )
+                elif i == 3 and msg:
+                    _log_window(
+                        f"autoscan: suppressing log for windows {i + 1}..{n_windows} "
+                        f"(same transformation per window)"
+                    )
 
                 try:
                     res = predict_with_model(

@@ -73,7 +73,7 @@ def test_trim_500hz_15s():
     assert sig.shape[0] == 7500
     out, fs, msg = resample_to_target(sig, 500.0)
     assert out.shape == (TARGET_SAMPLES, 12)
-    assert "trimmed" in msg
+    assert "trim" in msg
     assert np.allclose(out, sig[:TARGET_SAMPLES])
 
 
@@ -82,7 +82,7 @@ def test_pad_500hz_5s():
     assert sig.shape[0] == 2500
     out, fs, msg = resample_to_target(sig, 500.0)
     assert out.shape == (TARGET_SAMPLES, 12)
-    assert "padded" in msg
+    assert "pad" in msg
     assert np.allclose(out[:2500], sig)
     edge_value = sig[-1]
     assert np.allclose(out[2500:], edge_value)
