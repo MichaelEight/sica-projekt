@@ -38,6 +38,7 @@ def resample_to_target(
         raise ValueError(f"fs_in must be positive, got {fs_in}")
 
     n_in = signal.shape[0]
+    dur_in = n_in / float(fs_in)
     msg_parts: list[str] = []
 
     # Step 1: frequency adjustment ---------------------------------------
@@ -49,15 +50,12 @@ def resample_to_target(
         out = resample_poly(signal, up, down, axis=0).astype(np.float32)
         n_after = out.shape[0]
         delta = n_after - n_in
-        direction = "upsampled" if fs_in < TARGET_FS else "downsampled"
+        direction = "upsample" if fs_in < TARGET_FS else "downsample"
         sign = "+" if delta >= 0 else ""
         msg_parts.append(
-            f"{direction} {fs_in:g}Hz->{TARGET_FS}Hz "
-            f"(ratio {up}/{down}, {n_in} -> {n_after} pts, {sign}{delta})"
-        )
-        _log.info(
-            "resample: %s from %g Hz to %d Hz, ratio=%d/%d, %d -> %d samples (delta %s%d)",
-            direction, fs_in, TARGET_FS, up, down, n_in, n_after, sign, delta,
+            f"{direction} polyphase-FIR {fs_in:g}Hz->{TARGET_FS}Hz "
+            f"L/M={up}/{down}, in={n_in}pts({dur_in:.3f}s) "
+            f"out={n_after}pts({n_after / TARGET_FS:.3f}s) Δ={sign}{delta}pts"
         )
 
     # Step 2: length enforcement -----------------------------------------
@@ -65,24 +63,23 @@ def resample_to_target(
     if n > TARGET_SAMPLES:
         dropped = n - TARGET_SAMPLES
         out = out[:TARGET_SAMPLES].copy()
-        msg_parts.append(f"trimmed {dropped} pts ({n} -> {TARGET_SAMPLES})")
-        _log.info("resample: trimmed %d samples (%d -> %d)", dropped, n, TARGET_SAMPLES)
+        msg_parts.append(
+            f"trim head-keep {n}->{TARGET_SAMPLES}pts (dropped {dropped})"
+        )
     elif n < TARGET_SAMPLES:
         pad = TARGET_SAMPLES - n
         edge = np.repeat(out[-1:], pad, axis=0)
         out = np.concatenate([out, edge], axis=0)
         msg_parts.append(
-            f"edge-padded {pad} pts ({n} -> {TARGET_SAMPLES}, input <{TARGET_DURATION_S:g}s)"
-        )
-        _log.warning(
-            "resample: edge-padded %d samples (%d -> %d). Input shorter than %g s.",
-            pad, n, TARGET_SAMPLES, TARGET_DURATION_S,
+            f"edge-pad {n}->{TARGET_SAMPLES}pts (added {pad}, input <{TARGET_DURATION_S:g}s)"
         )
 
-    if not msg_parts:
+    if msg_parts:
+        _log.info("resample-window: %s", " | ".join(msg_parts))
+    else:
         _log.info(
-            "resample: passthrough — input already %d Hz / %d samples (no change)",
+            "resample-window: passthrough %dHz / %dpts (no change)",
             TARGET_FS, n_in,
         )
 
-    return out, TARGET_FS, "; ".join(msg_parts)
+    return out, TARGET_FS, " | ".join(msg_parts)
