@@ -814,6 +814,13 @@ class MarkingsPanel(QWidget):
         hint.setStyleSheet(f"color:{T.TEXT_MUTED}; font-size:10px;")
         lay.addWidget(hint)
 
+        mark_hint = QLabel("Pionowa kreska = 40%. Żółte wykrycia poniżej niej "
+                           "pokazujemy jako «Niepewne» (model nie jest pewny "
+                           "rozpoznania).")
+        mark_hint.setWordWrap(True)
+        mark_hint.setStyleSheet(f"color:{T.TEXT_MUTED}; font-size:10px;")
+        lay.addWidget(mark_hint)
+
         self._thr_reset_btn = QPushButton("Przywróć domyślne")
         self._thr_reset_btn.setFixedHeight(24)
         self._thr_reset_btn.setCursor(Qt.PointingHandCursor)
