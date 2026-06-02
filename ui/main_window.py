@@ -92,18 +92,9 @@ def _load_or_build_gt_cache() -> dict:
     return lookup
 
 
-# Map common WFDB lead name variants to our standard names
-_LEAD_ALIASES = {
-    "i": "I", "ii": "II", "iii": "III",
-    "avr": "aVR", "avl": "aVL", "avf": "aVF",
-    "v1": "V1", "v2": "V2", "v3": "V3",
-    "v4": "V4", "v5": "V5", "v6": "V6",
-}
-
-
-def _normalize_lead_names(names: list[str]) -> list[str]:
-    """Normalize WFDB lead names to standard form (I, II, aVR, V1, etc.)."""
-    return [_LEAD_ALIASES.get(n.lower(), n) for n in names]
+# WFDB lead-name normalization (aliases + fuzzy) lives in ui.lead_names so the
+# headless batch path can share it. Re-exported here for the existing call site.
+from ui.lead_names import normalize_lead_names as _normalize_lead_names
 
 
 class MainWindow(QMainWindow):

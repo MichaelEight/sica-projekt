@@ -18,18 +18,8 @@ import numpy as np
 from marking_store import Marking, MarkingStore
 from resample import resample_to_target
 from ui.theme import TARGET_CLASSES
-
-
-_LEAD_ALIASES = {
-    "i": "I", "ii": "II", "iii": "III",
-    "avr": "aVR", "avl": "aVL", "avf": "aVF",
-    "v1": "V1", "v2": "V2", "v3": "V3",
-    "v4": "V4", "v5": "V5", "v6": "V6",
-}
-
-
-def _normalize_lead_names(names: list[str]) -> list[str]:
-    return [_LEAD_ALIASES.get(n.lower(), n) for n in names]
+from ui.config import classify_window, get_threshold_high, get_threshold_low
+from ui.lead_names import normalize_lead_names as _normalize_lead_names
 
 
 def load_wfdb_record(base_path: str) -> tuple[np.ndarray, list[str], int] | None:
@@ -60,6 +50,8 @@ def scan_signal(signal: np.ndarray, fs: int, model, device) -> list[dict]:
     """
     from model.inference_api import predict_with_model
 
+    t_high = get_threshold_high()
+    t_low = get_threshold_low()
     window_sec = 10.0
     step_sec = 5.0
     window_samples = int(window_sec * fs)
@@ -90,14 +82,7 @@ def scan_signal(signal: np.ndarray, fs: int, model, device) -> list[dict]:
         except Exception:
             prob_dict = {cls: 0.0 for cls in TARGET_CLASSES}
 
-        top_cls = max(prob_dict, key=prob_dict.get)
-        top_prob = prob_dict[top_cls]
-        if top_cls == "class_healthy" and top_prob >= 0.5:
-            color = 0
-        elif top_cls != "class_healthy" and top_prob >= 0.5:
-            color = 2
-        else:
-            color = 1
+        color = classify_window(prob_dict, t_high, t_low)
         results.append({
             "t_start": t_start,
             "t_end": t_end,
@@ -319,6 +304,8 @@ def _scan_with_progress(
     """scan_signal variant that updates `progress` per window."""
     from model.inference_api import predict_with_model
 
+    t_high = get_threshold_high()
+    t_low = get_threshold_low()
     window_sec = 10.0
     step_sec = 5.0
     window_samples = int(window_sec * fs)
@@ -353,14 +340,7 @@ def _scan_with_progress(
         except Exception:
             prob_dict = {cls: 0.0 for cls in TARGET_CLASSES}
 
-        top_cls = max(prob_dict, key=prob_dict.get)
-        top_prob = prob_dict[top_cls]
-        if top_cls == "class_healthy" and top_prob >= 0.5:
-            color = 0
-        elif top_cls != "class_healthy" and top_prob >= 0.5:
-            color = 2
-        else:
-            color = 1
+        color = classify_window(prob_dict, t_high, t_low)
         results.append({
             "t_start": t_start, "t_end": t_end,
             "color": color, "probs": prob_dict,

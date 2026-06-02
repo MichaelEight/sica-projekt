@@ -24,6 +24,7 @@ from ui.panels import InfoPanel, MonitorSidebar
 from marking_store import MarkingStore, Marking, MARKING_STYLES
 from ui.context_menu import SelectionContextMenu
 from ui.markings_panel import MarkingsPanel
+from ui.config import classify_window, get_threshold_high, get_threshold_low
 from PySide6.QtGui import QCursor
 from ecg_measurements import compute_measurements
 from resample import resample_to_target, TARGET_FS
@@ -810,15 +811,18 @@ class ViewerPage(QWidget):
 
         from ui.theme import is_dark_mode as _idm
         _ah = '#047857' if _idm() else '#3a8eef'
-        self.btn_full_analysis = QPushButton("Pełna analiza")
+        self.btn_full_analysis = QPushButton("Analiza AI  ▾")
         self.btn_full_analysis.setObjectName("primary")
         self.btn_full_analysis.setCursor(Qt.PointingHandCursor)
+        self.btn_full_analysis.setToolTip(
+            "Uruchom analizę AI całego nagrania. Kliknij, aby wybrać, których "
+            "odprowadzeń użyć.")
         self.btn_full_analysis.setStyleSheet(f"""
             QPushButton {{ background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;
                 padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px; }}
             QPushButton:hover {{ background:{_ah}; }}
         """)
-        self.btn_full_analysis.clicked.connect(self._run_full_analysis)
+        self.btn_full_analysis.clicked.connect(self._show_analysis_menu)
         tb.addWidget(self.btn_full_analysis)
 
         self.btn_report = QPushButton("Raport")
@@ -908,6 +912,7 @@ class ViewerPage(QWidget):
         self.markings_panel.annotation_created.connect(self._on_annotation_created)
         self.markings_panel.undo_requested.connect(self._undo)
         self.markings_panel.redo_requested.connect(self._redo)
+        self.markings_panel.thresholds_changed.connect(self._on_thresholds_changed)
         self.content.addWidget(self.markings_panel)
 
         content_widget = QWidget()
@@ -1104,6 +1109,10 @@ class ViewerPage(QWidget):
 
         self.signal = signal
         self.leads = leads
+        # Default focus is lead II; fall back to the first available lead for
+        # records that don't contain it (e.g. 2-lead MIT-BIH montages).
+        if self._focus_lead not in self.leads and self.leads:
+            self._focus_lead = self.leads[0]
         self.fs = fs
         self.filename = filename
         self.duration = signal.shape[0] / fs
@@ -1515,7 +1524,7 @@ class ViewerPage(QWidget):
         e = min(self.signal.shape[0], int(marking.t2 * self.fs))
         if e - s < 100:
             return
-        window = self.signal[s:e]
+        window = self._assemble_model_signal()[s:e]
         window, _, msg = resample_to_target(window, self.fs)
         if msg:
             _log_window(f"explain {marking.t1:.2f}-{marking.t2:.2f}s: {msg}")
@@ -1945,7 +1954,13 @@ class ViewerPage(QWidget):
     def _autoscan_cache_path(self) -> str:
         file_key = self._base_path or self.filename or ""
         model_key = self._model_path or self._default_model_path() or ""
-        key = f"{file_key}:{model_key}"
+        # "All leads" runs keep the original key (back-compatible cache);
+        # "selected leads" runs are cached separately per active lead set.
+        scope_key = ""
+        if getattr(self, "_scan_selected_only", False):
+            active = ",".join(sorted(self.layout_switcher.visible_leads()))
+            scope_key = f":sel[{active}]"
+        key = f"{file_key}:{model_key}{scope_key}"
         h = hashlib.md5(key.encode()).hexdigest()
         return os.path.join(".cache", "autoscan", f"{h}.json")
 
@@ -2008,12 +2023,111 @@ class ViewerPage(QWidget):
             return
         self._marking_store.save_ann(path, patient=self._get_patient_dict())
 
-    def _run_full_analysis(self):
-        """Run full analysis: sliding window scan across the entire signal."""
+    def _show_analysis_menu(self):
+        """Popup with the two analysis choices, each with a plain-language
+        explanation always visible (no hover needed)."""
+        if self.signal is None:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Analiza AI",
+                                    "Najpierw wczytaj plik EKG.")
+            return
+        from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel
+
+        pop = QFrame(self, Qt.Popup)
+        pop.setStyleSheet(
+            f"QFrame#analysisPop {{ background:{T.WHITE}; "
+            f"border:1px solid {T.BORDER}; border-radius:8px; }}")
+        pop.setObjectName("analysisPop")
+        lay = QVBoxLayout(pop)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
+
+        cap = QLabel("Analiza AI przeszukuje całe nagranie. "
+                     "Wybierz, których odprowadzeń użyć:")
+        cap.setWordWrap(True)
+        cap.setFixedWidth(300)
+        cap.setStyleSheet(
+            f"color:{T.TEXT_MUTED}; font-size:11px; border:none; "
+            f"background:transparent;")
+        lay.addWidget(cap)
+
+        lay.addWidget(self._analysis_option_card(
+            "Wszystkie odprowadzenia",
+            "Używa wszystkich odprowadzeń obecnych w pliku.",
+            pop, selected_only=False))
+        lay.addWidget(self._analysis_option_card(
+            "Tylko zaznaczone odprowadzenia",
+            "Używa wyłącznie włączonych odprowadzeń (przyciski I, II, V1… "
+            "w panelu po lewej). Pozostałe są pomijane.",
+            pop, selected_only=True))
+
+        pop.adjustSize()
+        btn = self.btn_full_analysis
+        pop.move(btn.mapToGlobal(QPoint(0, btn.height() + 4)))
+        pop.show()
+        self._analysis_popup = pop
+
+    def _analysis_option_card(self, title: str, subtitle: str, popup,
+                              selected_only: bool):
+        from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel
+        card = QFrame()
+        card.setCursor(Qt.PointingHandCursor)
+        card.setStyleSheet(
+            f"QFrame {{ background:{T.BG_SECONDARY}; border:1px solid "
+            f"{T.BORDER}; border-radius:6px; }} "
+            f"QFrame:hover {{ border:1px solid {T.ACCENT}; }}")
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(10, 8, 10, 8)
+        cl.setSpacing(2)
+        t = QLabel(title)
+        t.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        t.setStyleSheet(f"color:{T.TEXT}; font-size:12px; font-weight:700; "
+                        f"border:none; background:transparent;")
+        s = QLabel(subtitle)
+        s.setWordWrap(True)
+        s.setFixedWidth(280)
+        s.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        s.setStyleSheet(f"color:{T.TEXT_MUTED}; font-size:10px; border:none; "
+                        f"background:transparent;")
+        cl.addWidget(t)
+        cl.addWidget(s)
+
+        def _on_click(_ev):
+            popup.close()
+            self._run_full_analysis(selected_only=selected_only)
+        card.mousePressEvent = _on_click
+        return card
+
+    def _assemble_model_signal(self, selected_only: bool = False) -> np.ndarray:
+        """Build a (N, 12) array in canonical lead order for the AI model.
+
+        The model is fixed to 12 leads, so we map each available lead into its
+        canonical slot and zero-fill the rest. This lets records with fewer or
+        differently-named leads (e.g. 2-lead MIT-BIH) still be analyzed. When
+        ``selected_only`` is set, leads not currently active in the viewer are
+        also zeroed — that is the "analyze selected leads" action.
+        """
+        from ui.ekg_canvas import ALL_LEADS_ORDER
+        n = self.signal.shape[0]
+        out = np.zeros((n, len(ALL_LEADS_ORDER)), dtype=np.float32)
+        active = (set(self.layout_switcher.visible_leads())
+                  if selected_only else None)
+        for ci, cl in enumerate(ALL_LEADS_ORDER):
+            if cl in self.leads and (active is None or cl in active):
+                out[:, ci] = self.signal[:, self.leads.index(cl)]
+        return out
+
+    def _run_full_analysis(self, selected_only: bool = False):
+        """Run the sliding-window AI scan across the whole recording.
+
+        ``selected_only=False`` uses every available lead; ``True`` uses only
+        the currently active leads (others zeroed). Both scan the full time axis.
+        """
         if self.signal is None:
             return
 
-        # Try cache first (keyed by full base_path + selected model)
+        self._scan_selected_only = bool(selected_only)
+        # Try cache first (keyed by base_path + model, and lead-scope when selected)
         self._autoscan_file_path = self.filename
         cached = self._load_autoscan_cache()
         if cached:
@@ -2036,11 +2150,15 @@ class ViewerPage(QWidget):
 
         from model.inference_api import predict_with_model
 
+        # Canonical 12-lead signal (zero-filled / lead-masked as chosen).
+        scan_signal = self._assemble_model_signal(
+            getattr(self, "_scan_selected_only", False))
+
         window_sec = 10.0
         step_sec = 5.0
         window_samples = int(window_sec * self.fs)
         step_samples = int(step_sec * self.fs)
-        total = self.signal.shape[0]
+        total = scan_signal.shape[0]
 
         starts = list(range(0, total - window_samples + 1, step_samples))
         last_start = total - window_samples
@@ -2059,13 +2177,17 @@ class ViewerPage(QWidget):
         self._autoscan_thread_results = None
         self._autoscan_thread_progress = [0, n_windows]
 
+        # Snapshot user thresholds once (avoid QSettings reads per window/thread)
+        t_high = get_threshold_high()
+        t_low = get_threshold_low()
+
         def _worker():
             """Run inference in background thread."""
             from model.inference_api import explain_prediction
             results = []
             for i, s in enumerate(starts):
                 self._autoscan_thread_progress[0] = i + 1
-                window = self.signal[s:s + window_samples]
+                window = scan_signal[s:s + window_samples]
                 t_start = s / self.fs
                 t_end = (s + window_samples) / self.fs
                 window, _, msg = resample_to_target(window, self.fs)
@@ -2090,28 +2212,10 @@ class ViewerPage(QWidget):
                 except Exception:
                     prob_dict = {cls: 0.0 for cls in TARGET_CLASSES}
 
-                # Thresholds (per user 2026-04-19):
-                #   top illness >= 0.7              → red (illness label)
-                #   top illness in [0.4, 0.7)       → yellow (illness label)
-                #   true top is healthy and < 0.5   → yellow (Niepewne label)
-                #   else                            → drop
-                ILLNESS_HIGH = 0.7
-                ILLNESS_FLOOR = 0.4
-                HEALTHY_FLOOR = 0.5
-
-                p_hlt = prob_dict.get("class_healthy", 0.0)
-                non_healthy = [(c, p) for c, p in prob_dict.items() if c != "class_healthy"]
-                top_ill_cls, p_ill = max(non_healthy, key=lambda x: x[1]) if non_healthy else ("", 0.0)
-                true_top_cls = max(prob_dict, key=prob_dict.get) if prob_dict else ""
-
-                if p_ill >= ILLNESS_HIGH:
-                    color = 2
-                elif p_ill >= ILLNESS_FLOOR:
-                    color = 1
-                elif true_top_cls == "class_healthy" and p_hlt < HEALTHY_FLOOR:
-                    color = 1  # model thinks healthy but uncertain → flag as Niepewne
-                else:
-                    color = 0
+                # Severity tier from the user-tunable confidence thresholds
+                # (single source of truth in ui.config). Snapshotted once before
+                # the worker thread starts so QSettings isn't read per-window.
+                color = classify_window(prob_dict, t_high, t_low)
 
                 # XAI: lead importance + time heatmap. Only run for actionable windows.
                 lead_importance = None
@@ -2359,6 +2463,31 @@ class ViewerPage(QWidget):
         self._refresh_markings()
         self._save_ann()
 
+    def _on_thresholds_changed(self, t_low: float, t_high: float):
+        """User moved the sensitivity sliders. Re-filter cached results live
+        (no re-inference) so previously-hidden windows can reappear."""
+        self._reapply_autoscan_thresholds()
+
+    def _reapply_autoscan_thresholds(self):
+        """Recompute every cached window's band color from its stored
+        probabilities using the current thresholds, then rebuild overlay +
+        markings. Runs in well under a frame — no model call."""
+        if not self._autoscan_results:
+            return
+        t_high = get_threshold_high()
+        t_low = get_threshold_low()
+        for w in self._autoscan_results:
+            probs = w.get("probs")
+            if probs:
+                w["color"] = classify_window(probs, t_high, t_low)
+        # Persist so the recolored result survives reload of this file.
+        try:
+            self._save_autoscan_cache(self._autoscan_results)
+        except Exception:
+            pass
+        self._apply_autoscan_results()
+        self._apply_autoscan_overlay()
+
     def _apply_autoscan_overlay(self):
         if not self._autoscan_results:
             return
@@ -2372,7 +2501,7 @@ class ViewerPage(QWidget):
             code = seg["color"]
             top_cls = seg.get("top_cls") or ""
             top_prob = seg.get("top_prob") or 0.0
-            if top_prob * 100 < 40:
+            if top_prob < get_threshold_low():
                 label = "Niepewne"
             else:
                 name = CLASS_NAMES_PL.get(top_cls, top_cls)
@@ -2474,7 +2603,7 @@ class ViewerPage(QWidget):
 
         start_sample = int(t1 * self.fs)
         end_sample = int(t2 * self.fs)
-        window_signal = self.signal[start_sample:end_sample]
+        window_signal = self._assemble_model_signal()[start_sample:end_sample]
         window_signal, _, msg = resample_to_target(window_signal, self.fs)
         if msg:
             _log_window(f"single window {t1:.2f}-{t2:.2f}s: {msg}")
@@ -2489,15 +2618,7 @@ class ViewerPage(QWidget):
         except Exception:
             prob_dict = {cls: 0.0 for cls in TARGET_CLASSES}
 
-        top_cls = max(prob_dict, key=prob_dict.get)
-        top_prob = prob_dict[top_cls]
-        color_code = 0
-        if top_cls == "class_healthy" and top_prob >= 0.5:
-            color_code = 0
-        elif top_cls != "class_healthy" and top_prob >= 0.5:
-            color_code = 2
-        else:
-            color_code = 1
+        color_code = classify_window(prob_dict)
 
         marking = Marking(
             type="scan", lead=lead, t1=t1, t2=t2,
