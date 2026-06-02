@@ -28,10 +28,6 @@ class RangeSlider(QWidget):
         self._high = int(high)
         self._drag: str | None = None  # 'low' | 'high'
         self._r = 8  # handle radius
-        # Fixed reference: yellow detections below this confidence are shown
-        # as "Niepewne" (label cutoff in marking_store.auto_label). Drawn as a
-        # tick so the user can see where the "Niepewne" zone ends.
-        self._mark: int | None = 40
         self.setCursor(Qt.PointingHandCursor)
 
     def values(self) -> tuple[int, int]:
@@ -84,10 +80,12 @@ class RangeSlider(QWidget):
         if x1 > xh:
             p.setBrush(QColor(T.RED))
             p.drawRect(QRectF(xh, y - th / 2, x1 - xh, th))
-        # Low-reliability zone [0..mark]: diagonal hatch over the track so the
-        # user sees that detections in this confidence range are unreliable.
-        if self._mark is not None:
-            xm = self._pct_to_x(self._mark)
+        # "Niepewne" zone: 0 up to the yellow threshold, capped at 40% (above
+        # which the model is confident enough to name an illness). Diagonal
+        # hatch marks it as low-reliability ("not healthy, no known illness").
+        mark = min(self._low, 40)
+        if mark > 0:
+            xm = self._pct_to_x(mark)
             zone = QRectF(x0, y - 8, xm - x0, 16)
             p.setPen(Qt.NoPen)
             p.setBrush(QBrush(QColor(T.TEXT_DIM), Qt.FDiagPattern))
