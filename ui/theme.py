@@ -18,6 +18,7 @@ def set_dark_mode(dark: bool):
     global BADGE_WARN_BG, BADGE_WARN_TEXT, TAG_BG, ICON_BG
     global GREEN_BG, GREEN_BORDER, BLUE_BG, PURPLE_BG
     global BADGE_BLUE_BG, BADGE_BLUE_TEXT, AMBER, BAR_BG, BORDER_DASHED, STYLESHEET
+    global TIER_YELLOW, TIER_YELLOW_TEXT
 
     _dark_mode = dark
     if dark:
@@ -46,6 +47,10 @@ def set_dark_mode(dark: bool):
         AMBER_SUB = "#ccaa00"
         PURPLE = "#bb86fc"
         RED = "#ff5252"
+        # AI severity tiers: yellow = borderline ("do sprawdzenia"),
+        # red = illness. Matches the waveform autoscan bands.
+        TIER_YELLOW = "#ffd600"        # shapes (slider, dot, bar) — true yellow
+        TIER_YELLOW_TEXT = "#ffd600"   # readable yellow on dark bg
         SEPARATOR = "#3a3a3a"
         BADGE_NORM_BG = "#0a2e1a"
         BADGE_NORM_TEXT = "#00e676"
@@ -88,6 +93,10 @@ def set_dark_mode(dark: bool):
         AMBER_SUB = "#a16207"
         PURPLE = "#8b5cf6"
         RED = "#e74c3c"
+        # AI severity tiers: yellow = borderline ("do sprawdzenia"),
+        # red = illness. Matches the waveform autoscan bands.
+        TIER_YELLOW = "#eab308"        # shapes (slider, dot, bar) — clear yellow
+        TIER_YELLOW_TEXT = "#a16207"   # readable dark-yellow text on white
         SEPARATOR = "#6b7280"
         BADGE_NORM_BG = "#d1fae5"
         BADGE_NORM_TEXT = "#065f46"
