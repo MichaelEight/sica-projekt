@@ -49,6 +49,8 @@ class RangeSlider(QWidget):
 
     def _pct_to_x(self, pct: int) -> float:
         x0, x1, _ = self._track()
+        if x1 <= x0:
+            return x0
         return x0 + (x1 - x0) * pct / 100.0
 
     def _x_to_pct(self, x: float) -> int:
@@ -61,6 +63,8 @@ class RangeSlider(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         x0, x1, y = self._track()
+        if x1 <= x0:
+            return  # too narrow to draw meaningfully
         xl = self._pct_to_x(self._low)
         xh = self._pct_to_x(self._high)
         th = 5.0  # track thickness
@@ -83,8 +87,13 @@ class RangeSlider(QWidget):
             p.drawEllipse(QPointF(x, y), self._r, self._r)
 
     def _nearest(self, x: float) -> str:
-        return "low" if abs(x - self._pct_to_x(self._low)) <= \
-            abs(x - self._pct_to_x(self._high)) else "high"
+        xl, xh = self._pct_to_x(self._low), self._pct_to_x(self._high)
+        dl, dh = abs(x - xl), abs(x - xh)
+        if dl == dh:
+            # Handles coincide (or equidistant): pick by drag side so a
+            # collapsed pair can always be separated again.
+            return "high" if x >= xl else "low"
+        return "low" if dl < dh else "high"
 
     def mousePressEvent(self, e):
         self._drag = self._nearest(e.position().x())
