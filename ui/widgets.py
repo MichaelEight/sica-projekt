@@ -28,6 +28,10 @@ class RangeSlider(QWidget):
         self._high = int(high)
         self._drag: str | None = None  # 'low' | 'high'
         self._r = 8  # handle radius
+        # Fixed reference: yellow detections below this confidence are shown
+        # as "Niepewne" (label cutoff in marking_store.auto_label). Drawn as a
+        # tick so the user can see where the "Niepewne" zone ends.
+        self._mark: int | None = 40
         self.setCursor(Qt.PointingHandCursor)
 
     def values(self) -> tuple[int, int]:
@@ -80,6 +84,12 @@ class RangeSlider(QWidget):
         if x1 > xh:
             p.setBrush(QColor(T.RED))
             p.drawRect(QRectF(xh, y - th / 2, x1 - xh, th))
+        # "Niepewne" boundary tick (fixed reference, e.g. 40%)
+        if self._mark is not None:
+            xm = self._pct_to_x(self._mark)
+            p.setPen(QPen(QColor(T.TEXT), 1.6))
+            p.drawLine(QPointF(xm, y - 9), QPointF(xm, y + 9))
+            p.setPen(Qt.NoPen)
         # handles (draw red first so an overlap shows yellow on top)
         for x, col in ((xh, T.RED), (xl, T.TIER_YELLOW)):
             p.setBrush(QColor(T.WHITE))
