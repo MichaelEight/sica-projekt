@@ -38,7 +38,7 @@ def auto_label(type: str, value_ms: float | None = None, t1: float = 0.0, t2: fl
             # but still surface the model's leading suspicion so a skipped finding
             # is visible.
             if pct < 40:
-                return f"Niepewne · {name} {pct:.0f}%"
+                return f"Niepewne ({name} {pct:.0f}%)"
             return f"{name}: {pct:.0f}%"
         elif type == "custom":
             return label if label else "Custom"

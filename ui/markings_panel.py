@@ -273,10 +273,24 @@ class _MarkingCard(QFrame):
             f"QPushButton:hover {{ color: {T.RED}; }}"
         )
         # label — color/weight/size graded by certainty (scan cards)
-        self._label.setStyleSheet(
-            f"border: none; color: {text_color}; font-size: {font_px}px;"
-            f"  font-weight: {weight}; font-family: 'Helvetica Neue';"
-        )
+        lbl = getattr(self.marking, "label", "") or self.marking.type
+        if self.marking.type == "scan" and lbl.startswith("Niepewne"):
+            # "Niepewne" keeps the tier color; the (illness %) part is muted grey.
+            rest = lbl[len("Niepewne"):].strip()
+            html = (f"<span style=\"color:{text_color};\">Niepewne</span>")
+            if rest:
+                html += f" <span style=\"color:{T.TEXT_MUTED};\">{rest}</span>"
+            self._label.setText(html)
+            self._label.setStyleSheet(
+                f"border: none; font-size: {font_px}px;"
+                f"  font-weight: {weight}; font-family: 'Helvetica Neue';"
+            )
+        else:
+            self._label.setText(lbl)
+            self._label.setStyleSheet(
+                f"border: none; color: {text_color}; font-size: {font_px}px;"
+                f"  font-weight: {weight}; font-family: 'Helvetica Neue';"
+            )
         # source badge
         if self._badge:
             self._badge.setStyleSheet(
