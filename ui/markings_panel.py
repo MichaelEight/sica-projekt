@@ -815,9 +815,9 @@ class MarkingsPanel(QWidget):
         hint.setStyleSheet(f"color:{T.TEXT_MUTED}; font-size:10px;")
         lay.addWidget(hint)
 
-        mark_hint = QLabel("Zakreskowany obszar (poniżej 40%) oznacza niską "
-                           "pewność modelu. Wyniki z tego regionu mogą być "
-                           "niewiarygodne i pokazujemy je jako «Niepewne».")
+        mark_hint = QLabel("Zakreskowany obszar oznacza NIEPEWNE. Model "
+                           "zauważył nieprawidłowość, ale pewność nie pasuje "
+                           "do żadnej znanej choroby.")
         mark_hint.setWordWrap(True)
         mark_hint.setStyleSheet(f"color:{T.TEXT_MUTED}; font-size:10px;")
         lay.addWidget(mark_hint)
