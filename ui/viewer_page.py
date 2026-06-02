@@ -2540,7 +2540,7 @@ class ViewerPage(QWidget):
                 name = name[:20] + "."
             if top_prob < get_threshold_low():
                 # Uncertain: keep "Niepewne" but still show the leading suspicion.
-                label = (f"Niepewne · {name} {top_prob * 100:.0f}%"
+                label = (f"Niepewne ({name} {top_prob * 100:.0f}%)"
                          if top_cls else "Niepewne")
             else:
                 label = f"{name} {top_prob * 100:.0f}%"
