@@ -430,7 +430,6 @@ class MarkingsPanel(QWidget):
         self._cards: list[_MarkingCard] = []
         self._selected_id: str | None = None
         self._current_lead: str = ""
-        self._lead_filter_active: bool = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 10)
@@ -465,26 +464,6 @@ class MarkingsPanel(QWidget):
         # --- 1b. AI sensitivity (confidence thresholds) ---
         root.addWidget(self._build_threshold_section())
         root.addWidget(self._separator())
-
-        # --- 2. Lead scope toggle (two-button segmented control) ---
-        scope_row = QHBoxLayout()
-        scope_row.setContentsMargins(0, 4, 0, 4)
-        scope_row.setSpacing(0)
-
-        self._scope_all_btn = QPushButton("Wszystkie")
-        self._scope_all_btn.setFixedHeight(26)
-        self._scope_all_btn.setCursor(Qt.PointingHandCursor)
-        self._scope_all_btn.clicked.connect(lambda: self._set_lead_filter(False))
-        scope_row.addWidget(self._scope_all_btn)
-
-        self._scope_lead_btn = QPushButton("—")
-        self._scope_lead_btn.setFixedHeight(26)
-        self._scope_lead_btn.setCursor(Qt.PointingHandCursor)
-        self._scope_lead_btn.clicked.connect(lambda: self._set_lead_filter(True))
-        scope_row.addWidget(self._scope_lead_btn)
-
-        scope_row.addStretch()
-        root.addLayout(scope_row)
 
         # --- 3. Filter pills ---
         self._pills = _FilterPills()
@@ -702,9 +681,6 @@ class MarkingsPanel(QWidget):
 
     def set_current_lead(self, lead: str):
         self._current_lead = lead
-        self._style_scope_buttons()
-        if self._lead_filter_active:
-            self._rebuild_visible()
 
     def set_selected(self, marking_id: str | None):
         self._selected_id = marking_id
@@ -758,7 +734,6 @@ class MarkingsPanel(QWidget):
             f"  font-weight: 700; font-family: 'Helvetica Neue';"
         )
         self._style_undo_redo()
-        self._style_scope_buttons()
         self._search.setStyleSheet(
             f"QLineEdit {{ border: 1px solid {T.BORDER}; border-radius: 6px;"
             f"  background: {T.WHITE}; color: {T.TEXT}; font-size: 12px;"
@@ -872,32 +847,6 @@ class MarkingsPanel(QWidget):
         self._update_threshold_readouts(lo, hi)
         self.thresholds_changed.emit(DEFAULT_T_LOW, DEFAULT_T_HIGH)
 
-    def _set_lead_filter(self, active: bool):
-        self._lead_filter_active = active
-        self._style_scope_buttons()
-        self._rebuild_visible()
-
-    def _style_scope_buttons(self):
-        lead = self._current_lead or "—"
-        self._scope_lead_btn.setText(f"Tylko {lead}")
-
-        active_style = (
-            f"QPushButton {{ border: 1px solid {T.ACCENT}; background: {T.ACCENT}; color: {T.ACCENT_TEXT};"
-            f"  font-size: 11px; padding: 4px 14px; border-radius: 4px; font-weight: 600; }}"
-        )
-        inactive_style = (
-            f"QPushButton {{ border: 1px solid {T.BORDER}; background: {T.WHITE}; color: {T.TEXT_MUTED};"
-            f"  font-size: 11px; padding: 4px 14px; border-radius: 4px; }}"
-            f"QPushButton:hover {{ background: {T.BG_SECONDARY}; color: {T.TEXT}; }}"
-        )
-
-        if self._lead_filter_active:
-            self._scope_all_btn.setStyleSheet(inactive_style)
-            self._scope_lead_btn.setStyleSheet(active_style)
-        else:
-            self._scope_all_btn.setStyleSheet(active_style)
-            self._scope_lead_btn.setStyleSheet(inactive_style)
-
     def _style_undo_redo(self):
         for btn, enabled in ((self._undo_btn, self._undo_enabled), (self._redo_btn, self._redo_enabled)):
             if enabled:
@@ -928,9 +877,6 @@ class MarkingsPanel(QWidget):
         for m in self._markings:
             if not self._pills.accepts(m.type):
                 continue
-            if self._lead_filter_active and self._current_lead:
-                if getattr(m, "lead", "") != self._current_lead:
-                    continue
             if query:
                 haystack = " ".join([
                     getattr(m, "label", "") or "", getattr(m, "lead", "") or "",
