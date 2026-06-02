@@ -33,10 +33,13 @@ def auto_label(type: str, value_ms: float | None = None, t1: float = 0.0, t2: fl
                 return "Niepewne"
             top_class = max(non_healthy, key=non_healthy.get)
             pct = non_healthy[top_class] * 100
-            # Below 40% illness AND healthy is dominant → "Niepewne" (model unsure)
+            name = _CLASS_NAMES_PL.get(top_class, top_class)
+            # Below 40% illness AND healthy is dominant → "Niepewne" (model unsure),
+            # but still surface the model's leading suspicion so a skipped finding
+            # is visible.
             if pct < 40:
-                return "Niepewne"
-            return f"{_CLASS_NAMES_PL.get(top_class, top_class)}: {pct:.0f}%"
+                return f"Niepewne · {name} {pct:.0f}%"
+            return f"{name}: {pct:.0f}%"
         elif type == "custom":
             return label if label else "Custom"
         else:

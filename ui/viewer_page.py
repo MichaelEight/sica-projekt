@@ -2535,12 +2535,14 @@ class ViewerPage(QWidget):
             code = seg["color"]
             top_cls = seg.get("top_cls") or ""
             top_prob = seg.get("top_prob") or 0.0
+            name = CLASS_NAMES_PL.get(top_cls, top_cls)
+            if len(name) > 22:
+                name = name[:20] + "."
             if top_prob < get_threshold_low():
-                label = "Niepewne"
+                # Uncertain: keep "Niepewne" but still show the leading suspicion.
+                label = (f"Niepewne · {name} {top_prob * 100:.0f}%"
+                         if top_cls else "Niepewne")
             else:
-                name = CLASS_NAMES_PL.get(top_cls, top_cls)
-                if len(name) > 22:
-                    name = name[:20] + "."
                 label = f"{name} {top_prob * 100:.0f}%"
             if self._is_gt_mismatch(seg["t_start"], seg["t_end"]):
                 label = "\u26a0 " + label
