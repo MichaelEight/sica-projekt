@@ -34,10 +34,15 @@ def auto_label(type: str, value_ms: float | None = None, t1: float = 0.0, t2: fl
             top_class = max(non_healthy, key=non_healthy.get)
             pct = non_healthy[top_class] * 100
             name = _CLASS_NAMES_PL.get(top_class, top_class)
-            # Below 40% illness AND healthy is dominant → "Niepewne" (model unsure),
-            # but still surface the model's leading suspicion so a skipped finding
-            # is visible.
-            if pct < 40:
+            # "Niepewne" when the top illness is below the user's yellow
+            # threshold: the model flagged the window but no known illness is
+            # confident enough to name. At/above the threshold we name it.
+            try:
+                from ui.config import get_threshold_low
+                cutoff = get_threshold_low() * 100
+            except Exception:
+                cutoff = 40.0
+            if pct < cutoff:
                 return f"Niepewne ({name} {pct:.0f}%)"
             return f"{name}: {pct:.0f}%"
         elif type == "custom":
