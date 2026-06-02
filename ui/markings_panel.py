@@ -808,14 +808,15 @@ class MarkingsPanel(QWidget):
         self._thr_high_lbl.setStyleSheet("font-size:11px;")
         lay.addWidget(self._thr_high_lbl)
 
-        hint = QLabel("Przesuń w lewo, aby wykryć więcej (mniej pominiętych "
-                      "fragmentów). W prawo — tylko najpewniejsze.")
+        hint = QLabel("Przesuń w lewo, aby wykryć więcej fragmentów, także te "
+                      "mniej pewne. Przesuń w prawo, aby zobaczyć tylko "
+                      "najpewniejsze.")
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color:{T.TEXT_MUTED}; font-size:10px;")
         lay.addWidget(hint)
 
-        mark_hint = QLabel("Zakreskowany obszar (poniżej 40%): pewność modelu "
-                           "jest niska — wyniki z tego regionu mogą być "
+        mark_hint = QLabel("Zakreskowany obszar (poniżej 40%) oznacza niską "
+                           "pewność modelu. Wyniki z tego regionu mogą być "
                            "niewiarygodne i pokazujemy je jako «Niepewne».")
         mark_hint.setWordWrap(True)
         mark_hint.setStyleSheet(f"color:{T.TEXT_MUTED}; font-size:10px;")
