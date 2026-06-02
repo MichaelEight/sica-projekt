@@ -10,7 +10,7 @@ import ui.theme as T
 from ui.widgets import RangeSlider
 from ui.config import (
     get_threshold_high, get_threshold_low, set_thresholds,
-    reset_thresholds, DEFAULT_T_HIGH, DEFAULT_T_LOW,
+    reset_thresholds, classify_window, DEFAULT_T_HIGH, DEFAULT_T_LOW,
 )
 
 
@@ -315,17 +315,22 @@ class _MarkingCard(QFrame):
 
     def _emphasis(self) -> tuple[str, int, int, str, int]:
         """Visual weight for a card: (text_color, font_weight, font_px,
-        bar_color, bar_px). AI scan cards are graded by certainty so the
-        confident findings dominate and the uncertain ones recede."""
+        bar_color, bar_px). AI scan cards are tier-colored (red = illness,
+        yellow = borderline) so the confident red findings dominate and the
+        yellow ones stay calmer. The tier is derived from the probabilities
+        with the current thresholds, so it tracks the sliders live (and works
+        even when a loaded marking's stored color_code is stale)."""
         if self.marking.type != "scan":
             c = self._type_color()
             return c, 600, 13, c, 3
-        cc = getattr(self.marking, "color_code", 0) or 0
-        if cc >= 2:                       # confident illness → demand attention
+        probs = getattr(self.marking, "probs", None)
+        cc = classify_window(probs) if probs else (
+            getattr(self.marking, "color_code", 0) or 0)
+        if cc >= 2:                       # confident illness → red, loud
             return T.RED, 700, 14, T.RED, 4
-        if cc == 1:                       # uncertain → quiet, muted
-            return T.TEXT_MUTED, 400, 12, T.TEXT_MUTED, 2
-        return T.TEXT_DIM, 400, 12, T.TEXT_DIM, 2
+        if cc == 1:                       # borderline → yellow, calmer
+            return T.TIER_YELLOW_TEXT, 500, 13, T.TIER_YELLOW, 3
+        return T.TEXT_DIM, 400, 12, T.TEXT_DIM, 2  # (healthy — not normally shown)
 
     def _apply_border(self):
         _tc, _w, _px, bar_color, bar_px = self._emphasis()
@@ -848,7 +853,7 @@ class MarkingsPanel(QWidget):
 
     def _update_threshold_readouts(self, low: int, high: int):
         self._thr_low_lbl.setText(
-            f"<span style='color:{T.YELLOW};'>●</span> "
+            f"<span style='color:{T.TIER_YELLOW};'>●</span> "
             f"Do sprawdzenia (żółte): <b>{low}%</b>")
         self._thr_high_lbl.setText(
             f"<span style='color:{T.RED};'>●</span> "

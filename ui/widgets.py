@@ -74,14 +74,14 @@ class RangeSlider(QWidget):
         p.drawRoundedRect(QRectF(x0, y - th / 2, x1 - x0, th), 2.5, 2.5)
         # yellow: borderline .. illness
         if xh > xl:
-            p.setBrush(QColor(T.YELLOW))
+            p.setBrush(QColor(T.TIER_YELLOW))
             p.drawRect(QRectF(xl, y - th / 2, xh - xl, th))
         # red: illness .. top
         if x1 > xh:
             p.setBrush(QColor(T.RED))
             p.drawRect(QRectF(xh, y - th / 2, x1 - xh, th))
         # handles (draw red first so an overlap shows yellow on top)
-        for x, col in ((xh, T.RED), (xl, T.YELLOW)):
+        for x, col in ((xh, T.RED), (xl, T.TIER_YELLOW)):
             p.setBrush(QColor(T.WHITE))
             p.setPen(QPen(QColor(col), 2.5))
             p.drawEllipse(QPointF(x, y), self._r, self._r)
