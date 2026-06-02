@@ -761,6 +761,8 @@ class ViewerPage(QWidget):
         self._autoscan_active = False
         self._autoscan_results = None
         self._autoscan_file_path = None
+        self._scan_selected_only = False   # last analysis lead-scope (cache key)
+        self._autoscan_from_scan = False   # True only for real per-window scans
         self._monitor_timer = QTimer(self)
         self._monitor_timer.setInterval(50)
         self._monitor_timer.timeout.connect(self._monitor_tick)
@@ -1158,6 +1160,10 @@ class ViewerPage(QWidget):
         self._autoscan_active = False
         self._autoscan_results = None
         self._autoscan_file_path = None
+        # New file defaults to all-leads scope so the cache key isn't carried
+        # over from a previous file's "selected leads" run.
+        self._scan_selected_only = False
+        self._autoscan_from_scan = False
         self.grid_12.clear_autoscan_regions()
         self.single_lead.autoscan_regions = []
         self.timeline_overview.clear_autoscan_regions()
@@ -1222,6 +1228,7 @@ class ViewerPage(QWidget):
         cached_raw = self._load_autoscan_cache()
         if cached_raw:
             self._autoscan_results = cached_raw
+            self._autoscan_from_scan = True  # full per-window probs
             self._apply_autoscan_overlay()
             self.analysis_badge.show()
         else:
@@ -2126,12 +2133,22 @@ class ViewerPage(QWidget):
         if self.signal is None:
             return
 
+        if selected_only and not self.layout_switcher.visible_leads():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, "Analiza AI",
+                "Nie wybrano żadnych odprowadzeń. Włącz co najmniej jedno "
+                "odprowadzenie (przyciski I, II, V1… w panelu po lewej) lub "
+                "użyj „Wszystkie odprowadzenia”.")
+            return
+
         self._scan_selected_only = bool(selected_only)
         # Try cache first (keyed by base_path + model, and lead-scope when selected)
         self._autoscan_file_path = self.filename
         cached = self._load_autoscan_cache()
         if cached:
             self._autoscan_results = cached
+            self._autoscan_from_scan = True  # full per-window probs
             self._log_autoscan_results(cached)
             self._apply_autoscan_results()
             self._apply_autoscan_overlay()
@@ -2254,6 +2271,7 @@ class ViewerPage(QWidget):
             if self._autoscan_thread_results is not None:
                 self._autoscan_poll.stop()
                 self._autoscan_results = self._autoscan_thread_results
+                self._autoscan_from_scan = True  # real per-window scan
                 self._save_autoscan_cache(self._autoscan_thread_results)
                 self._log_autoscan_results(self._autoscan_thread_results)
                 self._autoscan_thread_results = None
@@ -2344,6 +2362,9 @@ class ViewerPage(QWidget):
         # Sort by start time for predictable merge output.
         synthetic.sort(key=lambda r: r["t_start"])
         self._autoscan_results = synthetic
+        # Merged-region probs only — NOT full per-window probs. Threshold
+        # re-filtering must not recompute/persist from this coarse set.
+        self._autoscan_from_scan = False
         self._apply_autoscan_overlay()
         self.analysis_badge.show()
 
@@ -2440,12 +2461,16 @@ class ViewerPage(QWidget):
         """Create Marking objects from merged autoscan regions and add to the store."""
         if not self._autoscan_results:
             return
-        # Remove old scan markings before adding new ones
+        # Remove old scan markings before adding new ones, but remember any
+        # user-authored fields keyed by (t1,t2) so a threshold re-filter that
+        # regenerates regions doesn't silently wipe notes/labels or churn ids.
         old_scans = [m for m in self._marking_store.get_all() if m.type == "scan"]
+        preserved = {(round(m.t1, 2), round(m.t2, 2)): m for m in old_scans}
         for m in old_scans:
             self._marking_store.delete(m.id)
 
         for seg in self._merged_autoscan_regions():
+            prev = preserved.get((round(seg["t_start"], 2), round(seg["t_end"], 2)))
             marking = Marking(
                 type="scan",
                 lead="all",
@@ -2456,7 +2481,11 @@ class ViewerPage(QWidget):
                 source="ai",
                 lead_importance=seg.get("lead_importance"),
                 time_heatmap=seg.get("time_heatmap"),
+                note=prev.note if prev else "",
+                category=prev.category if prev else "",
             )
+            if prev is not None:
+                marking.id = prev.id  # keep id stable so selection survives
             self._marking_store.add(marking)
         # Scan bulk operations are not undoable
         self._marking_store.clear_history()
@@ -2471,8 +2500,13 @@ class ViewerPage(QWidget):
     def _reapply_autoscan_thresholds(self):
         """Recompute every cached window's band color from its stored
         probabilities using the current thresholds, then rebuild overlay +
-        markings. Runs in well under a frame — no model call."""
-        if not self._autoscan_results:
+        markings. Runs in well under a frame — no model call.
+
+        Only valid for results from a real per-window scan: a markings-derived
+        (synthetic) set holds coarse merged-region probs, so recomputing and
+        persisting it would corrupt the window-level cache. Skip in that case.
+        """
+        if not self._autoscan_results or not self._autoscan_from_scan:
             return
         t_high = get_threshold_high()
         t_low = get_threshold_low()
