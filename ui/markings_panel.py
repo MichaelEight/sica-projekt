@@ -256,9 +256,10 @@ class _MarkingCard(QFrame):
 
     def apply_theme(self):
         color = self._type_color()
+        text_color, weight, font_px, _bar_color, _bar_px = self._emphasis()
         # dot
         self._dot.setStyleSheet(
-            f"border: none; background: {color}; border-radius: 4px;"
+            f"border: none; background: {text_color}; border-radius: 4px;"
         )
         # meta label (monospace)
         self._meta_label.setStyleSheet(
@@ -271,10 +272,10 @@ class _MarkingCard(QFrame):
             f"  font-size: 13px; background: transparent; }}"
             f"QPushButton:hover {{ color: {T.RED}; }}"
         )
-        # label
+        # label — color/weight/size graded by certainty (scan cards)
         self._label.setStyleSheet(
-            f"border: none; color: {color}; font-size: 13px;"
-            f"  font-weight: 600; font-family: 'Helvetica Neue';"
+            f"border: none; color: {text_color}; font-size: {font_px}px;"
+            f"  font-weight: {weight}; font-family: 'Helvetica Neue';"
         )
         # source badge
         if self._badge:
@@ -312,8 +313,22 @@ class _MarkingCard(QFrame):
         }
         return m.get(self.marking.type, T.TEXT_DIM)
 
+    def _emphasis(self) -> tuple[str, int, int, str, int]:
+        """Visual weight for a card: (text_color, font_weight, font_px,
+        bar_color, bar_px). AI scan cards are graded by certainty so the
+        confident findings dominate and the uncertain ones recede."""
+        if self.marking.type != "scan":
+            c = self._type_color()
+            return c, 600, 13, c, 3
+        cc = getattr(self.marking, "color_code", 0) or 0
+        if cc >= 2:                       # confident illness → demand attention
+            return T.RED, 700, 14, T.RED, 4
+        if cc == 1:                       # uncertain → quiet, muted
+            return T.TEXT_MUTED, 400, 12, T.TEXT_MUTED, 2
+        return T.TEXT_DIM, 400, 12, T.TEXT_DIM, 2
+
     def _apply_border(self):
-        color = self._type_color()
+        _tc, _w, _px, bar_color, bar_px = self._emphasis()
         if self._selected:
             bg = T.BLUE_BG
             border_color = T.ACCENT
@@ -322,7 +337,7 @@ class _MarkingCard(QFrame):
             border_color = "transparent"
         self.setStyleSheet(
             f"_MarkingCard {{"
-            f"  border-left: 3px solid {color};"
+            f"  border-left: {bar_px}px solid {bar_color};"
             f"  border-top: 1px solid {border_color};"
             f"  border-right: 1px solid {border_color};"
             f"  border-bottom: 1px solid {border_color};"
@@ -330,7 +345,7 @@ class _MarkingCard(QFrame):
             f"  background: {bg};"
             f"}}"
             f"_MarkingCard:hover {{"
-            f"  border-left: 3px solid {color};"
+            f"  border-left: {bar_px}px solid {bar_color};"
             f"  border-top: 1px solid {T.BORDER};"
             f"  border-right: 1px solid {T.BORDER};"
             f"  border-bottom: 1px solid {T.BORDER};"
