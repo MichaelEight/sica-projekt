@@ -1063,10 +1063,7 @@ class ViewerPage(QWidget):
         # Toolbar
         self.toolbar.setStyleSheet(f"background: {T.TOPBAR};")
         self.file_label.setStyleSheet(f"font-size:11px; color:{T.BTN_TEXT}; font-family:Menlo;")
-        self.analysis_badge.setStyleSheet(f"""
-            font-size: 11px; background: {T.BADGE_NORM_BG}; color: {T.BADGE_NORM_TEXT};
-            padding: 0px 8px; border-radius: 3px; font-weight: 600;
-        """)
+        self._refresh_analysis_badge()  # re-style badge for the new theme
         from ui.theme import is_dark_mode as _idm
         _ah = '#047857' if _idm() else '#3a8eef'
         self.btn_full_analysis.setStyleSheet(f"""
@@ -1230,7 +1227,7 @@ class ViewerPage(QWidget):
             self._autoscan_results = cached_raw
             self._autoscan_from_scan = True  # full per-window probs
             self._apply_autoscan_overlay()
-            self.analysis_badge.show()
+            self._refresh_analysis_badge()
         else:
             self._rebuild_autoscan_from_markings()
 
@@ -2152,6 +2149,7 @@ class ViewerPage(QWidget):
             self._log_autoscan_results(cached)
             self._apply_autoscan_results()
             self._apply_autoscan_overlay()
+            self._refresh_analysis_badge()
         else:
             self._run_autoscan()
 
@@ -2187,6 +2185,7 @@ class ViewerPage(QWidget):
         # Show loading overlay
         self._autoscan_overlay = AutoscanOverlay(self)
         self._autoscan_overlay.show_loading(f"0/{n_windows} okien")
+        self._set_analysis_badge_running()
 
         # Progress polling timer
         self._autoscan_poll = QTimer(self)
@@ -2337,7 +2336,7 @@ class ViewerPage(QWidget):
                 "model_name": model_name,
                 "elapsed": 0.0,
             }
-            self.analysis_badge.show()
+        self._refresh_analysis_badge()
 
 
 
@@ -2366,7 +2365,7 @@ class ViewerPage(QWidget):
         # re-filtering must not recompute/persist from this coarse set.
         self._autoscan_from_scan = False
         self._apply_autoscan_overlay()
-        self.analysis_badge.show()
+        self._refresh_analysis_badge()
 
     def _merged_autoscan_regions(self) -> list[dict]:
         """Split overlapping scan windows into atomic segments, keep the
@@ -2521,6 +2520,63 @@ class ViewerPage(QWidget):
             pass
         self._apply_autoscan_results()
         self._apply_autoscan_overlay()
+        self._refresh_analysis_badge()
+
+    # ── Top-bar analysis status badge ──
+    def _badge_base_style(self, bg: str, fg: str) -> str:
+        return (f"font-size: 11px; background: {bg}; color: {fg}; "
+                f"padding: 0px 8px; border-radius: 3px; font-weight: 600;")
+
+    def _set_analysis_badge_running(self):
+        self.analysis_badge.setText("Analiza AI w toku…")
+        self.analysis_badge.setStyleSheet(
+            self._badge_base_style(T.BADGE_WARN_BG, T.BADGE_WARN_TEXT))
+        self.analysis_badge.setToolTip(
+            "Trwa analiza AI całego nagrania. Proszę czekać.")
+        self.analysis_badge.show()
+
+    def _refresh_analysis_badge(self):
+        """Show finding counts (red / yellow / niepewne) in a neutral pill.
+
+        The pill itself stays neutral (blue, informational). Severity lives only
+        in the colored count dots, so a finished scan is never misread as a
+        green 'all healthy'."""
+        if not self._autoscan_results:
+            self.analysis_badge.hide()
+            return
+        t_low = get_threshold_low()
+        red = yellow = niepewne = 0
+        for s in self._merged_autoscan_regions():
+            code = s.get("color", 0)
+            if code == 2:
+                red += 1
+            elif code == 1:
+                if (s.get("top_prob") or 0.0) < t_low:
+                    niepewne += 1
+                else:
+                    yellow += 1
+        total = red + yellow + niepewne
+        if total == 0:
+            text = "Analiza AI: brak znalezisk"
+        else:
+            parts = []
+            if red:
+                parts.append(f"<span style='color:{T.RED};'>● {red}</span>")
+            if yellow:
+                parts.append(f"<span style='color:{T.TIER_YELLOW};'>● {yellow}</span>")
+            if niepewne:
+                parts.append(f"<span style='color:{T.TEXT_MUTED};'>● {niepewne}</span>")
+            text = "Analiza AI:&nbsp; " + "&nbsp;&nbsp;".join(parts)
+        self.analysis_badge.setText(text)
+        self.analysis_badge.setStyleSheet(
+            self._badge_base_style(T.BADGE_BLUE_BG, T.BADGE_BLUE_TEXT))
+        self.analysis_badge.setToolTip(
+            "Czerwone: wysokie podejrzenie nieprawidłowości.\n"
+            "Żółte: do sprawdzenia.\n"
+            "Niepewne: model zauważył nieprawidłowość, ale nie dopasował choroby.\n"
+            "Wynik AI ma charakter pomocniczy i nie stanowi diagnozy. "
+            "Ostateczną ocenę stawia lekarz.")
+        self.analysis_badge.show()
 
     def _apply_autoscan_overlay(self):
         if not self._autoscan_results:
