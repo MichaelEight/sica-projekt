@@ -814,9 +814,9 @@ class MarkingsPanel(QWidget):
         hint.setStyleSheet(f"color:{T.TEXT_MUTED}; font-size:10px;")
         lay.addWidget(hint)
 
-        mark_hint = QLabel("Pionowa kreska = 40%. Żółte wykrycia poniżej niej "
-                           "pokazujemy jako «Niepewne» (model nie jest pewny "
-                           "rozpoznania).")
+        mark_hint = QLabel("Zakreskowany obszar (poniżej 40%): pewność modelu "
+                           "jest niska — wyniki z tego regionu mogą być "
+                           "niewiarygodne i pokazujemy je jako «Niepewne».")
         mark_hint.setWordWrap(True)
         mark_hint.setStyleSheet(f"color:{T.TEXT_MUTED}; font-size:10px;")
         lay.addWidget(mark_hint)

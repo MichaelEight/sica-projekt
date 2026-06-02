@@ -84,11 +84,17 @@ class RangeSlider(QWidget):
         if x1 > xh:
             p.setBrush(QColor(T.RED))
             p.drawRect(QRectF(xh, y - th / 2, x1 - xh, th))
-        # "Niepewne" boundary tick (fixed reference, e.g. 40%)
+        # Low-reliability zone [0..mark]: diagonal hatch over the track so the
+        # user sees that detections in this confidence range are unreliable.
         if self._mark is not None:
             xm = self._pct_to_x(self._mark)
-            p.setPen(QPen(QColor(T.TEXT), 1.6))
-            p.drawLine(QPointF(xm, y - 9), QPointF(xm, y + 9))
+            zone = QRectF(x0, y - 8, xm - x0, 16)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(QColor(T.TEXT_DIM), Qt.FDiagPattern))
+            p.drawRect(zone)
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QColor(T.TEXT_DIM), 1))
+            p.drawRect(zone)
             p.setPen(Qt.NoPen)
         # handles (draw red first so an overlap shows yellow on top)
         for x, col in ((xh, T.RED), (xl, T.TIER_YELLOW)):
