@@ -1174,12 +1174,15 @@ class TwelveLeadGrid(QWidget):
                 cell.clear()
                 cell.lead_name = lead
 
-        # Rhythm strip: lead II, current window
-        if "II" in leads:
-            ii_idx = leads.index("II")
+        # Rhythm strip: prefer lead II; fall back to the first available lead
+        # so records without II (e.g. 2-lead montages) still show a rhythm strip.
+        rhythm_lead = "II" if "II" in leads else (leads[0] if leads else None)
+        if rhythm_lead is not None:
+            r_idx = leads.index(rhythm_lead)
             self.rhythm.v_min = v_min
             self.rhythm.v_max = v_max
-            self.rhythm.set_data("II (rytm)", signal[:, ii_idx], fs, t_start, t_end)
+            label = "II (rytm)" if rhythm_lead == "II" else f"{rhythm_lead} (rytm)"
+            self.rhythm.set_data(label, signal[:, r_idx], fs, t_start, t_end)
         else:
             self.rhythm.clear()
 

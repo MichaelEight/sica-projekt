@@ -1,10 +1,112 @@
 """Shared UI helpers used across pages."""
 import numpy as np
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QRectF, QPointF
 from PySide6.QtGui import QFont, QPainter, QColor, QPen, QBrush
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QFrame
 
 import ui.theme as T
+
+
+class RangeSlider(QWidget):
+    """Horizontal dual-handle slider for the two AI confidence thresholds.
+
+    A single track with two handles: the YELLOW handle = 'do sprawdzenia'
+    (borderline) threshold, the RED handle = 'choroba' (illness) threshold.
+    The track is tinted in tier colors — grey below the yellow handle, yellow
+    between handles, red above the red handle — so the meaning is obvious
+    without reading anything. The yellow handle can never pass the red one
+    (low <= high is enforced). Values are integer percents (0..100).
+    """
+
+    valueChanged = Signal(int, int)  # low_pct, high_pct (live, during drag)
+
+    def __init__(self, low: int = 40, high: int = 70, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(34)
+        self.setMinimumWidth(180)
+        self._low = int(low)
+        self._high = int(high)
+        self._drag: str | None = None  # 'low' | 'high'
+        self._r = 8  # handle radius
+        self.setCursor(Qt.PointingHandCursor)
+
+    def values(self) -> tuple[int, int]:
+        return self._low, self._high
+
+    def set_values(self, low: int, high: int) -> None:
+        low = max(0, min(100, int(low)))
+        high = max(0, min(100, int(high)))
+        if low > high:
+            low, high = high, low
+        if (low, high) != (self._low, self._high):
+            self._low, self._high = low, high
+            self.update()
+
+    # ── geometry ──
+    def _track(self):
+        m = self._r + 2
+        return m, self.width() - m, self.height() / 2  # x0, x1, y_center
+
+    def _pct_to_x(self, pct: int) -> float:
+        x0, x1, _ = self._track()
+        return x0 + (x1 - x0) * pct / 100.0
+
+    def _x_to_pct(self, x: float) -> int:
+        x0, x1, _ = self._track()
+        if x1 <= x0:
+            return 0
+        return int(round(max(0.0, min(1.0, (x - x0) / (x1 - x0))) * 100))
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        x0, x1, y = self._track()
+        xl = self._pct_to_x(self._low)
+        xh = self._pct_to_x(self._high)
+        th = 5.0  # track thickness
+        p.setPen(Qt.NoPen)
+        # grey: below borderline
+        p.setBrush(QColor(T.BORDER))
+        p.drawRoundedRect(QRectF(x0, y - th / 2, x1 - x0, th), 2.5, 2.5)
+        # yellow: borderline .. illness
+        if xh > xl:
+            p.setBrush(QColor(T.YELLOW))
+            p.drawRect(QRectF(xl, y - th / 2, xh - xl, th))
+        # red: illness .. top
+        if x1 > xh:
+            p.setBrush(QColor(T.RED))
+            p.drawRect(QRectF(xh, y - th / 2, x1 - xh, th))
+        # handles (draw red first so an overlap shows yellow on top)
+        for x, col in ((xh, T.RED), (xl, T.YELLOW)):
+            p.setBrush(QColor(T.WHITE))
+            p.setPen(QPen(QColor(col), 2.5))
+            p.drawEllipse(QPointF(x, y), self._r, self._r)
+
+    def _nearest(self, x: float) -> str:
+        return "low" if abs(x - self._pct_to_x(self._low)) <= \
+            abs(x - self._pct_to_x(self._high)) else "high"
+
+    def mousePressEvent(self, e):
+        self._drag = self._nearest(e.position().x())
+        self._apply(e.position().x())
+
+    def mouseMoveEvent(self, e):
+        if self._drag:
+            self._apply(e.position().x())
+
+    def mouseReleaseEvent(self, _e):
+        self._drag = None
+
+    def _apply(self, x: float):
+        pct = self._x_to_pct(x)
+        if self._drag == "low":
+            self._low = min(pct, self._high)
+        elif self._drag == "high":
+            self._high = max(pct, self._low)
+        else:
+            return
+        self.update()
+        self.valueChanged.emit(self._low, self._high)
 
 
 class LeadImportanceBar(QWidget):

@@ -1,12 +1,17 @@
 """Unified markings panel — replaces CaliperPanel, AnnotationPanel, ResultsPanel."""
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QScrollArea, QFrame, QSizePolicy,
 )
 
 import ui.theme as T
+from ui.widgets import RangeSlider
+from ui.config import (
+    get_threshold_high, get_threshold_low, set_thresholds,
+    reset_thresholds, DEFAULT_T_HIGH, DEFAULT_T_LOW,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +399,7 @@ class MarkingsPanel(QWidget):
     marking_feedback_requested = Signal(str)  # id — open feedback dialog (scan only)
     undo_requested = Signal()
     redo_requested = Signal()
+    thresholds_changed = Signal(float, float)  # t_low, t_high (0..1)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -434,6 +440,10 @@ class MarkingsPanel(QWidget):
         h_lay.addWidget(self._redo_btn)
 
         root.addWidget(header)
+        root.addWidget(self._separator())
+
+        # --- 1b. AI sensitivity (confidence thresholds) ---
+        root.addWidget(self._build_threshold_section())
         root.addWidget(self._separator())
 
         # --- 2. Lead scope toggle (two-button segmented control) ---
@@ -757,6 +767,90 @@ class MarkingsPanel(QWidget):
         sep.setFixedHeight(1)
         sep.setStyleSheet(f"background: {T.BORDER}; border: none;")
         return sep
+
+    # ── AI sensitivity (confidence thresholds) ──
+    def _build_threshold_section(self) -> QWidget:
+        """Two-handle slider controlling the red/yellow detection thresholds.
+
+        Designed to be understood with zero prior knowledge: the track is
+        colored like the bands it controls, every value is shown as a live
+        percent, and a one-line explanation is always visible (no hover
+        needed)."""
+        box = QWidget()
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(0, 6, 0, 6)
+        lay.setSpacing(5)
+
+        title = QLabel("Czułość wykrywania AI")
+        title.setStyleSheet(
+            f"color:{T.TEXT}; font-size:12px; font-weight:700;")
+        lay.addWidget(title)
+
+        lo = int(round(get_threshold_low() * 100))
+        hi = int(round(get_threshold_high() * 100))
+        self._thr_slider = RangeSlider(low=lo, high=hi)
+        self._thr_slider.valueChanged.connect(self._on_slider_changed)
+        lay.addWidget(self._thr_slider)
+
+        self._thr_low_lbl = QLabel()
+        self._thr_low_lbl.setStyleSheet("font-size:11px;")
+        lay.addWidget(self._thr_low_lbl)
+        self._thr_high_lbl = QLabel()
+        self._thr_high_lbl.setStyleSheet("font-size:11px;")
+        lay.addWidget(self._thr_high_lbl)
+
+        hint = QLabel("Przesuń w lewo, aby wykryć więcej (mniej pominiętych "
+                      "fragmentów). W prawo — tylko najpewniejsze.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color:{T.TEXT_MUTED}; font-size:10px;")
+        lay.addWidget(hint)
+
+        self._thr_reset_btn = QPushButton("Przywróć domyślne")
+        self._thr_reset_btn.setFixedHeight(24)
+        self._thr_reset_btn.setCursor(Qt.PointingHandCursor)
+        self._thr_reset_btn.setStyleSheet(
+            f"font-size:11px; padding:2px 8px; border:1px solid {T.BORDER}; "
+            f"border-radius:4px; background:{T.WHITE}; color:{T.TEXT};")
+        self._thr_reset_btn.clicked.connect(self._reset_thresholds)
+        reset_row = QHBoxLayout()
+        reset_row.setContentsMargins(0, 0, 0, 0)
+        reset_row.addWidget(self._thr_reset_btn)
+        reset_row.addStretch()
+        lay.addLayout(reset_row)
+
+        # Debounce live dragging so the re-filter doesn't thrash.
+        self._thr_timer = QTimer(self)
+        self._thr_timer.setSingleShot(True)
+        self._thr_timer.setInterval(150)
+        self._thr_timer.timeout.connect(self._emit_thresholds)
+
+        self._update_threshold_readouts(lo, hi)
+        return box
+
+    def _on_slider_changed(self, low: int, high: int):
+        self._update_threshold_readouts(low, high)
+        self._thr_timer.start()  # debounced emit
+
+    def _update_threshold_readouts(self, low: int, high: int):
+        self._thr_low_lbl.setText(
+            f"<span style='color:{T.YELLOW};'>●</span> "
+            f"Do sprawdzenia (żółte): <b>{low}%</b>")
+        self._thr_high_lbl.setText(
+            f"<span style='color:{T.RED};'>●</span> "
+            f"Choroba (czerwone): <b>{high}%</b>")
+
+    def _emit_thresholds(self):
+        low, high = self._thr_slider.values()
+        set_thresholds(low / 100.0, high / 100.0)
+        self.thresholds_changed.emit(low / 100.0, high / 100.0)
+
+    def _reset_thresholds(self):
+        reset_thresholds()
+        lo = int(round(DEFAULT_T_LOW * 100))
+        hi = int(round(DEFAULT_T_HIGH * 100))
+        self._thr_slider.set_values(lo, hi)
+        self._update_threshold_readouts(lo, hi)
+        self.thresholds_changed.emit(DEFAULT_T_LOW, DEFAULT_T_HIGH)
 
     def _set_lead_filter(self, active: bool):
         self._lead_filter_active = active
