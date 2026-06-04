@@ -79,6 +79,7 @@ class Marking:
     source: str = "user"
     lead_importance: dict | None = None  # {lead_name: pct} from explainable AI
     time_heatmap: list | None = None     # per-sample attention 0..1 from Grad-CAM
+    detection_leads: list | None = None  # leads active when this was detected; XAI shows only these
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
@@ -110,6 +111,7 @@ class Marking:
             "source": self.source,
             "lead_importance": self.lead_importance,
             "time_heatmap": self.time_heatmap,
+            "detection_leads": self.detection_leads,
             "created_at": self.created_at,
         }
 
@@ -130,6 +132,7 @@ class Marking:
                 source=d.get("source", "user"),
                 lead_importance=d.get("lead_importance"),
                 time_heatmap=d.get("time_heatmap"),
+                detection_leads=d.get("detection_leads"),
             )
             if "id" in d:
                 m.id = d["id"]

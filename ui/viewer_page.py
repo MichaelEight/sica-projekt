@@ -28,6 +28,7 @@ from ui.config import classify_window, get_threshold_high, get_threshold_low
 from PySide6.QtGui import QCursor
 from ecg_measurements import compute_measurements
 from resample import resample_to_target, TARGET_FS
+from healthy_reference import fill_missing_leads, filter_lead_importance
 from ui.app_logger import get_logger
 
 _log = get_logger("viewer_page")
@@ -1491,9 +1492,21 @@ class ViewerPage(QWidget):
             if not m.lead_importance and self.signal is not None:
                 self._compute_lead_importance_for_marking(m)
             else:
+                self._show_lead_importance(m)
                 self._apply_explain_heatmap(m)
         else:
+            self.markings_panel._lead_importance_panel.set_data(None)
             self._apply_explain_heatmap(None)
+
+    def _show_lead_importance(self, marking):
+        """Show a scan marking's XAI lead-importance, limited to the leads that
+        were active when the illness was detected (persisted on the marking).
+        Leads added or swapped in afterwards are not shown; legacy markings with
+        no stored scope fall back to showing every lead."""
+        scope = set(marking.detection_leads or []) or None
+        imp = filter_lead_importance(marking.lead_importance, scope)
+        title = f"{marking.t1:.1f}–{marking.t2:.1f} s · {marking.label}"
+        self.markings_panel._lead_importance_panel.set_data(imp, title=title)
 
     def _apply_explain_heatmap(self, marking):
         """Set/clear attention overlay on all canvases."""
@@ -1515,8 +1528,14 @@ class ViewerPage(QWidget):
         e = min(self.signal.shape[0], int(marking.t2 * self.fs))
         if e - s < 100:
             return
+        # Reproduce the detection's lead scope so XAI matches what was used to
+        # find the illness — not whatever leads are visible now. Legacy markings
+        # without a stored scope fall back to all currently-real leads.
+        detection = (set(marking.detection_leads) if marking.detection_leads
+                     else self._present_model_leads())
         window = self._assemble_model_signal()[s:e]
         window, _, msg = resample_to_target(window, self.fs)
+        window = fill_missing_leads(window, detection)
         if msg:
             _log_window(f"explain {marking.t1:.2f}-{marking.t2:.2f}s: {msg}")
         # Pick non-healthy top class to explain
@@ -1533,19 +1552,26 @@ class ViewerPage(QWidget):
             )
             if exp.get("explanations"):
                 imp = exp["explanations"][0].get("lead_importance_percent")
+                imp = filter_lead_importance(imp, detection)
                 heat = exp["explanations"][0].get("time_heatmap")
                 if imp:
                     self._marking_store.edit(
                         marking.id, lead_importance=imp, time_heatmap=heat,
+                        detection_leads=sorted(detection),
                     )
-                    title = f"{marking.t1:.1f}\u2013{marking.t2:.1f} s \u00b7 {marking.label}"
-                    self.markings_panel._lead_importance_panel.set_data(imp, title=title)
+                    self._show_lead_importance(marking)
                     self._apply_explain_heatmap(marking)
                     self._save_ann()
         except Exception:
             pass
 
     def _on_marking_deleted(self, marking_id: str):
+        # Clear the XAI panel + attention overlay if we just deleted the marking
+        # they belong to (the selected one), so stale lead-importance can't linger.
+        if marking_id == getattr(self.markings_panel, "_selected_id", None):
+            self.markings_panel._selected_id = None
+            self.markings_panel._lead_importance_panel.set_data(None)
+            self._apply_explain_heatmap(None)
         self._marking_store.delete(marking_id)
         self._refresh_markings()
         self._save_ann()
@@ -2093,10 +2119,13 @@ class ViewerPage(QWidget):
         """Build a (N, 12) array in canonical lead order for the AI model.
 
         The model is fixed to 12 leads, so we map each available lead into its
-        canonical slot and zero-fill the rest. This lets records with fewer or
-        differently-named leads (e.g. 2-lead MIT-BIH) still be analyzed. When
-        ``selected_only`` is set, leads not currently active in the viewer are
-        also zeroed — that is the "analyze selected leads" action.
+        canonical slot. Missing slots are left at zero here and replaced with the
+        hardcoded healthy reference per-window (see ``fill_missing_leads``), after
+        resampling — that filler only exists so the model has all 12 inputs and is
+        never shown to the user. When ``selected_only`` is set, leads not currently
+        active in the viewer count as missing too — the "analyze selected leads"
+        action. Pair the slice with ``_present_model_leads(selected_only)`` to know
+        which leads are real before filling and before reading XAI back.
         """
         from ui.ekg_canvas import ALL_LEADS_ORDER
         n = self.signal.shape[0]
@@ -2107,6 +2136,18 @@ class ViewerPage(QWidget):
             if cl in self.leads and (active is None or cl in active):
                 out[:, ci] = self.signal[:, self.leads.index(cl)]
         return out
+
+    def _present_model_leads(self, selected_only: bool = False) -> set[str]:
+        """Canonical leads backed by real signal (and active, when selected_only).
+
+        Everything else is filled with the healthy reference for the model and
+        excluded from the XAI lead-importance readout.
+        """
+        from ui.ekg_canvas import ALL_LEADS_ORDER
+        active = (set(self.layout_switcher.visible_leads())
+                  if selected_only else None)
+        return {cl for cl in ALL_LEADS_ORDER
+                if cl in self.leads and (active is None or cl in active)}
 
     def _run_full_analysis(self, selected_only: bool = False):
         """Run the sliding-window AI scan across the whole recording.
@@ -2151,9 +2192,13 @@ class ViewerPage(QWidget):
 
         from model.inference_api import predict_with_model
 
-        # Canonical 12-lead signal (zero-filled / lead-masked as chosen).
-        scan_signal = self._assemble_model_signal(
-            getattr(self, "_scan_selected_only", False))
+        # Canonical 12-lead signal. Missing/deselected leads are healthy-filled
+        # per-window after resampling; ``present`` tracks the real ones so the
+        # filler stays out of the XAI lead-importance readout.
+        selected_only = getattr(self, "_scan_selected_only", False)
+        scan_signal = self._assemble_model_signal(selected_only)
+        present = self._present_model_leads(selected_only)
+        present_list = sorted(present)  # leads-at-detection, persisted per marking
 
         window_sec = 10.0
         step_sec = 5.0
@@ -2170,7 +2215,7 @@ class ViewerPage(QWidget):
 
         # Show loading overlay
         self._autoscan_overlay = AutoscanOverlay(self)
-        self._autoscan_overlay.show_loading(f"0/{n_windows} okien")
+        self._autoscan_overlay.show_loading(f"0/{n_windows} fragmentów")
 
         # Progress polling timer
         self._autoscan_poll = QTimer(self)
@@ -2192,6 +2237,7 @@ class ViewerPage(QWidget):
                 t_start = s / self.fs
                 t_end = (s + window_samples) / self.fs
                 window, _, msg = resample_to_target(window, self.fs)
+                window = fill_missing_leads(window, present)
                 if i < 3 and msg:
                     _log_window(
                         f"autoscan window #{i + 1}/{n_windows} "
@@ -2234,6 +2280,7 @@ class ViewerPage(QWidget):
                         )
                         if exp.get("explanations"):
                             lead_importance = exp["explanations"][0].get("lead_importance_percent")
+                            lead_importance = filter_lead_importance(lead_importance, present)
                             time_heatmap = exp["explanations"][0].get("time_heatmap")
                     except Exception:
                         lead_importance = None
@@ -2244,6 +2291,7 @@ class ViewerPage(QWidget):
                     "color": color, "probs": prob_dict,
                     "lead_importance": lead_importance,
                     "time_heatmap": time_heatmap,
+                    "detection_leads": present_list,
                 })
             self._autoscan_thread_results = results
 
@@ -2251,7 +2299,7 @@ class ViewerPage(QWidget):
             """Check thread progress from main thread."""
             done, total_w = self._autoscan_thread_progress
             if hasattr(self, '_autoscan_overlay') and self._autoscan_overlay:
-                self._autoscan_overlay.update_progress(f"{done}/{total_w} okien")
+                self._autoscan_overlay.update_progress(f"{done}/{total_w} fragmentów")
             if self._autoscan_thread_results is not None:
                 self._autoscan_poll.stop()
                 self._autoscan_results = self._autoscan_thread_results
@@ -2341,6 +2389,7 @@ class ViewerPage(QWidget):
                 "probs": m.probs or {},
                 "lead_importance": m.lead_importance,
                 "time_heatmap": m.time_heatmap,
+                "detection_leads": m.detection_leads,
             })
         # Sort by start time for predictable merge output.
         synthetic.sort(key=lambda r: r["t_start"])
@@ -2396,6 +2445,7 @@ class ViewerPage(QWidget):
                 "probs": rep.get("probs") or {},
                 "lead_importance": rep.get("lead_importance"),
                 "time_heatmap": rep.get("time_heatmap"),
+                "detection_leads": rep.get("detection_leads"),
             })
 
         # Drop "Niepewne" atoms whose top class matches a touching strong atom
@@ -2435,6 +2485,7 @@ class ViewerPage(QWidget):
                         prev["probs"] = seg["probs"]
                         prev["lead_importance"] = seg.get("lead_importance")
                         prev["time_heatmap"] = seg.get("time_heatmap")
+                        prev["detection_leads"] = seg.get("detection_leads")
                     continue
             merged.append(dict(seg))
         return merged
@@ -2463,6 +2514,7 @@ class ViewerPage(QWidget):
                 source="ai",
                 lead_importance=seg.get("lead_importance"),
                 time_heatmap=seg.get("time_heatmap"),
+                detection_leads=seg.get("detection_leads"),
                 note=prev.note if prev else "",
                 category=prev.category if prev else "",
             )
@@ -2621,8 +2673,10 @@ class ViewerPage(QWidget):
 
         start_sample = int(t1 * self.fs)
         end_sample = int(t2 * self.fs)
+        present = self._present_model_leads()
         window_signal = self._assemble_model_signal()[start_sample:end_sample]
         window_signal, _, msg = resample_to_target(window_signal, self.fs)
+        window_signal = fill_missing_leads(window_signal, present)
         if msg:
             _log_window(f"single window {t1:.2f}-{t2:.2f}s: {msg}")
 
@@ -2641,6 +2695,7 @@ class ViewerPage(QWidget):
         marking = Marking(
             type="scan", lead=lead, t1=t1, t2=t2,
             probs=prob_dict, color_code=color_code, source="ai",
+            detection_leads=sorted(present),
         )
         self._marking_store.add(marking)
         self._refresh_markings()
