@@ -7,8 +7,9 @@ import numpy as np
 CANONICAL_LEADS = ["I", "II", "III", "aVR", "aVL", "aVF",
                    "V1", "V2", "V3", "V4", "V5", "V6"]
 
-_ASSET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "assets", "healthy_reference.npy")
+_ASSET_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "assets", "healthy_reference.npy")
 _REFERENCE: np.ndarray | None = None
 
 

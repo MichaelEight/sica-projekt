@@ -28,7 +28,7 @@ from ui.config import classify_window, get_threshold_high, get_threshold_low
 from PySide6.QtGui import QCursor
 from ecg_measurements import compute_measurements
 from resample import resample_to_target, TARGET_FS
-from healthy_reference import fill_missing_leads, filter_lead_importance
+from model.healthy_reference import fill_missing_leads, filter_lead_importance
 from ui.app_logger import get_logger
 
 _log = get_logger("viewer_page")

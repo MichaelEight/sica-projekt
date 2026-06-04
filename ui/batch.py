@@ -17,7 +17,7 @@ import numpy as np
 
 from marking_store import Marking, MarkingStore
 from resample import resample_to_target
-from healthy_reference import CANONICAL_LEADS, fill_missing_leads
+from model.healthy_reference import CANONICAL_LEADS, fill_missing_leads
 from ui.theme import TARGET_CLASSES
 from ui.config import classify_window, get_threshold_high, get_threshold_low
 from ui.lead_names import normalize_lead_names as _normalize_lead_names

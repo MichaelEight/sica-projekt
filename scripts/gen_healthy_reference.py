@@ -14,7 +14,7 @@ import os
 import numpy as np
 import wfdb
 
-from healthy_reference import CANONICAL_LEADS
+from model.healthy_reference import CANONICAL_LEADS
 from model.inference_api import load_checkpoint_model, predict_with_model
 from ui.lead_names import normalize_lead_names
 from ui.theme import TARGET_CLASSES
