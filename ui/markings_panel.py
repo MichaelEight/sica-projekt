@@ -526,6 +526,7 @@ class MarkingsPanel(QWidget):
         from ui.widgets import LeadImportanceBar
         self._lead_importance_panel = LeadImportanceBar()
         self._lead_importance_panel.hide()
+        self._lead_importance_panel.closed.connect(self._on_lead_importance_closed)
         list_lay.addWidget(self._lead_importance_panel)
 
         self._stack.addWidget(list_page)  # index 0
@@ -946,6 +947,19 @@ class MarkingsPanel(QWidget):
                 if m.type != "scan":
                     self.show_edit_form(m)
                 break
+
+    def _on_lead_importance_closed(self):
+        # X on the XAI panel: hide it and deselect the active illness (if any).
+        self._lead_importance_panel.set_data(None)
+        if self._selected_id is None:
+            return
+        self._selected_id = None
+        for card in self._cards:
+            card.set_selected(False)
+        self.marking_selected.emit("")
+        if self._stack.currentIndex() == 2:
+            self._stack.setCurrentIndex(0)
+            self._editing_id = None
 
     # --- form handlers ---
 
