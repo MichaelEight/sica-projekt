@@ -937,14 +937,8 @@ class MarkingsPanel(QWidget):
         for card in self._cards:
             card.set_selected(card.marking.id == marking_id)
         self.marking_selected.emit(marking_id)
-
-        # Update lead-importance panel for scan markings with XAI data
-        selected = next((m for m in self._markings if m.id == marking_id), None)
-        if selected and selected.type == "scan":
-            title = f"{selected.t1:.1f}–{selected.t2:.1f} s · {selected.label}"
-            self._lead_importance_panel.set_data(selected.lead_importance, title=title)
-        else:
-            self._lead_importance_panel.set_data(None)
+        # The lead-importance panel is driven by ViewerPage._on_marking_selected
+        # (it knows the marking's detection-lead scope); don't set it here.
 
         # Open edit form for non-scan markings
         for m in self._markings:

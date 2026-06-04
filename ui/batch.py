@@ -17,9 +17,32 @@ import numpy as np
 
 from marking_store import Marking, MarkingStore
 from resample import resample_to_target
+from healthy_reference import CANONICAL_LEADS, fill_missing_leads
 from ui.theme import TARGET_CLASSES
 from ui.config import classify_window, get_threshold_high, get_threshold_low
 from ui.lead_names import normalize_lead_names as _normalize_lead_names
+
+
+def _assemble_canonical(
+    signal: np.ndarray, leads: list[str] | None
+) -> tuple[np.ndarray, set[str] | None]:
+    """Map loaded leads into canonical 12-lead order.
+
+    Returns (out, present) where ``out`` is (N, 12) and ``present`` is the set of
+    canonical leads backed by real signal (None when ``leads`` is omitted and the
+    input is assumed already-canonical 12-lead). Missing leads are filled with the
+    healthy reference per-window, matching the viewer's analysis path.
+    """
+    if leads is None:
+        return signal, None
+    n = signal.shape[0]
+    out = np.zeros((n, len(CANONICAL_LEADS)), dtype=np.float32)
+    present: set[str] = set()
+    for ci, cl in enumerate(CANONICAL_LEADS):
+        if cl in leads:
+            out[:, ci] = signal[:, leads.index(cl)]
+            present.add(cl)
+    return out, present
 
 
 def load_wfdb_record(base_path: str) -> tuple[np.ndarray, list[str], int] | None:
@@ -43,12 +66,18 @@ def load_wfdb_record(base_path: str) -> tuple[np.ndarray, list[str], int] | None
         return None
 
 
-def scan_signal(signal: np.ndarray, fs: int, model, device) -> list[dict]:
+def scan_signal(
+    signal: np.ndarray, fs: int, model, device, leads: list[str] | None = None
+) -> list[dict]:
     """Run sliding 10s/5s window autoscan on a signal.
 
-    Returns the raw window results (one per window).
+    When ``leads`` is given the signal is mapped into canonical 12-lead order and
+    missing leads are healthy-filled (same as the viewer); otherwise the input is
+    assumed already-canonical. Returns the raw window results (one per window).
     """
     from model.inference_api import predict_with_model
+
+    signal, present = _assemble_canonical(signal, leads)
 
     t_high = get_threshold_high()
     t_low = get_threshold_low()
@@ -72,6 +101,7 @@ def scan_signal(signal: np.ndarray, fs: int, model, device) -> list[dict]:
         t_start = s / fs
         t_end = (s + window_samples) / fs
         window, _, _ = resample_to_target(window, fs)
+        window = fill_missing_leads(window, present)
         try:
             res = predict_with_model(
                 model=model, data=window, threshold=0.5,
@@ -173,8 +203,15 @@ def write_autoscan_cache(base_path: str, model_path: str, windows: list[dict]) -
         pass
 
 
-def save_ai_annotations(base_path: str, merged: list[dict], patient: dict | None) -> None:
-    """Write a .ann sidecar containing synthetic scan markings."""
+def save_ai_annotations(
+    base_path: str, merged: list[dict], patient: dict | None,
+    detection_leads: list[str] | None = None,
+) -> None:
+    """Write a .ann sidecar containing synthetic scan markings.
+
+    ``detection_leads`` records which leads backed the scan so the viewer's
+    on-demand XAI later limits lead-importance to that scope.
+    """
     if not base_path:
         return
     store = MarkingStore()
@@ -187,6 +224,7 @@ def save_ai_annotations(base_path: str, merged: list[dict], patient: dict | None
             probs=seg.get("probs"),
             color_code=seg.get("color", 0),
             source="ai",
+            detection_leads=detection_leads,
         )
         store.add(m)
     store.save_ann(base_path + ".ann", patient=patient)
@@ -267,15 +305,17 @@ def run_batch(
             continue
         signal, leads, fs = loaded
         duration = signal.shape[0] / fs if fs else 0.0
+        _, present = _assemble_canonical(signal, leads)
+        detection_leads = sorted(present) if present is not None else None
 
-        windows = _scan_with_progress(signal, fs, model, device, progress, cancel_flag)
+        windows = _scan_with_progress(signal, fs, model, device, progress, cancel_flag, leads)
         if cancel_flag.is_set():
             break
 
         merged = merge_regions(windows)
         patient, _gt = _lookup_patient_and_gt(base_path, gt_lookup)
 
-        save_ai_annotations(base_path, merged, patient)
+        save_ai_annotations(base_path, merged, patient, detection_leads)
         write_autoscan_cache(base_path, model_path, windows)
 
         red, yellow = _count_colors(merged)
@@ -300,9 +340,12 @@ def _scan_with_progress(
     device,
     progress: dict,
     cancel_flag: threading.Event,
+    leads: list[str] | None = None,
 ) -> list[dict]:
     """scan_signal variant that updates `progress` per window."""
     from model.inference_api import predict_with_model
+
+    signal, present = _assemble_canonical(signal, leads)
 
     t_high = get_threshold_high()
     t_low = get_threshold_low()
@@ -330,6 +373,7 @@ def _scan_with_progress(
         t_start = s / fs
         t_end = (s + window_samples) / fs
         window, _, _ = resample_to_target(window, fs)
+        window = fill_missing_leads(window, present)
         try:
             res = predict_with_model(
                 model=model, data=window, threshold=0.5,
