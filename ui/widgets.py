@@ -138,11 +138,37 @@ class LeadImportanceBar(QWidget):
     Per professor 2026-04-14 + 11mat11: explain which leads drove the AI's decision.
     """
 
+    closed = Signal()  # X button clicked: caller deselects the active illness
+
+    _CLOSE_SZ = 20  # hit-box for the X (drawn directly; native button stays
+                    # invisible under the custom paintEvent)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(140)
+        self.setMouseTracking(True)
         self._importances: dict[str, float] = {}
         self._title = ""
+        self._close_rect = QRectF()
+        self._close_hover = False
+
+    def _close_box(self) -> QRectF:
+        s = self._CLOSE_SZ
+        return QRectF(self.width() - s - 6, 4, s, s)
+
+    def mouseMoveEvent(self, event):
+        hov = self._close_box().contains(event.position())
+        if hov != self._close_hover:
+            self._close_hover = hov
+            self.setCursor(Qt.PointingHandCursor if hov else Qt.ArrowCursor)
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event):
+        if self._close_box().contains(event.position()):
+            self.closed.emit()
+            return
+        super().mousePressEvent(event)
 
     def set_data(self, lead_importance: dict | None, title: str = ""):
         self._importances = lead_importance or {}
@@ -159,6 +185,12 @@ class LeadImportanceBar(QWidget):
         h = self.height()
 
         p.fillRect(0, 0, w, h, QColor(T.BG_SECONDARY))
+
+        # Close (X) — drawn so it composites correctly over the painted bg
+        box = self._close_box()
+        p.setPen(QColor(T.RED if self._close_hover else T.TEXT_SECONDARY))
+        p.setFont(QFont(".AppleSystemUIFont", 14, QFont.Bold))
+        p.drawText(box, Qt.AlignCenter, "✕")
 
         # Title
         p.setPen(QColor(T.TEXT))
