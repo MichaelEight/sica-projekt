@@ -22,3 +22,9 @@ build/
 # Generated report exports
 *.pdf
 *.png
+
+# Benchmarking artifacts (not part of app)
+results/
+scripts/compare_lead_fill.py
+scripts/topk_rank_loss.py
+scripts/topk_rank_loss_v2.py

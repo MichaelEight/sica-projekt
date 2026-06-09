@@ -223,7 +223,7 @@ class MainWindow(QMainWindow):
         """Look up ground truth for a record."""
         import json
 
-        # Check for .annotations.json sidecar first
+        # Check for .annotations.json sidecar first (manual override)
         json_path = base_path + ".annotations.json"
         if os.path.exists(json_path):
             try:
@@ -233,11 +233,76 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+        # MIT-BIH .atr beat/rhythm annotations (expert ground truth)
+        mit = self._load_mit_annotations(base_path)
+        if mit:
+            return mit
+
         # Fall back to PTB-XL CSV cache
         entry = self._lookup_csv_entry(base_path)
         if entry:
             return entry.get("ground_truth")
         return None
+
+    def _load_mit_annotations(self, base_path: str) -> list | None:
+        """Load MIT-BIH .atr rhythm annotations as windowed ground truth.
+
+        Reads rhythm-change markers (aux_note like "(AFIB", "(N", "(VT") and
+        turns each rhythm span into a window {start, end, label, ground_truth}.
+        Returns None when no .atr file, no WFDB, or no rhythm markers exist.
+        """
+        if not HAS_WFDB or not os.path.exists(base_path + ".atr"):
+            return None
+        try:
+            ann = wfdb.rdann(base_path, "atr")
+        except Exception:
+            _log.exception("rdann failed: base_path=%r", base_path)
+            return None
+
+        fs = float(ann.fs) if getattr(ann, "fs", None) else float(self._fs)
+        if fs <= 0:
+            return None
+        # End time from the loaded signal (fall back to last annotation).
+        if self._signal is not None and self._fs:
+            total_dur = self._signal.shape[0] / float(self._fs)
+        elif len(ann.sample):
+            total_dur = float(ann.sample[-1]) / fs
+        else:
+            return None
+
+        # Rhythm codes that count as normal sinus (no model mismatch warning).
+        NORMAL_RHYTHMS = {"N", "NSR"}
+
+        segs: list = []
+        cur_label = None
+        cur_start = 0.0
+        aux_notes = ann.aux_note or []
+        for samp, aux in zip(ann.sample, aux_notes):
+            aux = (aux or "").strip().strip("\x00").strip()
+            if not aux.startswith("("):
+                continue  # beat-level aux, not a rhythm change
+            rhythm = aux[1:].strip("\x00").strip()
+            if not rhythm or rhythm == cur_label:
+                continue
+            t = float(samp) / fs
+            if cur_label is not None and t > cur_start:
+                segs.append((cur_start, t, cur_label))
+            cur_label = rhythm
+            cur_start = t
+        if cur_label is not None and total_dur > cur_start:
+            segs.append((cur_start, total_dur, cur_label))
+
+        if not segs:
+            return None
+
+        windows = []
+        for s, e, label in segs:
+            healthy = 1.0 if label.upper() in NORMAL_RHYTHMS else 0.0
+            windows.append({
+                "start": s, "end": e, "label": label,
+                "ground_truth": {"class_healthy": healthy},
+            })
+        return windows
 
     def _lookup_patient_info(self, base_path: str) -> dict | None:
         """Look up patient info from PTB-XL CSV cache."""

@@ -2597,8 +2597,12 @@ class ViewerPage(QWidget):
             return []
         gt_lines = []
         if isinstance(gt, list):
-            # Windowed GT from .annotations.json
+            # Windowed GT from .annotations.json or MIT-BIH .atr
             for win in gt:
+                # MIT-BIH rhythm windows carry a direct label; show it as-is.
+                if win.get("label"):
+                    gt_lines.append((win["start"], win["end"], win["label"]))
+                    continue
                 truth = win.get("ground_truth", {})
                 # Find top non-healthy class with value 1.0
                 top_cls = None
