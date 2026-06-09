@@ -3,6 +3,7 @@ data/ptb-xl.zip
 data/demo/
 data/filtered/**
 data/training/*/*
+data/mit_sample/
 models/*.pt
 models/*.pth
 models/*.npy
