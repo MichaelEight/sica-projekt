@@ -19,6 +19,8 @@ build/
 *.dat
 *.hea
 *.apwr
+media/
+visualizations/
 
 # Generated report exports
 *.pdf
