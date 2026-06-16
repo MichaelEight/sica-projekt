@@ -305,8 +305,8 @@ class TimelineOverview(QWidget):
         # readable. Yellow = borderline, red = illness, healthy gets nothing.
         if self._autoscan_regions and self._duration > 0:
             colors = {
-                1: QColor(250, 204, 21, 110),  # yellow
-                2: QColor(239, 68, 68, 130),   # red
+                1: QColor(250, 191, 0, 210),   # yellow — intense amber
+                2: QColor(229, 28, 28, 225),    # red — intense
             }
             for t_s, t_e, code in self._autoscan_regions:
                 if code <= 0:
@@ -325,8 +325,8 @@ class TimelineOverview(QWidget):
             mx = float(self._overview[:, 1].max())
             rng = mx - mn if mx > mn else 1.0
             bins = self._overview.shape[0]
-            p.setPen(QPen(QColor(T.TEXT_DIM), 1))
-            p.setBrush(QColor(T.TEXT_DIM))
+            p.setPen(QPen(QColor(T.TEXT), 1))
+            p.setBrush(QColor(T.TEXT))
             pad = 4
             usable = h - 2 * pad
             for i in range(bins):

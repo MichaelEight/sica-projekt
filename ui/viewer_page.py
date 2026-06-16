@@ -8,8 +8,8 @@ import sys
 
 import threading
 import numpy as np
-from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve, Property, QPoint
-from PySide6.QtGui import QFont, QPainter, QPen, QColor, QBrush
+from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve, Property, QPoint, QPointF, QSize
+from PySide6.QtGui import QFont, QPainter, QPen, QColor, QBrush, QIcon, QPixmap
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                 QPushButton, QFrame, QStackedWidget, QSlider,
                                 QSizePolicy, QApplication, QDialog,
@@ -742,8 +742,8 @@ class ViewerPage(QWidget):
         self.duration = 0.0
         self.time_pos = 0.0
         self._scrubber_max = 0.0
-        self._window_12 = 2.5
-        self._window_1 = 3.0
+        self._window_12 = 5.0
+        self._window_1 = 5.0
         self._v_min = -1.5
         self._v_max = 1.5
         # Unified screen state — replaces _view_mode
@@ -770,7 +770,7 @@ class ViewerPage(QWidget):
         self._monitor_playing = False
         self._monitor_t = 0.0
         self._monitor_speed = 1.0
-        self._monitor_window = 3.0
+        self._monitor_window = 5.0
         # Snapshot of the multi-lead view captured before switching to
         # focus_1L; restored via the canvas context menu.
         self._prev_view_snapshot = None
@@ -944,6 +944,23 @@ class ViewerPage(QWidget):
         self._hold_handler = None
         self._hold_timer.timeout.connect(self._on_hold_tick)
 
+        # Left cell: current window / total time
+        left_cell = QWidget()
+        lc = QHBoxLayout(left_cell)
+        lc.setContentsMargins(0, 0, 0, 0)
+        lc.setSpacing(6)
+        self.time_label = QLabel()
+        self.time_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.time_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
+        lc.addWidget(self.time_label)
+        lc.addStretch()
+
+        # Center cell: transport controls
+        center_cell = QWidget()
+        cc = QHBoxLayout(center_cell)
+        cc.setContentsMargins(0, 0, 0, 0)
+        cc.setSpacing(6)
+
         def _make_nav(label, handler):
             btn = QPushButton(label)
             btn.setObjectName("nav")
@@ -951,7 +968,7 @@ class ViewerPage(QWidget):
             btn.pressed.connect(lambda h=handler: self._start_hold(h))
             btn.released.connect(self._stop_hold)
             self._nav_btns.append(btn)
-            nav.addWidget(btn)
+            cc.addWidget(btn)
 
         for label, handler in back_buttons:
             _make_nav(label, handler)
@@ -960,50 +977,59 @@ class ViewerPage(QWidget):
         self.pause_btn.setCursor(Qt.PointingHandCursor)
         self._apply_pause_btn_style()
         self.pause_btn.clicked.connect(self._on_navbar_pause)
-        nav.addWidget(self.pause_btn)
+        cc.addWidget(self.pause_btn)
 
         for label, handler in fwd_buttons:
             _make_nav(label, handler)
 
+        # Hidden scrubber — still drives playback position/state; the timeline
+        # overview below is the single visible seek surface (no duplicate slider).
         self.scrubber = QSlider(Qt.Horizontal)
         self.scrubber.setRange(0, 1000)
         self.scrubber.setValue(350)
-        self.scrubber.setStyleSheet(self._scrubber_style())
         self.scrubber.valueChanged.connect(self._on_scrubber)
-        nav.addWidget(self.scrubber, stretch=1)
+        self.scrubber.hide()
 
-        self.time_label = QLabel()
-        self.time_label.setFixedWidth(180)
-        self.time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.time_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
-        nav.addWidget(self.time_label)
+        # Right cell: zoom controls
+        right_cell = QWidget()
+        rc = QHBoxLayout(right_cell)
+        rc.setContentsMargins(0, 0, 0, 0)
+        rc.setSpacing(6)
+        rc.addStretch()
 
-        nav.addWidget(make_separator())
-
-        # Zoom controls — fixed width group
-        self._zoom_out_btn = QPushButton("\u2212")
+        # Zoom controls— fixed width group
+        self._zoom_out_btn = QPushButton()
         self._zoom_out_btn.setObjectName("nav")
+        self._zoom_out_btn.setIcon(self._make_zoom_icon(plus=False))
+        self._zoom_out_btn.setIconSize(QSize(18, 18))
         self._zoom_out_btn.setCursor(Qt.PointingHandCursor)
         self._zoom_out_btn.clicked.connect(self._zoom_out)
-        nav.addWidget(self._zoom_out_btn)
+        rc.addWidget(self._zoom_out_btn)
 
-        self._zoom_label = QLabel("3.0 s")
+        self._zoom_label = QLabel("5.0 s")
         self._zoom_label.setFixedWidth(42)
         self._zoom_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_MUTED};")
         self._zoom_label.setAlignment(Qt.AlignCenter)
-        nav.addWidget(self._zoom_label)
+        rc.addWidget(self._zoom_label)
 
-        self._zoom_in_btn = QPushButton("+")
+        self._zoom_in_btn = QPushButton()
         self._zoom_in_btn.setObjectName("nav")
+        self._zoom_in_btn.setIcon(self._make_zoom_icon(plus=True))
+        self._zoom_in_btn.setIconSize(QSize(18, 18))
         self._zoom_in_btn.setCursor(Qt.PointingHandCursor)
         self._zoom_in_btn.clicked.connect(self._zoom_in)
-        nav.addWidget(self._zoom_in_btn)
+        rc.addWidget(self._zoom_in_btn)
 
         self._zoom_reset_btn = QPushButton("Reset")
         self._zoom_reset_btn.setStyleSheet(self._zoom_reset_btn_style())
         self._zoom_reset_btn.setCursor(Qt.PointingHandCursor)
         self._zoom_reset_btn.clicked.connect(self._reset_zoom)
-        nav.addWidget(self._zoom_reset_btn)
+        rc.addWidget(self._zoom_reset_btn)
+
+        # Equal-stretch side cells keep transport perfectly centered
+        nav.addWidget(left_cell, 1)
+        nav.addWidget(center_cell, 0)
+        nav.addWidget(right_cell, 1)
 
         bottom_layout.addWidget(self.navbar)
 
@@ -1024,27 +1050,6 @@ class ViewerPage(QWidget):
         self._sel_indicator.setFixedHeight(24)
         self._sel_indicator.setStyleSheet(f"background: {T.WHITE}; border: none; color: transparent;")
         bottom_layout.addWidget(self._sel_indicator)
-
-        # Row 3: Persistent status strip — always visible across modes
-        self.status_strip = QWidget()
-        self.status_strip.setFixedHeight(26)
-        self.status_strip.setStyleSheet(
-            f"background: {T.BG_SECONDARY}; border-top: 1px solid {T.BORDER};"
-        )
-        ss = QHBoxLayout(self.status_strip)
-        ss.setContentsMargins(14, 0, 14, 0)
-        ss.setSpacing(16)
-        self.status_file = QLabel("Brak wczytanego pliku")
-        self.status_file.setStyleSheet(f"font-size:11px; color:{T.TEXT_SECONDARY}; font-family:Menlo;")
-        self.status_meta = QLabel("")
-        self.status_meta.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM}; font-family:Menlo;")
-        self.status_pos = QLabel("")
-        self.status_pos.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM}; font-family:Menlo;")
-        ss.addWidget(self.status_file)
-        ss.addWidget(self.status_meta)
-        ss.addStretch()
-        ss.addWidget(self.status_pos)
-        bottom_layout.addWidget(self.status_strip)
 
         outer.addWidget(self.bottom_bar)
         self._update_time_display()
@@ -1075,13 +1080,9 @@ class ViewerPage(QWidget):
         self.time_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_SECONDARY};")
         self._zoom_label.setStyleSheet(f"font-size:11px; font-family:Menlo; color:{T.TEXT_MUTED};")
         self._zoom_reset_btn.setStyleSheet(self._zoom_reset_btn_style())
+        self._zoom_out_btn.setIcon(self._make_zoom_icon(plus=False))
+        self._zoom_in_btn.setIcon(self._make_zoom_icon(plus=True))
         self._sel_indicator.setStyleSheet(f"background: {T.WHITE}; border: none; color: transparent;")
-        self.status_strip.setStyleSheet(
-            f"background: {T.BG_SECONDARY}; border-top: 1px solid {T.BORDER};"
-        )
-        self.status_file.setStyleSheet(f"font-size:11px; color:{T.TEXT_SECONDARY}; font-family:Menlo;")
-        self.status_meta.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM}; font-family:Menlo;")
-        self.status_pos.setStyleSheet(f"font-size:11px; color:{T.TEXT_DIM}; font-family:Menlo;")
         self.timeline_overview.update()
         self._apply_pause_btn_style()
 
@@ -1126,20 +1127,17 @@ class ViewerPage(QWidget):
         self._v_min = self._global_min - pad
         self._v_max = self._global_max + pad
 
-        # Adaptive time windows based on signal duration
-        if self.duration <= 3.0:
+        # Adaptive time windows based on signal duration — default 10 s view
+        if self.duration <= 5.0:
             self._window_12 = self.duration
             self._window_1 = self.duration
-        elif self.duration <= 10.0:
-            self._window_12 = min(2.5, self.duration)
-            self._window_1 = min(3.0, self.duration)
         else:
-            self._window_12 = 2.5
-            self._window_1 = 3.0
+            self._window_12 = 5.0
+            self._window_1 = 5.0
         self._update_zoom_label()
 
         self.file_label.setText(
-            f"{filename} | {self.duration:.1f} s"
+            f"{filename} | {round(self.duration)} s"
         )
 
         # Reset autoscan
@@ -1174,10 +1172,6 @@ class ViewerPage(QWidget):
 
         # Timeline overview for window-rect visualization
         self.timeline_overview.set_signal(signal, self.duration)
-
-        # Persistent status strip
-        self.status_file.setText(f"Plik: {filename}" if filename else "Brak wczytanego pliku")
-        self.status_meta.setText(f"{self.duration:.1f} s")
 
         # Load patient info
         if patient_info:
@@ -1823,6 +1817,31 @@ class ViewerPage(QWidget):
 
     _ZOOM_STEPS = [0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 15.0, 20.0, 30.0]
 
+    def _make_zoom_icon(self, plus: bool) -> QIcon:
+        """Magnifying-glass icon with +/- inside the lens, themed to TEXT color."""
+        import math
+        dpr = 2
+        s = 18  # logical px
+        pm = QPixmap(s * dpr, s * dpr)
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(QColor(T.TEXT))
+        pen.setWidthF(1.7)
+        pen.setCapStyle(Qt.RoundCap)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        cx, cy, r = 7.0, 7.0, 4.6
+        p.drawEllipse(QPointF(cx, cy), r, r)       # lens
+        off = r / math.sqrt(2)
+        p.drawLine(QPointF(cx + off, cy + off), QPointF(15.5, 15.5))  # handle
+        p.drawLine(QPointF(cx - 2.3, cy), QPointF(cx + 2.3, cy))      # minus
+        if plus:
+            p.drawLine(QPointF(cx, cy - 2.3), QPointF(cx, cy + 2.3))  # plus
+        p.end()
+        return QIcon(pm)
+
     def _is_focus(self) -> bool:
         return self._layout_id == "focus_1L"
 
@@ -1866,11 +1885,11 @@ class ViewerPage(QWidget):
     def _reset_zoom(self):
         """Reset current view to default window size."""
         if self._live:
-            self._monitor_window = min(3.0, self.duration)
+            self._monitor_window = min(5.0, self.duration)
         elif self._is_focus():
-            self._window_1 = min(3.0, self.duration)
+            self._window_1 = min(5.0, self.duration)
         else:
-            self._window_12 = min(2.5, self.duration)
+            self._window_12 = min(5.0, self.duration)
         self._apply_zoom()
 
     def _on_pinch_zoom(self, direction: int):
@@ -2886,16 +2905,6 @@ class ViewerPage(QWidget):
         t_end = min(self.duration, self.time_pos + window)
         self.time_label.setText(f"{self.time_pos:.2f} – {t_end:.2f} s / {self.duration:.2f} s")
         self.timeline_overview.set_window(self.time_pos, window)
-        layout_names = {
-            "grid_3x4": "Siatka 3×4",
-            "grid_2x6": "Siatka 2×6",
-            "stack_1xN": "Wybrane jako paski",
-            "focus_1L": "Pojedyncze odprowadzenie",
-        }
-        mode_name = layout_names.get(self._layout_id, self._layout_id)
-        if self._live:
-            mode_name = f"Podgląd ciągły · {mode_name}"
-        self.status_pos.setText(f"{mode_name} · pozycja: {self.time_pos:.2f} s")
 
     def _on_overview_seek(self, t: float):
         if self.signal is None:
@@ -2910,7 +2919,7 @@ class ViewerPage(QWidget):
             return
         self._monitor_t = self.time_pos
         if self._monitor_window <= 0:
-            self._monitor_window = 3.0
+            self._monitor_window = 5.0
         self._monitor_page_start = (self._monitor_t // self._monitor_window) * self._monitor_window
         self._monitor_playing = True
         self._monitor_timer.setInterval(int(50 / max(0.1, self._monitor_speed)))
