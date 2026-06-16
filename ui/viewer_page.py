@@ -764,6 +764,7 @@ class ViewerPage(QWidget):
         self._autoscan_file_path = None
         self._scan_selected_only = False   # last analysis lead-scope (cache key)
         self._autoscan_from_scan = False   # True only for real per-window scans
+        self._is_12lead = True             # AI inference gated off when False
         self._monitor_timer = QTimer(self)
         self._monitor_timer.setInterval(50)
         self._monitor_timer.timeout.connect(self._monitor_tick)
@@ -800,6 +801,16 @@ class ViewerPage(QWidget):
         self.file_label.setStyleSheet(f"font-size:11px; color:{T.BTN_TEXT}; font-family:Menlo;")
         tb.addWidget(self.file_label)
 
+        # Shown only for sub-12-lead records: AI inference is gated off.
+        self.lead_warning_label = QLabel("")
+        self.lead_warning_label.setStyleSheet(
+            f"font-size:11px; color:{T.RED}; font-weight:600;")
+        self.lead_warning_label.setToolTip(
+            "Model do pełnego i wiarygodnego wnioskowania<br>"
+            "potrzebuje wszystkich 12 odprowadzeń.<br>"
+            "Odczyt sygnału pozostaje dostępny.")
+        self.lead_warning_label.hide()
+
         tb.addStretch()
 
         from ui.theme import is_dark_mode as _idm
@@ -814,8 +825,10 @@ class ViewerPage(QWidget):
             QPushButton {{ background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;
                 padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px; }}
             QPushButton:hover {{ background:{_ah}; }}
+            QPushButton:disabled {{ background:#3a3f47;color:#7c828b; }}
         """)
         self.btn_full_analysis.clicked.connect(self._show_analysis_menu)
+        tb.addWidget(self.lead_warning_label)
         tb.addWidget(self.btn_full_analysis)
 
         self.btn_report = QPushButton("Raport")
@@ -1065,6 +1078,7 @@ class ViewerPage(QWidget):
             QPushButton {{ background:{T.ACCENT};color:{T.ACCENT_TEXT};border:none;
                 padding:5px 14px;border-radius:5px;font-weight:600;font-size:12px; }}
             QPushButton:hover {{ background:{_ah}; }}
+            QPushButton:disabled {{ background:#3a3f47;color:#7c828b; }}
         """)
         from ui.theme import is_dark_mode
         self.btn_dark.setText("Tryb jasny" if is_dark_mode() else "Tryb ciemny")
@@ -1156,14 +1170,35 @@ class ViewerPage(QWidget):
         self.markings_panel._lead_importance_panel.set_data(None)
         self._apply_explain_heatmap(None)
 
-        # Enable/disable full analysis based on duration
+        # Full 12-lead recording required for AI inference. Sub-12 records can
+        # still be viewed, but model inference is gated off (median-filling the
+        # missing leads would fabricate signal the model can't trust).
+        real_present = [l for l in STANDARD_LEADS if l in set(leads)]
+        self._is_12lead = len(real_present) == 12
+        if self._is_12lead:
+            self.lead_warning_label.hide()
+        else:
+            self.lead_warning_label.setText(
+                f"⚠ {len(real_present)}/12 odprowadzeń. Analiza AI niedostępna.")
+            self.lead_warning_label.show()
+
+        # Enable/disable full analysis based on duration and lead count
         min_samples = int(10.0 * self.fs)
-        if self.signal.shape[0] < min_samples:
+        if not self._is_12lead:
+            self.btn_full_analysis.setEnabled(False)
+            self.btn_full_analysis.setToolTip(
+                "Analiza AI wymaga pełnego zapisu 12 odprowadzeń.<br>"
+                "Model do pełnego i wiarygodnego wnioskowania<br>"
+                "potrzebuje wszystkich 12 odprowadzeń.<br>"
+                "Odczyt sygnału pozostaje dostępny.")
+        elif self.signal.shape[0] < min_samples:
             self.btn_full_analysis.setEnabled(False)
             self.btn_full_analysis.setToolTip("")
         else:
             self.btn_full_analysis.setEnabled(True)
-            self.btn_full_analysis.setToolTip("")
+            self.btn_full_analysis.setToolTip(
+                "Uruchom analizę AI całego nagrania. Kliknij, aby wybrać, "
+                "których odprowadzeń użyć.")
 
         active_window = self._current_window()
         self._scrubber_max = max(0.0, self.duration - active_window)
@@ -2066,6 +2101,14 @@ class ViewerPage(QWidget):
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.information(self, "Analiza AI",
                                     "Najpierw wczytaj plik EKG.")
+            return
+        if not self._is_12lead:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self, "Analiza AI niedostępna",
+                "Analiza AI wymaga pełnego zapisu 12 odprowadzeń. Model do "
+                "pełnego i wiarygodnego wnioskowania potrzebuje wszystkich 12 "
+                "odprowadzeń. Odczyt sygnału pozostaje dostępny.")
             return
         from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel
 
