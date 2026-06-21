@@ -23,6 +23,40 @@ try:
 except ImportError:
     HAS_WFDB = False
 
+
+def _rdrecord_robust(base_path: str):
+    """Read a WFDB record, tolerating a header whose internal record/signal
+    name differs from the on-disk file name.
+
+    PTB-XL records copied/renamed (e.g. ``00005_00005_hr``) keep the original
+    name inside the ``.hea`` (its signal lines still point at ``00005_hr.dat``),
+    so ``wfdb.rdrecord`` looks for the original name and fails. When that
+    happens we stage the actual files in a temp dir under the names the header
+    expects, then read from there.
+    """
+    try:
+        return wfdb.rdrecord(base_path)
+    except FileNotFoundError as err:
+        record_dir = os.path.dirname(base_path) or "."
+        actual_dat = base_path + ".dat"
+        hdr = wfdb.rdheader(base_path)
+        referenced = list(dict.fromkeys(hdr.file_name or []))
+        missing = [fn for fn in referenced
+                   if not os.path.exists(os.path.join(record_dir, fn))]
+        if not missing or not os.path.exists(actual_dat):
+            raise err
+        import tempfile
+        import shutil
+        tmp = tempfile.mkdtemp(prefix="wfdb_")
+        try:
+            shutil.copy(base_path + ".hea",
+                        os.path.join(tmp, hdr.record_name + ".hea"))
+            for fn in referenced:
+                shutil.copy(actual_dat, os.path.join(tmp, fn))
+            return wfdb.rdrecord(os.path.join(tmp, hdr.record_name))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
 # ── Ground truth cache ──────────────────────────────────────
 _GT_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".cache")
 _GT_CACHE_PATH = os.path.join(_GT_CACHE_DIR, "gt_lookup.pkl")
@@ -343,7 +377,7 @@ class MainWindow(QMainWindow):
 
         if os.path.exists(dat_path) and os.path.exists(hea_path) and HAS_WFDB:
             try:
-                record = wfdb.rdrecord(base_path)
+                record = _rdrecord_robust(base_path)
                 self._signal = record.p_signal.astype(np.float32)
                 self._fs = int(round(float(record.fs)))
                 self._leads = _normalize_lead_names(record.sig_name)

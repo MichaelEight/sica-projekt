@@ -31,3 +31,7 @@ results/
 scripts/compare_lead_fill.py
 scripts/topk_rank_loss.py
 scripts/topk_rank_loss_v2.py
+
+# Presentation build (not part of app)
+*.pptx
+scripts/build_prezentacja.py

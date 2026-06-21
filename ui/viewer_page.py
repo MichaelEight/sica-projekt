@@ -2134,11 +2134,6 @@ class ViewerPage(QWidget):
             "Wszystkie odprowadzenia",
             "Używa wszystkich odprowadzeń obecnych w pliku.",
             pop, selected_only=False))
-        lay.addWidget(self._analysis_option_card(
-            "Tylko zaznaczone odprowadzenia",
-            "Używa wyłącznie włączonych odprowadzeń (przyciski I, II, V1… "
-            "w panelu po lewej). Pozostałe są pomijane.",
-            pop, selected_only=True))
 
         pop.adjustSize()
         btn = self.btn_full_analysis
